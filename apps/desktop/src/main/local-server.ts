@@ -2636,9 +2636,9 @@ export class InstallerApi {
           // Only the planner finding no model that fits can be helped by
           // freeing memory; free memory is what it measures at that moment.
           job.errorCode === "LOCAL_MODELS_UNAVAILABLE"
-            ? "This computer can't run the local model right now. Close other programs to free memory, or choose another AI runtime, and try again."
+            ? `This computer can't run the local model right now. Close other programs to free memory, or choose another AI runtime, and try again.${job.message ? ` (${job.message})` : ""}`
             : LOCAL_MODEL_FAILURES.has(job.errorCode ?? "")
-              ? "This computer can't run the local model right now. Choose another AI runtime and try again."
+              ? `This computer can't run the local model right now. Choose another AI runtime and try again.${job.message ? ` (${job.message})` : ""}`
               : job.message || "The installation stopped",
         );
       await delay(this.#pollMs, undefined, { signal });

@@ -1570,12 +1570,17 @@ describe("LocalServerModule", () => {
         state: "waiting_user",
         errorCode: "LOCAL_MODELS_APPROVAL_REQUIRED",
         localModelsPlan: { planId: "a".repeat(64) },
+        message: "Review the plan before installing.",
       }),
     );
     await f.host.start();
     const failure = f.module.begin({ runtime: "pi" });
     await expect(failure).rejects.toThrow("can't run the local model");
     await expect(failure).rejects.not.toThrow("free memory");
+    // The installer's own reason follows the advice.
+    await expect(failure).rejects.toThrow(
+      "Choose another AI runtime and try again. (Review the plan before installing.)",
+    );
     expect(f.api.retried).toEqual([]);
     expect(f.module.status().phase).toBe("failed");
     await f.host.stop("quit");
