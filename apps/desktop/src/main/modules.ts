@@ -19,6 +19,8 @@ export interface BusEvents {
   // Why the Computer service keeps exiting at start, or undefined once it ran.
   "computer.failed": [reason: string | undefined];
   "computer.renamed": [];
+  // The local server's installer reported new runtime or localmodels paths.
+  "computer.runtime": [];
   "diagnostics.changed": [];
   "grants.changed": [];
   "local-server.changed": [];

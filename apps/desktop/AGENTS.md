@@ -368,7 +368,12 @@ building a package.
   variables do not reach the daemon. The config's
   `runtimeEnvironment` (the local server's runtime: these paths plus
   `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`) replaces them,
-  names compared case-insensitively for Windows.
+  names compared case-insensitively for Windows. Its four
+  `LINGER_LOCALMODELS_*` paths become the daemon config's `local_models`
+  section, which the daemon's model library runs. Every `--resume` reports
+  the runtime again; a change updates `runtimeEnvironment` and restarts the
+  daemon once its tasks end (`computer.runtime`), so an install from before
+  the daemon knew the tool gains it.
 - `LINGER_LOCALMODELS_DEV_PYTHON`, `LINGER_LOCALMODELS_DEV_MODULE_DIR`:
   absolute Python and module directory for running a local `localmodels`
   checkout in Quick Install and the Desktop Computer without fetching the
