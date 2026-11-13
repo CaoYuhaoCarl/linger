@@ -364,7 +364,8 @@ export type TeamHubInvalidationResource =
   | "connections"
   | "work-items"
   | "document"
-  | "document-access";
+  | "document-access"
+  | "local-models";
 export interface TeamHubResourceInvalidation {
   id: string;
   resource: TeamHubInvalidationResource;
