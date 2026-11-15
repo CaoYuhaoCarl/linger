@@ -23,6 +23,7 @@ result.
 | Apps            | From 22:00 to 08:00, or after five reminders that day, an app event is only recorded; one item in one state is judged once a day                   |
 | Delivery        | Waits until the chat has been quiet for 3 minutes                                                                                                  |
 | Tell now        | Another Me checks the facts that may have changed, then sends one short message: the point, the facts, the next step                               |
+| Prepare         | Before an interview, a first meeting, or one with an investor, client or partner, the reminder adds a few points from your own notes and the web   |
 | Follow up later | A follow-up item with scheduled checks, recorded without a message                                                                                 |
 | Stay silent     | The run ends without a reply                                                                                                                       |
 

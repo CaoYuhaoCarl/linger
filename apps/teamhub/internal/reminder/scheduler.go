@@ -158,8 +158,10 @@ func deliverReminder(ctx context.Context, tx pgx.Tx, queries *store.Queries, rec
 	if err != nil {
 		return 0, "", dropped, err
 	}
-	instruction := record.Instruction + trackingNote(record)
-	origin := &messagecreation.FiredRoutine{ID: record.ID, Instruction: strings.TrimSpace(instruction)}
+	instruction := trackingNote(record) + record.Instruction
+	// The origin keeps only what the Routine saved: permission review reads it
+	// as the Routine's words, and the trigger rules are TeamHub's, not its own.
+	origin := &messagecreation.FiredRoutine{ID: record.ID, Instruction: strings.TrimSpace(record.Instruction)}
 	seq := func() (int64, error) {
 		return appendChangedWithName(ctx, queries, Authority{
 			TenantID: record.TenantID, RoomID: record.RoomID, ActorID: record.CreatedByActorID,
@@ -207,15 +209,16 @@ func deliverReminder(ctx context.Context, tx pgx.Tx, queries *store.Queries, rec
 	return value, created.Message.ID, dropped, nil
 }
 
-// trackingNote names the Tracking Item a Routine serves, so the woken Agent
-// checks that matter and adjusts its Routines as it changes.
+// trackingNote names the Tracking Item a Routine serves and carries the
+// trigger rules. Both come before the Routine's own instruction, which the
+// Agent wrote earlier and may be narrower than the rules.
 func trackingNote(record store.RoomReminder) string {
 	if !record.TrackingItemID.Valid {
 		return ""
 	}
-	return "\n" + Prompt(RoutineTrackingItem, map[string]string{
+	return Prompt(RoutineTrackingItem, map[string]string{
 		"id": record.TrackingItemID.String, "purpose": record.TrackingPurpose.String,
-	})
+	}) + "\n" + TriggerRules() + "\n"
 }
 
 // A Human-created Routine keeps that Human as the message author. An Agent

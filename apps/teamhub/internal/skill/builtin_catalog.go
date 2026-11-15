@@ -424,3 +424,24 @@ func (w *mediaSniffWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// BuiltinBootstrapFile returns one file of the Manifest a built-in Skill
+// installs by default, read from the embedded catalog. TeamHub uses it to put
+// a Skill's own text into a wake, so the woken Agent need not read the Skill.
+func BuiltinBootstrapFile(skillID, name string) ([]byte, error) {
+	catalog, err := loadBuiltinDefinitionsFromFS(builtinskills.FS)
+	if err != nil {
+		return nil, err
+	}
+	for _, skill := range catalog.Skills {
+		if skill.SkillID != skillID {
+			continue
+		}
+		for _, manifest := range skill.Manifests {
+			if manifest.ManifestID == skill.BootstrapManifestID {
+				return fs.ReadFile(builtinskills.FS, path.Join(manifest.PackagePath, name))
+			}
+		}
+	}
+	return nil, fmt.Errorf("built-in Skill %s has no bootstrap Manifest", skillID)
+}
