@@ -11,6 +11,7 @@ import {
 import {
   teamHubErrorResponse,
   type TestRouteMethod,
+  type TestRouteRequest,
 } from "@/test/teamhub-test-server";
 import {
   useQuery,
@@ -1640,7 +1641,7 @@ describe("Library Documents", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("keeps uploading the rest of a drop after one file fails and names the failure", async () => {
+  it("keeps uploading the rest of a drop after one file fails and keeps the failed file retryable", async () => {
     const runtime = await signedInRuntime();
     await declareWikiUpload(runtime, "one.txt", "plain_text");
     const upload = vi
@@ -1657,15 +1658,146 @@ describe("Library Documents", () => {
     fireEvent.drop(root, { dataTransfer: transfer });
 
     await waitFor(() => expect(upload).toHaveBeenCalledTimes(3));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "two.txt: Second upload failed safely.",
-    );
+    // A failed file stays in the queue instead of collapsing into a message
+    // the reader can only dismiss, so it can be sent again later.
+    expect(
+      await screen.findByRole("treeitem", { name: "two.txt upload failed" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(upload.mock.calls.map((call) => call[1].file.name)).toEqual([
       "one.txt",
       "two.txt",
       "three.txt",
     ]);
-    expect(screen.queryByRole("treeitem", { name: /upload/ })).toBeNull();
+  });
+
+  it("retries an uploaded file from its failed row and clears the row on success", async () => {
+    const runtime = await signedInRuntime();
+    const uploaded = await seedRoomUpload(
+      runtime,
+      "row-retry-upload",
+      {
+        file: new File(["retry"], "retry.txt", { type: "text/plain" }),
+        representationFormat: "plain_text",
+      },
+      "wiki-jenny",
+    );
+    const placement = documentSeeds(runtime).tree.items.pop()!;
+    let attempts = 0;
+    const upload = vi
+      .spyOn(runtime.client, "uploadPersonalWikiDocument")
+      .mockImplementation(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("Network dropped.");
+        documentSeeds(runtime).tree.items.push(placement);
+        return uploaded;
+      });
+    renderPage(runtime);
+    const target = await screen.findByTestId("workspace-file-drop-target");
+    const file = new File(["retry"], "retry.txt", { type: "text/plain" });
+
+    await dropFilesOnLibrary(target, [file]);
+
+    const failedRow = await screen.findByRole("status", {
+      name: "retry.txt upload failed",
+    });
+    expect(failedRow).toHaveTextContent("Network dropped.");
+    fireEvent.click(within(failedRow).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    // The row keeps the File it was dropped with, so a retry owes the reader
+    // no second file pick.
+    expect(upload.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ file, representationFormat: "plain_text" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("status", { name: "retry.txt upload failed" }),
+      ).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("link", { name: "retry.txt" }).length,
+      ).toBeGreaterThan(0),
+    );
+  });
+
+  it("dismisses a failed upload row and its queue summary", async () => {
+    const runtime = await signedInRuntime();
+    vi.spyOn(runtime.client, "uploadPersonalWikiDocument").mockRejectedValue(
+      new Error("Retry later."),
+    );
+    renderPage(runtime);
+    const target = await screen.findByTestId("workspace-file-drop-target");
+
+    await dropFilesOnLibrary(target, [new File(["x"], "blocked.txt")]);
+
+    const failedRow = await screen.findByRole("status", {
+      name: "blocked.txt upload failed",
+    });
+    expect(failedRow).toHaveTextContent("Retry later.");
+    const summary = screen.getByRole("status", { name: "Upload progress" });
+    expect(summary).toHaveTextContent("1 upload failed");
+    expect(
+      within(summary).getByRole("button", { name: "Retry failed" }),
+    ).toBeVisible();
+
+    fireEvent.click(within(failedRow).getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("status", { name: "blocked.txt upload failed" }),
+      ).toBeNull(),
+    );
+    expect(
+      screen.queryByRole("status", { name: "Upload progress" }),
+    ).toBeNull();
+  });
+
+  it("retries every failed upload from the queue summary", async () => {
+    const runtime = await signedInRuntime();
+    const uploaded = await seedRoomUpload(
+      runtime,
+      "summary-retry-upload",
+      {
+        file: new File(["alpha"], "alpha.txt", { type: "text/plain" }),
+        representationFormat: "plain_text",
+      },
+      "wiki-jenny",
+    );
+    let attempts = 0;
+    vi.spyOn(runtime.client, "uploadPersonalWikiDocument").mockImplementation(
+      async () => {
+        attempts += 1;
+        if (attempts <= 2) throw new Error("Network dropped.");
+        return uploaded;
+      },
+    );
+    renderPage(runtime);
+    const target = await screen.findByTestId("workspace-file-drop-target");
+
+    await dropFilesOnLibrary(target, [
+      new File(["alpha"], "alpha.txt"),
+      new File(["beta"], "beta.txt"),
+    ]);
+
+    const summary = await screen.findByRole("status", {
+      name: "Upload progress",
+    });
+    await waitFor(() => expect(attempts).toBe(2));
+    expect(await screen.findByText("2 uploads failed")).toBeVisible();
+
+    fireEvent.click(
+      within(summary).getByRole("button", { name: "Retry failed" }),
+    );
+
+    await waitFor(() => expect(attempts).toBe(4));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("status", { name: "Upload progress" }),
+      ).toBeNull(),
+    );
+    expect(screen.queryByRole("status", { name: /upload failed$/ })).toBeNull();
   });
 
   it("reports a Files drop with no supported file entries", async () => {
@@ -1743,8 +1875,15 @@ describe("Library Documents", () => {
     fireEvent.drop(root, { dataTransfer: transfer });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "3 files could not be uploaded (Kept/locked.md, Broken/, Broken/lost.md)",
+      "2 files could not be uploaded (Kept/locked.md, Broken/)",
     );
+    // The file whose folder could not be created is itself a failed row, so it
+    // can be retried into the drop target once the folder exists.
+    expect(
+      await screen.findByRole("treeitem", {
+        name: "Broken/lost.md upload failed",
+      }),
+    ).toBeVisible();
     expect(createFolder.mock.calls.map((call) => call[0].body)).toEqual([
       { name: "Broken" },
       { name: "Kept" },
@@ -2350,6 +2489,113 @@ it("renames a binary file from its tree menu and keeps failures editable", async
     "review.mp4",
   );
 });
+
+it("renames a native Document in place through its draft title endpoint", async () => {
+  const runtime = await signedInRuntime();
+  const document = seedNativeDocument(runtime, "in-place-native-rename");
+  const draftTitle = vi.fn(({ body }: TestRouteRequest): unknown =>
+    showDocument(runtime, {
+      ...document,
+      title: (body as { title: string }).title,
+    }),
+  );
+  runtime.server.on(
+    "PATCH",
+    "/v0/documents/{documentId}/draft-title",
+    draftTitle,
+  );
+  renderTree(runtime);
+
+  await chooseNodeAction("untitled.md", "Rename");
+
+  // Renaming keeps the reader in the Library instead of opening the Document.
+  expect(screen.queryByText("Document detail")).toBeNull();
+  const dialog = screen.getByRole("dialog", { name: "Rename file" });
+  const input = within(dialog).getByRole("textbox", { name: "File name" });
+  expect(input).toHaveValue("untitled");
+  fireEvent.change(input, { target: { value: "Plan.md" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Rename file" })).toBeNull(),
+  );
+  expect(draftTitle).toHaveBeenCalledOnce();
+  expect(draftTitle.mock.calls[0]?.[0]).toEqual(
+    expect.objectContaining({
+      body: { title: "Plan.md" },
+      params: { documentId: document.id },
+    }),
+  );
+  // A native Document's title is its draft title; the generic title update
+  // rejects native content, so it must not be sent.
+  expect(
+    runtime.server.requestsTo("PATCH", "/v0/documents/{documentId}"),
+  ).toHaveLength(0);
+  expect(screen.queryByText("Document detail")).toBeNull();
+  expect(
+    await screen.findByRole("treeitem", { name: "Plan.md" }),
+  ).toBeVisible();
+});
+
+it("renames an uploaded file in place through the document title endpoint", async () => {
+  const runtime = await signedInRuntime();
+  const document = await seedUploadedDocument(
+    runtime,
+    "in-place-uploaded-rename",
+    {
+      file: new File(["plain"], "notes.txt", { type: "text/plain" }),
+      representationFormat: "plain_text",
+    },
+  );
+  const renameDocument = vi.fn(({ body }: TestRouteRequest): unknown =>
+    showDocument(runtime, {
+      ...document,
+      title: (body as { title: string }).title,
+    }),
+  );
+  runtime.server.on("PATCH", "/v0/documents/{documentId}", renameDocument);
+  renderTree(runtime);
+
+  await chooseNodeAction("notes.txt", "Rename");
+
+  expect(screen.queryByText("Document detail")).toBeNull();
+  const dialog = screen.getByRole("dialog", { name: "Rename file" });
+  const input = within(dialog).getByRole("textbox", { name: "File name" });
+  expect(input).toHaveValue("notes.txt");
+  fireEvent.change(input, { target: { value: "minutes.txt" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Rename file" })).toBeNull(),
+  );
+  expect(renameDocument).toHaveBeenCalledOnce();
+  expect(renameDocument.mock.calls[0]?.[0]).toEqual(
+    expect.objectContaining({
+      body: { title: "minutes.txt" },
+      params: { documentId: document.id },
+    }),
+  );
+  expect(
+    runtime.server.requestsTo(
+      "PATCH",
+      "/v0/documents/{documentId}/draft-title",
+    ),
+  ).toHaveLength(0);
+  expect(screen.queryByText("Document detail")).toBeNull();
+  expect(
+    await screen.findByRole("treeitem", { name: "minutes.txt" }),
+  ).toBeVisible();
+});
+
+/** Drops files on the Library once its tree has settled and accepts them. */
+async function dropFilesOnLibrary(target: HTMLElement, files: File[]) {
+  const transfer = createDataTransfer(files);
+  await waitFor(() => {
+    fireEvent.dragEnter(target, { dataTransfer: transfer });
+    expect(screen.getByTestId("file-drop-overlay")).toBeVisible();
+  });
+  fireEvent.drop(target, { dataTransfer: transfer });
+}
 
 async function chooseCreateAction(action: "New folder" | "New file") {
   fireEvent.click(

@@ -14,6 +14,7 @@ import { documentUploadRepresentationFormat } from "./document-upload-representa
 import {
   fileUploadBatch,
   tenantUploads,
+  type PendingDocumentUpload,
   type UploadBatch,
   type UploadFailure,
   useTenantUploads,
@@ -72,6 +73,10 @@ export function useMyDocumentsUploads({
     error: uploadError,
     uploads: pendingUploads,
   } = useTenantUploads(tenantId);
+  // Retried rows are queued by id so one row and the queue summary can ask at
+  // the same time without racing two uploads into the same folder.
+  const retryQueueRef = useRef(new Set<string>());
+  const retryRunningRef = useRef(false);
   // An upload outlives this view; it must not navigate a reader who moved on.
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -126,10 +131,20 @@ export function useMyDocumentsUploads({
     tenantUploads.setActive(tenantId, true);
     expandFolder(parentId);
     const { preparedFiles, uploads } = prepareUploads(batch, items, parentId);
-    tenantUploads.add(tenantId, uploads);
+    tenantUploads.add(
+      tenantId,
+      uploads.map((upload) => ({
+        ...upload,
+        onDismiss: () => dismissUpload(upload.id),
+        onRetry: () => retryUploads([upload.id]),
+      })),
+    );
     await nextPaint();
     let uploadedDocumentId: string | undefined;
     const failures: UploadFailure[] = [...batch.readFailures];
+    // The rows that stay in the queue: a failed file keeps its bytes so it can
+    // be sent again instead of vanishing into a dismissible message.
+    const failedUploadIds = new Set<string>();
     try {
       const folderIds = await createUploadFolders(
         { client, items, onChanged, tenantId },
@@ -166,15 +181,18 @@ export function useMyDocumentsUploads({
             setRevealDocumentId(document.id);
             await onChanged();
           } catch (uploadError) {
-            failures.push({
-              filename: upload.filename,
-              message:
+            failedUploadIds.add(upload.id);
+            tenantUploads.patch(tenantId, upload.id, {
+              error:
                 uploadError instanceof Error
                   ? uploadError.message
                   : "The document could not be imported.",
+              status: "failed",
             });
           } finally {
-            tenantUploads.remove(tenantId, new Set([upload.id]));
+            if (!failedUploadIds.has(upload.id)) {
+              tenantUploads.remove(tenantId, new Set([upload.id]));
+            }
           }
         },
       );
@@ -199,12 +217,107 @@ export function useMyDocumentsUploads({
     } finally {
       tenantUploads.remove(
         tenantId,
-        new Set<string>(uploads.map((upload) => upload.id)),
+        new Set(
+          uploads
+            .map((upload) => upload.id)
+            .filter((id) => !failedUploadIds.has(id)),
+        ),
       );
       tenantUploads.setActive(tenantId, false);
       setCreating(null);
       setExternalDrop(null);
     }
+  }
+
+  function dismissUpload(uploadId: string) {
+    tenantUploads.remove(tenantId, new Set([uploadId]));
+  }
+
+  function dismissFailedUploads() {
+    const failed = failedUploadRows(tenantId).map((upload) => upload.id);
+    if (failed.length > 0) tenantUploads.remove(tenantId, new Set(failed));
+  }
+
+  function retryUpload(uploadId: string) {
+    retryUploads([uploadId]);
+  }
+
+  function retryFailedUploads() {
+    retryUploads(failedUploadRows(tenantId).map((upload) => upload.id));
+  }
+
+  function retryUploads(uploadIds: readonly string[]) {
+    if (uploadIds.length === 0) return;
+    for (const uploadId of uploadIds) retryQueueRef.current.add(uploadId);
+    void drainRetryQueue();
+  }
+
+  /**
+   * Sends each failed row again into the folder the batch was dropped on. A
+   * row leaves the queue only once its retry succeeds or the reader dismisses
+   * it, so a failure never loses the file the reader picked.
+   */
+  async function drainRetryQueue(): Promise<void> {
+    if (retryRunningRef.current) return;
+    retryRunningRef.current = true;
+    setCreating("import");
+    tenantUploads.setActive(tenantId, true);
+    tenantUploads.setError(tenantId, null);
+    try {
+      await retryQueuedUploads();
+    } finally {
+      retryRunningRef.current = false;
+      tenantUploads.setActive(tenantId, false);
+      setCreating(null);
+    }
+  }
+
+  async function retryQueuedUploads(): Promise<void> {
+    if (retryQueueRef.current.size === 0) return;
+    const uploadIds = [...retryQueueRef.current];
+    retryQueueRef.current.clear();
+    await runSequentially(uploadIds, async (uploadId) => {
+      const upload = tenantUploads
+        .get(tenantId)
+        .uploads.find((candidate) => candidate.id === uploadId);
+      if (!upload?.file || upload.status !== "failed") return;
+      tenantUploads.patch(tenantId, upload.id, {
+        error: undefined,
+        progress: 0,
+        status: "uploading",
+      });
+      try {
+        const document = await client.uploadPersonalWikiDocument(
+          tenantId,
+          {
+            file: upload.file,
+            ...(upload.parentId ? { parentId: upload.parentId } : {}),
+            representationFormat: documentUploadRepresentationFormat(
+              upload.file,
+            ),
+          },
+          createTeamHubIdempotencyKey(),
+          {
+            onProgress: (progress) =>
+              tenantUploads.patch(tenantId, upload.id, { progress }),
+          },
+        );
+        rememberUploadedImage(client, document, upload.file);
+        setRevealDocumentId(document.id);
+        await onChanged();
+        tenantUploads.remove(tenantId, new Set([upload.id]));
+      } catch (retryError) {
+        tenantUploads.patch(tenantId, upload.id, {
+          error:
+            retryError instanceof Error
+              ? retryError.message
+              : "The document could not be imported.",
+          status: "failed",
+        });
+      }
+    });
+    // A row retried while this pass ran joins the next one.
+    await retryQueuedUploads();
   }
 
   useLayoutEffect(() => {
@@ -218,16 +331,27 @@ export function useMyDocumentsUploads({
   }, []);
 
   return {
+    dismissFailedUploads,
+    dismissUpload,
     externalDrop,
     importDocument,
     importDocuments,
     importDroppedDocuments,
     pendingUploads,
+    retryFailedUploads,
+    retryUpload,
     revealDocumentId,
     setExternalDrop,
     uploadError,
     uploadsActive,
   };
+}
+
+/** The queued rows whose last attempt failed, in queue order. */
+function failedUploadRows(tenantId: string): PendingDocumentUpload[] {
+  return tenantUploads
+    .get(tenantId)
+    .uploads.filter((upload) => upload.status === "failed");
 }
 
 /**
@@ -262,6 +386,7 @@ function prepareUploads(
   // Plain-http origins have no crypto.randomUUID; the import must still work
   // there, so fall back to a locally unique id.
   const uploads = preparedFiles.map(({ file, folderPath }, index) => ({
+    file,
     filename: [...folderPath, file.name].join("/"),
     id:
       globalThis.crypto?.randomUUID?.() ??

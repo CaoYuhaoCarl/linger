@@ -152,7 +152,7 @@ export function useMyDocumentsDocumentActions({
       setError(
         trashError instanceof Error
           ? trashError.message
-          : "The document could not be moved to trash.",
+          : "The document could not be deleted.",
       );
     } finally {
       setTrashPending(false);

@@ -1,26 +1,28 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/modal-dialog";
-import { documentDetailPath } from "@/features/rooms/files/document-detail-routes";
+import { documentQueryKey } from "@/features/rooms/room-queries";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubDocumentTreeSummary } from "@/features/teamhub/teamhub-types";
-import { documentQueryKey } from "@/features/rooms/room-queries";
 
 export function canRenameDocument(document: TeamHubDocumentTreeSummary) {
   if (document.status !== "active") return false;
-  return document.format === "blocknote" || document.can_edit_native_content
+  return isNativeContent(document)
     ? document.capabilities.write && document.can_edit_native_content
     : document.capabilities.manage;
+}
+
+/** A native Document whose title lives on its draft, not on an uploaded file. */
+function isNativeContent(document: TeamHubDocumentTreeSummary) {
+  return document.can_edit_native_content || document.format === "blocknote";
 }
 
 export function useDocumentRename(tenantId: string) {
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [document, setDocument] = useState<TeamHubDocumentTreeSummary | null>(
     null,
   );
@@ -29,14 +31,10 @@ export function useDocumentRename(tenantId: string) {
   const [error, setError] = useState<string | null>(null);
   const formId = useId();
 
+  // Renaming keeps the reader where they are: the row opens this dialog in
+  // place instead of navigating into the Document and losing the folder.
   function beginRename(value: TeamHubDocumentTreeSummary) {
     if (!canRenameDocument(value)) return;
-    if (value.can_edit_native_content) {
-      void navigate(documentDetailPath({ documentId: value.id, tenantId }), {
-        state: { editDocumentTitle: true, selectTitleBaseName: true },
-      });
-      return;
-    }
     setDocument(value);
     setName(value.title);
     setError(null);
@@ -51,16 +49,21 @@ export function useDocumentRename(tenantId: string) {
     setPending(true);
     setError(null);
     try {
-      const updated = await teamHubData(
-        client.api.PATCH("/v0/documents/{documentId}", {
-          params: { path: { documentId: document.id } },
-          body: { title: name.trim() },
-        }),
-      );
-      queryClient.setQueryData(
-        documentQueryKey(tenantId, document.id),
-        updated,
-      );
+      // A native Document's title is its draft title; the generic title update
+      // rejects native content, while an uploaded file renames the file itself.
+      await (isNativeContent(document)
+        ? teamHubData(
+            client.api.PATCH("/v0/documents/{documentId}/draft-title", {
+              params: { path: { documentId: document.id } },
+              body: { title: name.trim() },
+            }),
+          )
+        : teamHubData(
+            client.api.PATCH("/v0/documents/{documentId}", {
+              params: { path: { documentId: document.id } },
+              body: { title: name.trim() },
+            }),
+          ));
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: ["teamhub", tenantId, "document-tree"],
@@ -70,6 +73,9 @@ export function useDocumentRename(tenantId: string) {
         }),
         queryClient.invalidateQueries({
           queryKey: ["teamhub", "library-documents"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: documentQueryKey(tenantId, document.id),
         }),
       ]);
       setDocument(null);

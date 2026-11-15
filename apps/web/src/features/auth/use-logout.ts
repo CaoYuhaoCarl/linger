@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { useNavigate } from "react-router";
 
+import { tenantUploads } from "@/features/library/library-upload-queue";
 import { browserRoomMessageOutbox } from "@/features/rooms/chat/room-message-outbox";
 import {
   deleteRoomDocumentLocalCopies,
@@ -42,6 +43,9 @@ export function useLogout({ returnTo }: { returnTo?: string } = {}) {
       // Let the router unmount protected query consumers before clearing them.
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       clearLocalAuthenticatedState(queryClient);
+      // Queued upload filenames belong to the Session that dropped them; a
+      // shared device must not show them to the next sign-in.
+      tenantUploads.clearAll();
       // The editors here have unmounted; editors in other tabs close when the
       // deletion reaches them and cannot reopen without the Session. A copy
       // that fails to delete goes at the account's next logout.

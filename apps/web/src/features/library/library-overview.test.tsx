@@ -22,6 +22,7 @@ import {
   documentSeeds,
 } from "@/test/document-scenarios";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
+import { formatDateTime, formatUpdatedAt } from "@/lib/date-format";
 import {
   useTeamHubRuntime,
   TeamHubRuntimeProvider,
@@ -137,6 +138,24 @@ describe("Library Home", () => {
       within(recent).getAllByRole("button", { name: /^Actions for / })[0],
     ).toBeVisible();
     expect(screen.queryByText(/blocknote/i)).not.toBeInTheDocument();
+  });
+
+  it("dates a folder row the same way it dates a file row", async () => {
+    const runtime = createDocumentTestRuntime();
+    const updatedAt = "2026-08-26T10:00:00.000Z";
+    const folder = seedFolder(runtime, "folder-date-format", {
+      name: "Reports",
+    });
+    folder.updated_at = updatedAt;
+
+    renderHome(runtime);
+
+    const row = await screen.findByRole("button", {
+      name: "Open folder Reports",
+    });
+    const time = row.closest(".workspace-file-row")!.querySelector("time")!;
+    expect(time).toHaveTextContent(formatUpdatedAt(updatedAt));
+    expect(time).toHaveAttribute("title", formatDateTime(updatedAt));
   });
 
   it("opens a recent file through its document route", async () => {

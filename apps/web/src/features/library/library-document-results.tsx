@@ -1,7 +1,6 @@
-import { Loading03Icon } from "@hugeicons/core-free-icons";
 import { Link } from "react-router";
 
-import { Icon } from "@/components/ui/icon";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { ActorAvatar } from "@/features/rooms/members/actor-avatar";
 import {
@@ -12,6 +11,7 @@ import type {
   TeamHubDocument,
   TeamHubDocumentTreeSummary,
 } from "@/features/teamhub/teamhub-types";
+import { cn } from "@/lib/cn";
 import { formatDateTime, formatUpdatedAt } from "@/lib/date-format";
 
 import { documentFileName } from "./document-display-name";
@@ -186,30 +186,7 @@ export function LibraryDocumentResults({
         />
       ))}
       {pendingUploads.map((upload) => (
-        <div
-          aria-label={`${upload.filename} upload ${upload.status}`}
-          className="workspace-file-row text-app-muted"
-          key={upload.id}
-          role="status"
-        >
-          <span className="workspace-file-name">
-            {upload.status === "uploading" ? (
-              <Icon
-                icon={Loading03Icon}
-                className="shrink-0 animate-spin"
-                size={16}
-              />
-            ) : (
-              <WorkspaceFileIcon filename={upload.filename} />
-            )}
-            <strong className="truncate">{upload.filename}</strong>
-          </span>
-          {upload.status === "uploading" ? (
-            <span aria-hidden="true" className="text-xs">
-              {Math.round(upload.progress * 100)}%
-            </span>
-          ) : null}
-        </div>
+        <PendingUploadRow key={upload.id} upload={upload} />
       ))}
       {documents.map((document) => (
         <DocumentRow
@@ -232,6 +209,70 @@ export function LibraryDocumentResults({
 /** The full date and time behind a relative label, shown on hover. */
 function exactTime(iso: string) {
   return Number.isFinite(Date.parse(iso)) ? formatDateTime(iso) : undefined;
+}
+
+/**
+ * A file still on its way into this folder, or one whose last attempt failed.
+ * A failed row keeps its own error, Retry and Dismiss so the reader can act on
+ * one file without losing the rest of the queue.
+ */
+function PendingUploadRow({ upload }: { upload: PendingDocumentUpload }) {
+  const failed = upload.status === "failed";
+  return (
+    <div
+      aria-label={`${upload.filename} upload ${upload.status}`}
+      className={cn(
+        "workspace-file-row",
+        failed ? "text-app-danger" : "text-app-muted",
+      )}
+      role="status"
+    >
+      <span className="workspace-file-name">
+        {upload.status === "uploading" ? (
+          <Spinner size={16} />
+        ) : (
+          <WorkspaceFileIcon filename={upload.filename} />
+        )}
+        <span className="min-w-0">
+          <strong>{upload.filename}</strong>
+          {failed ? (
+            <span className="block overflow-hidden text-ellipsis whitespace-nowrap text-xs leading-4">
+              {upload.error ?? "Upload failed"}
+            </span>
+          ) : null}
+        </span>
+      </span>
+      {upload.status === "uploading" ? (
+        <span aria-hidden="true" className="text-xs">
+          {Math.round(upload.progress * 100)}%
+        </span>
+      ) : (
+        <span />
+      )}
+      {failed ? (
+        <span className="flex items-center justify-end gap-1">
+          <Button
+            onClick={() => upload.onRetry?.()}
+            size="compact"
+            tone="secondary"
+            type="button"
+          >
+            Retry
+          </Button>
+          <Button
+            onClick={() => upload.onDismiss?.()}
+            size="compact"
+            tone="ghost"
+            type="button"
+          >
+            Dismiss
+          </Button>
+        </span>
+      ) : (
+        <span />
+      )}
+    </div>
+  );
 }
 
 function DocumentRow({

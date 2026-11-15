@@ -16,6 +16,10 @@ import {
   writeRoomComposerDraft,
 } from "@/features/rooms/room-drafts";
 import { teamHubAuthenticationSignals } from "@/features/teamhub/teamhub-authentication";
+import {
+  resetTenantUploadsForTest,
+  tenantUploads,
+} from "@/features/library/library-upload-queue";
 import { LOGOUT_UNSAVED_DOCUMENT_MESSAGE, useLogout } from "./use-logout";
 
 const localCopies = vi.hoisted(() => ({
@@ -47,7 +51,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  resetTenantUploadsForTest();
+});
 
 describe("useLogout", () => {
   it("keeps the authenticated state when TeamHub cannot revoke the Session", async () => {
@@ -210,6 +217,40 @@ describe("useLogout", () => {
         actorIds: identity.actors.map((actor) => actor.id),
       }),
     );
+  });
+
+  it("clears queued Library uploads from every tenant on logout", async () => {
+    const runtime = await testRuntime();
+    vi.spyOn(browserRoomMessageOutbox, "clearAccount").mockResolvedValue();
+    runtime.server.on("POST", "/v0/auth/logout", () => undefined);
+    tenantUploads.add("tenant-northstar", [
+      {
+        error: "Network dropped.",
+        file: new File(["private"], "private.txt"),
+        filename: "private.txt",
+        id: "upload-private",
+        progress: 0,
+        status: "failed",
+      },
+    ]);
+    tenantUploads.add("tenant-other", [
+      {
+        filename: "other.txt",
+        id: "upload-other",
+        progress: 0,
+        status: "queued",
+      },
+    ]);
+
+    renderLogout(runtime);
+    fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(/^\/login$/),
+    );
+    // A shared device must not show one account's dropped filenames to the next.
+    expect(tenantUploads.get("tenant-northstar").uploads).toEqual([]);
+    expect(tenantUploads.get("tenant-other").uploads).toEqual([]);
   });
 
   it("rejects an external return destination", async () => {

@@ -21,13 +21,21 @@ export interface UploadBatch {
 }
 
 export interface PendingDocumentUpload {
+  /** Why the last attempt failed; only set while the row is `failed`. */
+  error?: string;
+  /** The bytes to send again, kept so a failed row retries on one click. */
+  file?: File;
   /** Display name; files from a dropped folder keep their relative path. */
   filename: string;
   id: string;
+  /** Removes this row from the queue. */
+  onDismiss?: () => void;
+  /** Starts another attempt for this row. */
+  onRetry?: () => void;
   parentId?: string;
   /** Upload fraction from 0 to 1 while the request body is sent. */
   progress: number;
-  status: "queued" | "uploading";
+  status: "queued" | "uploading" | "failed";
 }
 
 interface TenantUploads {
@@ -59,10 +67,16 @@ export const tenantUploads = {
       uploads: [...current.uploads, ...uploads],
     }));
   },
+  /** The queue as it is now, for work that must not read a stale render. */
+  get(tenantId: string): TenantUploads {
+    return uploadsByTenant.get(tenantId) ?? emptyUploads;
+  },
   patch(
     tenantId: string,
     uploadId: string,
-    patch: Partial<Pick<PendingDocumentUpload, "progress" | "status">>,
+    patch: Partial<
+      Pick<PendingDocumentUpload, "error" | "file" | "progress" | "status">
+    >,
   ) {
     update(tenantId, (current) => ({
       ...current,
@@ -82,6 +96,12 @@ export const tenantUploads = {
   },
   setError(tenantId: string, error: string | null) {
     update(tenantId, (current) => ({ ...current, error }));
+  },
+  /** Drops every tenant's queue; queued filenames must not outlive the Session. */
+  clearAll() {
+    if (uploadsByTenant.size === 0) return;
+    uploadsByTenant.clear();
+    notify();
   },
 };
 

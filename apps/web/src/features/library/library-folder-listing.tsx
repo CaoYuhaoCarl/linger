@@ -133,7 +133,7 @@ export function LibraryFolderListing({
           )}
         documentActions={documentActions}
         error={browsedError}
-        folders={folders.sort((a, b) =>
+        folders={[...folders].sort((a, b) =>
           sortBy === "name"
             ? a.name.localeCompare(b.name)
             : b.updated_at.localeCompare(a.updated_at),

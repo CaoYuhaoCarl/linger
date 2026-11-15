@@ -2249,7 +2249,7 @@ it("disables binary rename when metadata management is not permitted", async () 
   ).toBeDisabled();
 });
 
-it("routes native menu rename through the existing Draft title editor", async () => {
+it("renames a native Document from its header menu in place", async () => {
   const runtime = createDocumentTestRuntime();
 
   const document = seedNativeDocument(runtime, "create-native-menu-rename");
@@ -2272,15 +2272,16 @@ it("routes native menu rename through the existing Draft title editor", async ()
     screen.getByRole("button", { name: "More Document actions" }),
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
-  const title = await screen.findByRole("textbox", { name: "Document title" });
-  expect(title).toHaveFocus();
-  fireEvent.change(title, { target: { value: "Native renamed" } });
-  fireEvent.keyDown(title, { key: "Enter" });
+  const dialog = await screen.findByRole("dialog", { name: "Rename file" });
+  const input = within(dialog).getByRole("textbox", { name: "File name" });
+  fireEvent.change(input, { target: { value: "Native renamed" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
   await waitFor(async () =>
     expect((await readDocument(runtime.client, document.id)).title).toBe(
       "Native renamed",
     ),
   );
+  expect(updateTitle).toHaveBeenCalledOnce();
   expect(
     runtime.server.requestsTo("PATCH", "/v0/documents/{documentId}"),
   ).toHaveLength(0);

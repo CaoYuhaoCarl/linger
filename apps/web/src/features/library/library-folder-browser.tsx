@@ -8,6 +8,7 @@ import type {
   TeamHubDocumentPlacementNode,
   TeamHubDocumentTreeSummary,
 } from "@/features/teamhub/teamhub-types";
+import { formatDateTime, formatUpdatedAt } from "@/lib/date-format";
 
 import type { PendingDocumentUpload } from "./library-upload-queue";
 
@@ -15,12 +16,6 @@ export type LibraryFolder = Extract<
   TeamHubDocumentPlacementNode,
   { node_kind: "folder" }
 >;
-
-const folderDateFormatter = new Intl.DateTimeFormat("en-US", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-});
 
 /** Folders and Documents placed directly in one My pages folder (root when undefined). */
 export function folderChildren(
@@ -125,7 +120,6 @@ export function LibraryFolderRow({
   folder: LibraryFolder;
   onOpen: (folderId: string) => void;
 }) {
-  const date = new Date(folder.updated_at);
   return (
     <div className="workspace-file-row">
       <button
@@ -143,15 +137,18 @@ export function LibraryFolderRow({
         </span>
       </button>
       <div className="workspace-file-metadata">
-        <time dateTime={folder.updated_at} title={folder.updated_at}>
-          {Number.isNaN(date.valueOf())
-            ? "—"
-            : folderDateFormatter.format(date)}
+        <time dateTime={folder.updated_at} title={exactTime(folder.updated_at)}>
+          {formatUpdatedAt(folder.updated_at)}
         </time>
       </div>
       <span aria-hidden="true" />
     </div>
   );
+}
+
+/** The full date and time behind a Folder's relative label, shown on hover. */
+function exactTime(iso: string) {
+  return Number.isFinite(Date.parse(iso)) ? formatDateTime(iso) : undefined;
 }
 
 /** A compact queue summary that survives leaving and reopening the Library. */
@@ -161,8 +158,11 @@ export function LibraryUploadSummary({
   uploads: readonly PendingDocumentUpload[];
 }) {
   if (uploads.length === 0) return null;
-  const current = uploads.find((upload) => upload.status === "uploading");
+  const failed = uploads.filter((upload) => upload.status === "failed");
+  const inFlight = uploads.filter((upload) => upload.status !== "failed");
+  const current = inFlight.find((upload) => upload.status === "uploading");
   const percent = Math.round((current?.progress ?? 0) * 100);
+  const remaining = inFlight.length > 0 ? inFlight.length : failed.length;
   return (
     <div
       aria-label="Upload progress"
@@ -171,27 +171,53 @@ export function LibraryUploadSummary({
     >
       <div className="flex items-center justify-between gap-3">
         <span className="truncate">
-          {current ? `Uploading ${current.filename}` : "Preparing upload…"}
+          {inFlight.length === 0
+            ? failed.length === 1
+              ? "1 upload failed"
+              : `${failed.length} uploads failed`
+            : current
+              ? `Uploading ${current.filename}`
+              : "Preparing upload…"}
         </span>
         <span className="shrink-0">
-          {uploads.length === 1
-            ? "1 file left"
-            : `${uploads.length} files left`}
+          {remaining === 1 ? "1 file left" : `${remaining} files left`}
         </span>
       </div>
-      <div
-        aria-label="Current file upload"
-        aria-valuemax={100}
-        aria-valuemin={0}
-        aria-valuenow={percent}
-        className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-      >
+      {inFlight.length > 0 ? (
         <div
-          className="h-full rounded-full bg-primary transition-[width] duration-150"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+          aria-label="Current file upload"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={percent}
+          className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted"
+          role="progressbar"
+        >
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-150"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      ) : null}
+      {failed.length > 0 ? (
+        <div className="mt-2 flex items-center justify-end gap-1">
+          <Button
+            onClick={() => failed.forEach((upload) => upload.onRetry?.())}
+            size="compact"
+            tone="secondary"
+            type="button"
+          >
+            Retry failed
+          </Button>
+          <Button
+            onClick={() => failed.forEach((upload) => upload.onDismiss?.())}
+            size="compact"
+            tone="ghost"
+            type="button"
+          >
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
