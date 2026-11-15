@@ -21,10 +21,8 @@ const ALL_PANEL_CREATE_ITEMS = [
 
 export type PanelCreateChoice = (typeof ALL_PANEL_CREATE_ITEMS)[number]["kind"];
 
-/** Keep the general launcher focused on Documents; Agent info is DM-scoped. */
-export const PANEL_HIDDEN_CREATE_KINDS = new Set<PanelCreateChoice>([
-  "roomInfo",
-]);
+/** Keep the launcher honest: only Agent info is DM-scoped. */
+export const PANEL_HIDDEN_CREATE_KINDS = new Set<PanelCreateChoice>();
 
 export function panelCreateItems(includeAgentInfo = false) {
   return ALL_PANEL_CREATE_ITEMS.filter((item) =>

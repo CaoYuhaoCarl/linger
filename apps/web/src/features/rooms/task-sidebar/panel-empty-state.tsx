@@ -2,6 +2,7 @@ import {
   ArrowUpRight01Icon,
   File01Icon,
   HierarchyIcon,
+  InformationCircleIcon,
   LayoutLeftIcon,
 } from "@hugeicons/core-free-icons";
 
@@ -45,7 +46,7 @@ export function PanelEmptyState({
           <p className="mt-1 text-sm text-muted-foreground">
             {agent
               ? "Agent settings, routines, activity, and shared documents — alongside your chat."
-              : "Shared documents and message threads — alongside your chat."}
+              : "Room information, shared documents, and message threads — alongside your chat."}
           </p>
         </div>
         <div className="space-y-2">
@@ -105,6 +106,34 @@ export function PanelEmptyState({
               size={14}
             />
           </button>
+          {agent ? null : (
+            <button
+              aria-label="Room info"
+              className={rowClassName}
+              onClick={() => onCreate("roomInfo")}
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className="grid size-8 shrink-0 place-items-center rounded-lg bg-rain-500 text-white"
+              >
+                <Icon icon={InformationCircleIcon} size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-foreground">
+                  Room info
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Room description, visibility, and members
+                </span>
+              </span>
+              <Icon
+                className="shrink-0 text-muted-foreground"
+                icon={ArrowUpRight01Icon}
+                size={14}
+              />
+            </button>
+          )}
           <button
             aria-label="Collaboration"
             className={rowClassName}

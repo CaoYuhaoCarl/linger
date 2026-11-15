@@ -653,8 +653,8 @@ describe("RoomSurface command availability", () => {
       within(sidebar).getByRole("button", { name: "Documents" }),
     ).toBeVisible();
     expect(
-      within(sidebar).queryByRole("button", { name: "Room info" }),
-    ).not.toBeInTheDocument();
+      within(sidebar).getByRole("button", { name: "Room info" }),
+    ).toBeVisible();
     expect(
       within(sidebar).getByRole("button", { name: "Add panel view" }),
     ).toBeVisible();
@@ -991,8 +991,8 @@ describe("RoomSurface command availability", () => {
       within(sidebar).getByRole("button", { name: "Documents" }),
     ).toBeVisible();
     expect(
-      within(sidebar).queryByRole("button", { name: "Room info" }),
-    ).not.toBeInTheDocument();
+      within(sidebar).getByRole("button", { name: "Room info" }),
+    ).toBeVisible();
   });
 
   it("opens Documents as a folder browser instead of a picker dialog", async () => {

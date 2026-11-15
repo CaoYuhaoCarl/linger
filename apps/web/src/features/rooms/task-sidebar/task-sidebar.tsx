@@ -93,8 +93,14 @@ function isEditableTarget(target: EventTarget | null) {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+/**
+ * Escape belongs to whatever is being edited or to the surface on top: a
+ * composer, a Thread reply, a picker input, or an open dialog. Only a bare
+ * Escape may close a panel tab.
+ */
 function shouldDeferEscape(event: KeyboardEvent) {
   if (event.defaultPrevented) return true;
+  if (isEditableTarget(event.target)) return true;
   if (document.querySelector("dialog[open]")) return true;
   return (
     event.target instanceof Element && Boolean(event.target.closest("dialog"))

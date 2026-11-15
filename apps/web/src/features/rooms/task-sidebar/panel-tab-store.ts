@@ -1,6 +1,7 @@
 import {
   PANEL_CLOSED_STACK_CAP,
   PANEL_TAB_CAP,
+  panelScopeKey,
   panelTabKey,
   type PanelTab,
   type PanelTabKind,
@@ -9,11 +10,31 @@ import {
 } from "./panel-tab-types";
 
 const prefix = "linger.panel-tabs.v3:";
+const openPrefix = "linger.panel-open.v1:";
 
 function key(scope: PanelTabScope) {
-  return `${prefix}${[scope.accountId, scope.tenantId, scope.roomId]
-    .map(encodeURIComponent)
-    .join(":")}`;
+  return `${prefix}${panelScopeKey(scope)}`;
+}
+
+/** Whether the user left the panel open in this Room, across reloads. */
+function openKey(scope: PanelTabScope) {
+  return `${openPrefix}${panelScopeKey(scope)}`;
+}
+
+export function readPanelOpen(scope: PanelTabScope): boolean {
+  try {
+    return globalThis.localStorage?.getItem(openKey(scope)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function writePanelOpen(scope: PanelTabScope, open: boolean) {
+  try {
+    globalThis.localStorage?.setItem(openKey(scope), open ? "true" : "false");
+  } catch {
+    // session-only fallback: caller keeps React state
+  }
 }
 
 function emptyState(): PanelTabState {

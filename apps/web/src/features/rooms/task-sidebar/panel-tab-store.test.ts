@@ -5,8 +5,10 @@ import {
   ensureDefaultAgentInfoTab,
   movePanelTab,
   openPanelTab,
+  readPanelOpen,
   readPanelTabState,
   retargetAgentInfoTab,
+  writePanelOpen,
 } from "./panel-tab-store";
 import { panelTabKey } from "./panel-tab-types";
 
@@ -455,5 +457,23 @@ describe("panel tab store", () => {
     const state = readPanelTabState(scope);
     expect(state.openTabIds).toEqual(["roomInfo:current", "url:preview"]);
     expect(state.activeTabId).toBe("roomInfo:current");
+  });
+
+  it("remembers panel visibility per Room without touching the tab state", () => {
+    const otherRoom = { ...scope, roomId: "room-2" };
+    expect(readPanelOpen(scope)).toBe(false);
+
+    writePanelOpen(scope, true);
+    expect(readPanelOpen(scope)).toBe(true);
+    expect(readPanelOpen(otherRoom)).toBe(false);
+    expect(readPanelTabState(scope).openTabIds).toEqual([]);
+
+    writePanelOpen(scope, false);
+    expect(readPanelOpen(scope)).toBe(false);
+
+    // A scope with an encoded separator keeps its own entry.
+    writePanelOpen({ ...scope, roomId: "room:2" }, true);
+    expect(readPanelOpen({ ...scope, roomId: "room:2" })).toBe(true);
+    expect(readPanelOpen(otherRoom)).toBe(false);
   });
 });

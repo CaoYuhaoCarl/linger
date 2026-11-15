@@ -881,9 +881,8 @@ describe("TaskSidebar", () => {
       within(launcher)
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["Documents", "Collaboration"]);
+    ).toEqual(["Documents", "Room info", "Collaboration"]);
     expect(screen.queryByRole("button", { name: "Thread" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Room info" })).toBeNull();
     expect(screen.queryByText("Suggestion")).toBeNull();
 
     const surface = screen.getByTestId("panel-content-surface");
@@ -899,6 +898,12 @@ describe("TaskSidebar", () => {
     fireEvent.click(documents);
     expect(onCreate).toHaveBeenCalledWith("file");
     expect(screen.queryByRole("button", { name: "Routines" })).toBeNull();
+    const roomInfo = screen.getByRole("button", { name: "Room info" });
+    expect(
+      within(roomInfo).getByText("Room description, visibility, and members"),
+    ).toBeVisible();
+    fireEvent.click(roomInfo);
+    expect(onCreate).toHaveBeenCalledWith("roomInfo");
     fireEvent.click(screen.getByRole("button", { name: "Collaboration" }));
     expect(onCreate).toHaveBeenCalledWith("collaboration");
 
@@ -909,7 +914,7 @@ describe("TaskSidebar", () => {
     expect(
       screen.getByRole("menuitem", { name: "Collaboration" }),
     ).toBeVisible();
-    expect(screen.queryByRole("menuitem", { name: "Room info" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Room info" })).toBeVisible();
   });
 
   it("reopens the current Agent Info from the empty panel", () => {
@@ -1403,6 +1408,37 @@ describe("TaskSidebar", () => {
       panelTabKey("thread", { anchorMessageId: "msg-a" }),
     );
     expect(onCollapse).not.toHaveBeenCalled();
+  });
+
+  it("leaves the panel alone when Escape is typed in an editable field", () => {
+    const onCloseTab = vi.fn();
+    const onCollapse = vi.fn();
+    renderSidebar({
+      activeTabId: panelTabKey("thread", { anchorMessageId: "msg-a" }),
+      onCloseTab,
+      onCollapse,
+      tabs: [threadTab("msg-a", "Alpha task", 1)],
+    });
+
+    const composer = document.createElement("textarea");
+    document.body.append(composer);
+    composer.focus();
+    fireEvent.keyDown(composer, { key: "Escape" });
+    const search = document.createElement("input");
+    document.body.append(search);
+    fireEvent.keyDown(search, { key: "Escape" });
+    const picker = document.createElement("select");
+    document.body.append(picker);
+    fireEvent.keyDown(picker, { key: "Escape" });
+
+    expect(onCloseTab).not.toHaveBeenCalled();
+    expect(onCollapse).not.toHaveBeenCalled();
+
+    // A bare Escape outside an editor still closes the active tab.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onCloseTab).toHaveBeenCalledWith(
+      panelTabKey("thread", { anchorMessageId: "msg-a" }),
+    );
   });
 
   it("moves the active tab on Cmd+Alt+ArrowRight", () => {

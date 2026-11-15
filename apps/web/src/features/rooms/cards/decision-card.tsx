@@ -11,7 +11,7 @@ import {
   UserEdit01Icon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
-import { lazy, type ReactNode, Suspense, useState } from "react";
+import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 
 import { Icon, type IconSvgElement } from "@/components/ui/icon";
 import type { TeamHubMessageCard } from "@/features/teamhub/teamhub-types";
@@ -63,6 +63,9 @@ const ComputerPermissionDecision = lazy(async () => {
   const module = await import("./decision-computer-permission-view");
   return { default: module.ComputerPermissionDecision };
 });
+
+/** setTimeout fires immediately above this delay, so re-arm in chunks. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 export type DecisionMessageCard = Extract<
   TeamHubMessageCard,
@@ -160,11 +163,25 @@ function ApprovalDecision({
   roomMemberDecisionAllowed,
   tenantId,
 }: DecisionCardProps) {
-  const [now] = useState(Date.now);
+  const [now, setNow] = useState(() => Date.now());
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const state = decisionState(card, now);
+  const expiresAt = card.expires_at;
+
+  // A card that is still waiting must flip to expired on its own, without a
+  // reload and without arming a timer longer than setTimeout can hold.
+  useEffect(() => {
+    if (state !== "pending" || !expiresAt) return;
+    const remaining = Date.parse(expiresAt) - now;
+    if (!Number.isFinite(remaining)) return;
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      Math.min(Math.max(remaining, 0), MAX_TIMEOUT_MS),
+    );
+    return () => clearTimeout(timer);
+  }, [expiresAt, now, state]);
   const roomCreation = card.kind === "room_creation";
   const canDecide =
     state === "pending" &&
@@ -271,6 +288,15 @@ function ApprovalDecision({
               </div>
             ) : null}
           </div>
+        ) : state === "pending" ? (
+          // Someone else owns the decision: say so instead of leaving the
+          // footer empty, where the card looks broken.
+          <p className="flex items-center gap-1.5 pb-1.5 text-xs text-muted-foreground">
+            <Icon icon={Clock01Icon} size={14} />
+            <span>
+              {`Waiting for ${card.decision_owner.display_name} to ${words.approve.toLowerCase()}`}
+            </span>
+          </p>
         ) : null}
         {decisionError ? <CardError>{decisionError}</CardError> : null}
       </CardBox>

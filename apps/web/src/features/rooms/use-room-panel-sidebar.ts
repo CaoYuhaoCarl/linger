@@ -2,9 +2,16 @@ import { useCallback, useLayoutEffect, useState } from "react";
 import type { SetURLSearchParams } from "react-router";
 
 import type { OpenPanelTabInput } from "./room-connectivity";
-import { openPanelTab as persistOpenPanelTab } from "./task-sidebar/panel-tab-store";
+import {
+  openPanelTab as persistOpenPanelTab,
+  readPanelOpen,
+  writePanelOpen,
+} from "./task-sidebar/panel-tab-store";
 import { panelTabTitle } from "./task-sidebar/panel-tab-title";
-import type { PanelTabScope } from "./task-sidebar/panel-tab-types";
+import {
+  panelScopeKey,
+  type PanelTabScope,
+} from "./task-sidebar/panel-tab-types";
 
 export function useRoomPanelSidebar({
   profileOpen,
@@ -17,7 +24,15 @@ export function useRoomPanelSidebar({
   searchParams: URLSearchParams;
   setSearchParams: SetURLSearchParams;
 }) {
-  const [panelOpen, setPanelOpen] = useState(false);
+  const scopeKey = panelScopeKey(scope);
+  const [panelOpen, setPanelOpen] = useState(() => readPanelOpen(scope));
+  const [openScopeKey, setOpenScopeKey] = useState(scopeKey);
+  if (openScopeKey !== scopeKey) {
+    // A Room switch carries its own remembered visibility instead of
+    // inheriting the previous Room's, so the panel does not silently vanish.
+    setOpenScopeKey(scopeKey);
+    setPanelOpen(readPanelOpen(scope));
+  }
   const [panelTabRevision, setPanelTabRevision] = useState(0);
   const panelVisible = panelOpen && !profileOpen;
   const [sidebarMounted, setSidebarMounted] = useState(panelVisible);
@@ -63,6 +78,7 @@ export function useRoomPanelSidebar({
         }
       }
       setPanelOpen(true);
+      writePanelOpen(scope, true);
       if (searchParams.has("profile")) {
         const next = new URLSearchParams(searchParams);
         next.delete("profile");
@@ -74,16 +90,20 @@ export function useRoomPanelSidebar({
 
   const closePanel = useCallback(() => {
     setPanelOpen(false);
+    writePanelOpen(scope, false);
     setInitialActiveMessageId(null);
-  }, []);
+  }, [scope]);
 
   const onActiveMessageChange = useCallback((messageId: string | null) => {
     setFocusMessageId(messageId);
   }, []);
 
   const togglePanel = useCallback(() => {
-    setPanelOpen((open) => !open);
-  }, []);
+    setPanelOpen((open) => {
+      writePanelOpen(scope, !open);
+      return !open;
+    });
+  }, [scope]);
 
   return {
     closePanel,

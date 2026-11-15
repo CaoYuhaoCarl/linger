@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/modal-dialog";
+import { Spinner } from "@/components/ui/spinner";
 import { idempotencyHeader, teamHubData } from "@/features/teamhub/teamhub-api";
 import {
   createTeamHubIdempotencyKey,
@@ -20,6 +21,19 @@ import type { TeamHubMessage } from "@/features/teamhub/teamhub-types";
 import { tenantActorsQueryOptions } from "../room-queries";
 
 type TargetKind = "agent" | "room";
+
+interface ForwardTarget {
+  id: string;
+  label: string;
+}
+
+/** What an empty checklist means: a search that missed, or no one to pick. */
+function emptyTargetsCopy(kind: TargetKind, searching: boolean) {
+  if (kind === "room") {
+    return searching ? "No matching rooms" : "No rooms available";
+  }
+  return searching ? "No matching agents" : "No agents available";
+}
 
 export function MessageForwardDialog({
   client,
@@ -49,8 +63,10 @@ export function MessageForwardDialog({
     queryKey: ["teamhub", tenantId, "message-forward-rooms"],
     staleTime: 60_000,
   });
-  const targets = useMemo(() => {
-    const values: Array<{ id: string; label: string }> = [];
+  // The whole directory names the selected pills; only the checklist follows
+  // the search, so a pill never falls back to a raw ID.
+  const allTargets = useMemo(() => {
+    const values: ForwardTarget[] = [];
     if (kind === "room") {
       for (const room of rooms.data?.items ?? []) {
         values.push({ id: room.id, label: room.name });
@@ -62,13 +78,20 @@ export function MessageForwardDialog({
         }
       }
     }
-    const needle = query.trim().toLowerCase();
-    return needle
-      ? values.filter((target) => target.label.toLowerCase().includes(needle))
-      : values;
-  }, [actors.data, kind, query, rooms.data]);
+    return values;
+  }, [actors.data, kind, rooms.data]);
+  const needle = query.trim().toLowerCase();
+  const filteredTargets = needle
+    ? allTargets.filter((target) => target.label.toLowerCase().includes(needle))
+    : allTargets;
   const selectedSet = new Set(selected);
-  const targetById = new Map(targets.map((target) => [target.id, target]));
+  const targetById = new Map(
+    allTargets.map((target) => [target.id, target] as const),
+  );
+  // Only the list in view gates on its own query; a failure in either source
+  // still surfaces where the user can retry it.
+  const targetsPending = (kind === "room" ? rooms : actors).isPending;
+  const targetsError = actors.isError || rooms.isError;
 
   async function forward() {
     if (!selected.length || sending) return;
@@ -100,6 +123,11 @@ export function MessageForwardDialog({
     }
   }
 
+  function retryTargets() {
+    void actors.refetch();
+    void rooms.refetch();
+  }
+
   return (
     <ModalDialog
       closeOnBackdrop
@@ -115,6 +143,7 @@ export function MessageForwardDialog({
             disabled={!selected.length}
             loading={sending}
             onClick={() => void forward()}
+            tone="primary"
           >
             <Icon icon={SentIcon} size={16} /> Forward
           </Button>
@@ -148,16 +177,21 @@ export function MessageForwardDialog({
             <Icon icon={Search01Icon} size={16} />
           </Button>
         </form>
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div
+          aria-label="Forward target kind"
+          className="mt-3 grid grid-cols-2 gap-2"
+          role="group"
+        >
           {(["agent", "room"] as const).map((targetKind) => (
             <Button
+              aria-pressed={kind === targetKind}
               key={targetKind}
               onClick={() => {
                 setKind(targetKind);
                 setSelected([]);
               }}
               size="compact"
-              tone={kind === targetKind ? "primary" : "secondary"}
+              tone={kind === targetKind ? "secondary" : "ghost"}
             >
               {targetKind === "agent" ? "Agents" : "Rooms"}
             </Button>
@@ -191,30 +225,58 @@ export function MessageForwardDialog({
             })}
           </div>
         ) : null}
-        <div className="mt-3 divide-y divide-app-border border-y border-app-border">
-          {targets.map((target) => {
-            const checked = selectedSet.has(target.id);
-            return (
-              <button
-                className="flex min-h-14 w-full items-center justify-between px-3 text-left hover:bg-app-hover"
-                key={target.id}
-                onClick={() =>
-                  setSelected((current) =>
-                    checked
-                      ? current.filter((id) => id !== target.id)
-                      : [...current, target.id],
-                  )
-                }
-                type="button"
-              >
-                <span className="text-sm text-app-ink">{target.label}</span>
-                <span className="text-xs text-app-muted">
-                  {checked ? "Selected" : "Select"}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        {targetsError ? (
+          <div
+            className="mt-3 flex items-center justify-between gap-3 rounded-md border border-app-border px-3 py-2"
+            role="alert"
+          >
+            <p className="min-w-0 text-sm text-app-danger">
+              Forward targets could not be loaded.
+            </p>
+            <Button onClick={retryTargets} size="compact" tone="secondary">
+              Retry
+            </Button>
+          </div>
+        ) : null}
+        {targetsPending ? (
+          <p
+            className="mt-3 flex items-center gap-2 px-1 text-sm text-app-muted"
+            role="status"
+          >
+            <Spinner size={16} />
+            Loading targets…
+          </p>
+        ) : (
+          <div className="mt-3 divide-y divide-app-border border-y border-app-border">
+            {filteredTargets.map((target) => {
+              const checked = selectedSet.has(target.id);
+              return (
+                <button
+                  className="flex min-h-14 w-full items-center justify-between px-3 text-left hover:bg-app-hover"
+                  key={target.id}
+                  onClick={() =>
+                    setSelected((current) =>
+                      checked
+                        ? current.filter((id) => id !== target.id)
+                        : [...current, target.id],
+                    )
+                  }
+                  type="button"
+                >
+                  <span className="text-sm text-app-ink">{target.label}</span>
+                  <span className="text-xs text-app-muted">
+                    {checked ? "Selected" : "Select"}
+                  </span>
+                </button>
+              );
+            })}
+            {filteredTargets.length ? null : (
+              <p className="px-3 py-6 text-center text-sm text-app-muted">
+                {emptyTargetsCopy(kind, Boolean(needle))}
+              </p>
+            )}
+          </div>
+        )}
         {error ? (
           <p className="mt-3 text-sm text-app-danger" role="alert">
             {error}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DecisionCard, type DecisionMessageCard } from "./decision-card";
@@ -506,16 +506,53 @@ describe("DecisionCard", () => {
     );
   });
 
-  it("shows other members the box without actions or copy", () => {
+  it("tells other members who the pending request waits for instead of leaving the footer empty", () => {
     renderCard(connectorCard(), "actor_someone_else");
     expect(
       screen.getByRole("region", { name: "Confirmation request" }),
     ).toBeVisible();
     expect(screen.getByRole("button", { expanded: false })).toBeVisible();
-    expect(screen.queryByText(/Waiting for|Only /)).not.toBeInTheDocument();
+    const waiting = screen.getByText("Waiting for Leo Xing to send");
+    expect(waiting.closest("p")).toHaveClass(
+      "text-xs",
+      "text-muted-foreground",
+    );
+    expect(waiting.closest("p")?.querySelector("svg")).toBeInTheDocument();
     expect(
       screen.queryByRole("group", { name: "Approval actions" }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Only /)).not.toBeInTheDocument();
+  });
+
+  it("uses the approval's own verb in the waiting line", () => {
+    renderCard(agentCard(createDetail()), "actor_someone_else");
+    expect(screen.getByText("Waiting for Leo Xing to create")).toBeVisible();
+  });
+
+  it("expires a pending card on its own once its deadline passes", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-24T02:00:00Z"));
+      renderCard(
+        connectorCard(messageDetail(), {
+          expires_at: new Date("2026-10-24T02:00:05Z").toISOString(),
+        }),
+      );
+      expect(
+        screen.getByRole("group", { name: "Approval actions" }),
+      ).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+
+      expect(
+        screen.queryByRole("group", { name: "Approval actions" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Expired")).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("puts a done line in place of the actions once a request is decided or expired", () => {

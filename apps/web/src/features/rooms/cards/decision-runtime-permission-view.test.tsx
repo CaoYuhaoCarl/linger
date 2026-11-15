@@ -254,14 +254,15 @@ describe("Runtime permission decisions", () => {
     expect(toggle).toHaveClass("rounded-r-lg");
   });
 
-  it("shows other members the box without actions or copy", () => {
+  it("shows other members the box without actions, naming who owns the decision", () => {
     renderCard(permissionCard(), "actor_someone_else");
     expect(
       screen.getByRole("region", { name: "Permission request" }),
     ).toBeVisible();
     expect(
-      screen.queryByText(/Waiting for|can decide/),
-    ).not.toBeInTheDocument();
+      screen.getByText("Waiting for Leo Xing to allow once"),
+    ).toBeVisible();
+    expect(screen.queryByText(/can decide/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("group", { name: "Approval actions" }),
     ).not.toBeInTheDocument();

@@ -7,6 +7,13 @@ export interface PanelTabScope {
   roomId: string;
 }
 
+/** The one string that identifies a Room's panel state, storage key included. */
+export function panelScopeKey(scope: PanelTabScope): string {
+  return [scope.accountId, scope.tenantId, scope.roomId]
+    .map((part) => encodeURIComponent(part))
+    .join(":");
+}
+
 export type PanelTabKind =
   | "agentInfo"
   | "agentActivity"
@@ -55,11 +62,11 @@ export const PANEL_COLLECTION_TAB_IDS = {
 
 export const PANEL_COLLECTION_TAB_TITLES = {
   file: "Files",
-  thread: "Anotherme",
+  thread: "Thread",
   roomSettings: "Room settings",
   roomInfo: "Room info",
   collaboration: "Collaboration",
-  url: "Lovable vs Enter Pro | AI Website Builder",
+  url: "Link preview",
 } as const;
 
 export function panelTabKey(
