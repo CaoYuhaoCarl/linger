@@ -74,7 +74,7 @@ export function useUnifiedDocumentActions({
       setTrashError(
         trashDocumentError instanceof Error
           ? trashDocumentError.message
-          : "The Document could not be moved to trash.",
+          : "The Document could not be deleted.",
       );
     } finally {
       setTrashPending(false);

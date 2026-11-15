@@ -15,7 +15,7 @@ export function SettingsLayout() {
         className="flex shrink-0 flex-col border-b border-border px-3 py-4 md:w-[228px] md:border-r md:border-b-0"
       >
         <div className="flex items-center pt-0.5 pb-3.5">
-          <h1 className="text-lg">Settings</h1>
+          <p className="text-lg font-medium text-foreground">Settings</p>
         </div>
         <nav
           aria-label="Settings sections"

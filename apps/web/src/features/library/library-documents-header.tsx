@@ -4,12 +4,15 @@ import {
   FolderAddIcon,
   FolderUploadIcon,
   PlusSignIcon,
+  Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { type RefObject, useRef } from "react";
 
 import { ActionMenu } from "@/components/ui/action-menu";
-import { buttonClassName } from "@/components/ui/button";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { useOpenGlobalSearch } from "@/features/search/global-search-context";
+import { searchShortcutLabel } from "@/features/search/search-shortcut";
 
 /** The Library heading with the New menu and its hidden file pickers. */
 export function LibraryDocumentsHeader({
@@ -30,6 +33,8 @@ export function LibraryDocumentsHeader({
   onUploadFolder: (files: File[]) => void;
 }) {
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const openSearch = useOpenGlobalSearch();
+  const shortcut = searchShortcutLabel();
   return (
     <header className="workspace-files-heading">
       <h2>Library</h2>
@@ -60,6 +65,20 @@ export function LibraryDocumentsHeader({
           }}
           type="file"
         />
+        <Button
+          aria-keyshortcuts="Control+k Meta+k"
+          aria-label="Search"
+          onClick={openSearch}
+          size="compact"
+          title={`Search everything (${shortcut})`}
+          tone="ghost"
+        >
+          <Icon icon={Search01Icon} />
+          Search
+          <kbd className="hidden rounded border border-app-border bg-app-surface px-1 font-sans text-[11px] font-medium text-app-muted sm:inline">
+            {shortcut}
+          </kbd>
+        </Button>
         <ActionMenu
           buttonClassName={buttonClassName({ size: "large", tone: "primary" })}
           items={[

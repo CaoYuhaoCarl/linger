@@ -128,6 +128,16 @@ describe("Settings surfaces", () => {
     const runtime = await testRuntime();
     renderSettings(runtime);
 
+    const rail = await screen.findByRole("complementary", {
+      name: "Settings navigation",
+    });
+    expect(within(rail).getByText("Settings")).toBeVisible();
+    // The rail label is not a heading; the open section owns the single h1.
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Profile" }),
+    ).toBeVisible();
+
     fireEvent.click(
       within(
         await screen.findByRole("navigation", { name: "Settings sections" }),
@@ -144,6 +154,10 @@ describe("Settings surfaces", () => {
       "aria-current",
       "page",
     );
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Security" }),
+    ).toBeVisible();
   });
 
   it("presents Settings as a page and displays the saved Account response", async () => {
@@ -158,12 +172,13 @@ describe("Settings surfaces", () => {
     renderSettings(runtime);
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Settings" }),
+      await screen.findByRole("heading", { level: 1, name: "Profile" }),
     ).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     const settingsNav = screen.getByRole("complementary", {
       name: "Settings navigation",
     });
+    expect(within(settingsNav).getByText("Settings")).toBeVisible();
     expect(
       within(settingsNav)
         .getAllByRole("link")

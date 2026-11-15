@@ -1756,6 +1756,13 @@ describe("Unified Document page", () => {
       expect(breadcrumb).toHaveTextContent("Review");
     });
     expect(breadcrumb).toHaveTextContent(/untitled\.md/i);
+    // The Placement trail is readable, not screen-reader-only, so the folder
+    // and sharing context sits beside the title.
+    expect(breadcrumb.closest(".sr-only")).toBeNull();
+    // Share shares the 32px icon hit target its neighbouring actions use.
+    expect(screen.getByRole("button", { name: "Share" })).toHaveClass(
+      "ui-button-icon",
+    );
     expect(
       screen
         .getByRole("link", { name: /untitled\.md/i })

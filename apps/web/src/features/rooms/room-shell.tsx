@@ -22,6 +22,7 @@ import { AccountMenu } from "@/features/auth/account-menu";
 import { LOGOUT_ERROR_MESSAGE, useLogout } from "@/features/auth/use-logout";
 
 import { Button } from "@/components/ui/button";
+import { OpenGlobalSearchContext } from "@/features/search/global-search-context";
 import { useGlobalSearchShortcut } from "@/features/search/search-shortcut";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
@@ -297,7 +298,8 @@ function RoomShellContent({
   const [searchOpen, setSearchOpen] = useState(false);
   // What a spoken search asked for; the shortcut opens an empty search.
   const [searchQuery, setSearchQuery] = useState("");
-  useGlobalSearchShortcut(() => setSearchOpen(true));
+  const openGlobalSearch = useCallback(() => setSearchOpen(true), []);
+  useGlobalSearchShortcut(openGlobalSearch);
   // Voice page actions wait while a route is loading: lazy routes commit
   // their URL only once their code has arrived.
   const navigating = useRef(false);
@@ -328,139 +330,144 @@ function RoomShellContent({
 
   return (
     <ActorAvatarImageProvider identity={identity} tenantId={tenantId}>
-      <OpenMobileNavigationContext value={openMobileNavigation}>
-        {/* Inside the avatar provider so the window can show Another Me. */}
-        <RecordingWindowHost />
-        <VoiceModeWindowHost
-          anotherMeActorId={anotherMeActorId}
-          currentActorId={
-            identity.actors.find((actor) => actor.tenant_id === tenantId)?.id
-          }
-        />
-        <div
-          className="app-shell flex h-dvh min-h-0 overflow-hidden bg-app-canvas text-app-ink"
-          inert={inert}
-        >
-          <RoomNavigation
-            username={spaceOwnerNameFor(identity, tenantId)}
-            accountMenu={
-              <AccountMenu
-                identity={identity}
-                tenantId={tenantId}
-                isPending={logout.isPending}
-                onLogout={logout.mutate}
-                onNavigate={() => setMobileNavigationOpen(false)}
-                onOpenSettings={() =>
-                  void navigate(`/t/${tenantId}/settings/account`)
-                }
-                settingsOpen={settingsOpen}
-              />
+      <OpenGlobalSearchContext value={openGlobalSearch}>
+        <OpenMobileNavigationContext value={openMobileNavigation}>
+          {/* Inside the avatar provider so the window can show Another Me. */}
+          <RecordingWindowHost />
+          <VoiceModeWindowHost
+            anotherMeActorId={anotherMeActorId}
+            currentActorId={
+              identity.actors.find((actor) => actor.tenant_id === tenantId)?.id
             }
-            mobileOpen={mobileNavigationOpen}
-            onCloseMobile={() => setMobileNavigationOpen(false)}
-            onCreateRoom={() => setCreateRoomOpen(true)}
-            onOpenSearch={() => setSearchOpen(true)}
-            pendingPathname={navigation.location?.pathname}
-            rooms={rooms}
-            anotherMeRoomId={anotherMeRoomId}
-            navigationStatus={navigationStatus}
-            tenant={tenant}
           />
-          <div className="app-work-surface flex min-w-0 flex-1 flex-col">
-            {/* A Room puts this menu button in its own header, so narrow
+          <div
+            className="app-shell flex h-dvh min-h-0 overflow-hidden bg-app-canvas text-app-ink"
+            inert={inert}
+          >
+            <RoomNavigation
+              username={spaceOwnerNameFor(identity, tenantId)}
+              accountMenu={
+                <AccountMenu
+                  identity={identity}
+                  tenantId={tenantId}
+                  isPending={logout.isPending}
+                  onLogout={logout.mutate}
+                  onNavigate={() => setMobileNavigationOpen(false)}
+                  onOpenSettings={() =>
+                    void navigate(`/t/${tenantId}/settings/account`)
+                  }
+                  settingsOpen={settingsOpen}
+                />
+              }
+              mobileOpen={mobileNavigationOpen}
+              onCloseMobile={() => setMobileNavigationOpen(false)}
+              onCreateRoom={() => setCreateRoomOpen(true)}
+              onOpenSearch={openGlobalSearch}
+              pendingPathname={navigation.location?.pathname}
+              rooms={rooms}
+              anotherMeRoomId={anotherMeRoomId}
+              navigationStatus={navigationStatus}
+              tenant={tenant}
+            />
+            <div className="app-work-surface flex min-w-0 flex-1 flex-col">
+              {/* A Room puts this menu button in its own header, so narrow
               screens keep one top bar there. */}
-            {roomOpen ? null : (
-              <div className="flex h-(--app-header-height) shrink-0 items-center gap-3 border-b border-border/60 bg-app-sidebar px-3 md:hidden">
-                <MobileNavigationButton />
-                <span className="truncate text-sm font-medium">
-                  {spaceOwnerNameFor(identity, tenantId)}'s space
-                </span>
-              </div>
-            )}
-            {logout.error ? (
-              <div
-                className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-3 text-sm text-app-danger"
-                role="alert"
-              >
-                <span>{LOGOUT_ERROR_MESSAGE}</span>
-                <Button
-                  loading={logout.isPending}
-                  onClick={logout.mutate}
-                  tone="ghost"
+              {roomOpen ? null : (
+                <div className="flex h-(--app-header-height) shrink-0 items-center gap-3 border-b border-border/60 bg-app-sidebar px-3 md:hidden">
+                  <MobileNavigationButton />
+                  <span className="truncate text-sm font-medium">
+                    {spaceOwnerNameFor(identity, tenantId)}'s space
+                  </span>
+                </div>
+              )}
+              {logout.error ? (
+                <div
+                  className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-3 text-sm text-app-danger"
+                  role="alert"
                 >
-                  {logout.isPending ? "Logging out" : "Retry logout"}
-                </Button>
-              </div>
-            ) : null}
-            {/* Pages without their own header row put their title in this bar
-              on the desktop window frame; Room and Library hide it. */}
-            {desktopShell ? (
-              <div className="desktop-frame-bar">
-                <div className="flex min-w-0 flex-1" ref={setFrameTitleSlot} />
-              </div>
-            ) : null}
-            <div className="app-page-card flex min-h-0 min-w-0 flex-1 flex-col">
-              <DesktopBarSlot value={frameTitleSlot}>
-                {changingPage ? (
-                  <AuthenticatedRouteLoading
-                    pathname={loadingPathname}
-                    rooms={rooms}
-                  />
-                ) : (
-                  <Suspense
-                    fallback={
-                      <AuthenticatedRouteLoading
-                        pathname={loadingPathname}
-                        rooms={rooms}
-                      />
-                    }
-                    key={routeLayoutKey(location.pathname)}
+                  <span>{LOGOUT_ERROR_MESSAGE}</span>
+                  <Button
+                    loading={logout.isPending}
+                    onClick={logout.mutate}
+                    tone="ghost"
                   >
-                    <Outlet />
-                  </Suspense>
-                )}
-              </DesktopBarSlot>
+                    {logout.isPending ? "Logging out" : "Retry logout"}
+                  </Button>
+                </div>
+              ) : null}
+              {/* Pages without their own header row put their title in this bar
+              on the desktop window frame; Room and Library hide it. */}
+              {desktopShell ? (
+                <div className="desktop-frame-bar">
+                  <div
+                    className="flex min-w-0 flex-1"
+                    ref={setFrameTitleSlot}
+                  />
+                </div>
+              ) : null}
+              <div className="app-page-card flex min-h-0 min-w-0 flex-1 flex-col">
+                <DesktopBarSlot value={frameTitleSlot}>
+                  {changingPage ? (
+                    <AuthenticatedRouteLoading
+                      pathname={loadingPathname}
+                      rooms={rooms}
+                    />
+                  ) : (
+                    <Suspense
+                      fallback={
+                        <AuthenticatedRouteLoading
+                          pathname={loadingPathname}
+                          rooms={rooms}
+                        />
+                      }
+                      key={routeLayoutKey(location.pathname)}
+                    >
+                      <Outlet />
+                    </Suspense>
+                  )}
+                </DesktopBarSlot>
+              </div>
             </div>
+            {newRoomId ? (
+              <Suspense fallback={null}>
+                <RoomAddMembersDialog
+                  key={newRoomId}
+                  tenantId={tenantId}
+                  roomId={newRoomId}
+                  onClose={() => {
+                    const state = { ...location.state };
+                    delete state.newRoomId;
+                    void navigate(location.pathname + location.search, {
+                      replace: true,
+                      state,
+                    });
+                  }}
+                />
+              </Suspense>
+            ) : null}
+            {createRoomOpen ? (
+              <Suspense fallback={null}>
+                <RoomCreateDialog
+                  onClose={() => setCreateRoomOpen(false)}
+                  tenantId={tenantId}
+                />
+              </Suspense>
+            ) : null}
+            {searchOpen ? (
+              <Suspense fallback={null}>
+                <GlobalSearchDialog
+                  initialQuery={searchQuery}
+                  onClose={() => {
+                    setSearchOpen(false);
+                    setSearchQuery("");
+                  }}
+                  tenantId={tenantId}
+                />
+              </Suspense>
+            ) : null}
           </div>
-          {newRoomId ? (
-            <Suspense fallback={null}>
-              <RoomAddMembersDialog
-                key={newRoomId}
-                tenantId={tenantId}
-                roomId={newRoomId}
-                onClose={() => {
-                  const state = { ...location.state };
-                  delete state.newRoomId;
-                  void navigate(location.pathname + location.search, {
-                    replace: true,
-                    state,
-                  });
-                }}
-              />
-            </Suspense>
-          ) : null}
-          {createRoomOpen ? (
-            <Suspense fallback={null}>
-              <RoomCreateDialog
-                onClose={() => setCreateRoomOpen(false)}
-                tenantId={tenantId}
-              />
-            </Suspense>
-          ) : null}
-          {searchOpen ? (
-            <Suspense fallback={null}>
-              <GlobalSearchDialog
-                initialQuery={searchQuery}
-                onClose={() => {
-                  setSearchOpen(false);
-                  setSearchQuery("");
-                }}
-                tenantId={tenantId}
-              />
-            </Suspense>
-          ) : null}
-        </div>
-      </OpenMobileNavigationContext>
+        </OpenMobileNavigationContext>
+      </OpenGlobalSearchContext>
     </ActorAvatarImageProvider>
   );
 }

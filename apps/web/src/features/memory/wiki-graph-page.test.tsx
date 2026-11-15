@@ -278,7 +278,7 @@ describe("WikiGraphPage", () => {
       "getPersonalKnowledgeGraphVisualization",
     ).mockResolvedValue(html);
     const { queryClient } = renderPage(runtime);
-    const frame = await screen.findByTitle("Personal knowledge graph");
+    const frame = await screen.findByTitle("Timeline");
     wiki = wikiStatus({
       published_generation: 1,
       state: "failed",
@@ -288,7 +288,7 @@ describe("WikiGraphPage", () => {
       queryKey: ["teamhub", "tenant-northstar", "personal-wiki", "status"],
     });
     expect(await screen.findByText("Wiki update failed")).toBeVisible();
-    expect(screen.getByTitle("Personal knowledge graph")).toBe(frame);
+    expect(screen.getByTitle("Timeline")).toBe(frame);
     expect(frame).toHaveAttribute("srcdoc", html);
   });
   it("renders the tenant-scoped graph in a script-only sandbox", async () => {
@@ -299,7 +299,10 @@ describe("WikiGraphPage", () => {
       .mockResolvedValue(html);
     renderPage(runtime);
 
-    const frame = await screen.findByTitle("Personal knowledge graph");
+    const frame = await screen.findByTitle("Timeline");
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Timeline" }),
+    ).toBeVisible();
     expect(getGraph).toHaveBeenCalledWith("tenant-northstar");
     expect(frame).toHaveAttribute("sandbox", "allow-scripts");
     expect(frame).toHaveAttribute("srcdoc", html);
@@ -322,10 +325,10 @@ describe("WikiGraphPage", () => {
         name: "Graph has not been generated yet.",
       }),
     ).toBeVisible();
-    expect(screen.queryByTitle("Personal knowledge graph")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Retry graph" }));
+    expect(screen.queryByTitle("Timeline")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(getGraph).toHaveBeenCalledTimes(2));
-    expect(await screen.findByTitle("Personal knowledge graph")).toBeVisible();
+    expect(await screen.findByTitle("Timeline")).toBeVisible();
   });
 
   it("shows generation progress instead of a graph failure before the first revision", async () => {
@@ -366,9 +369,10 @@ describe("WikiGraphPage", () => {
       .mockImplementation(async () => graphHtml);
     const { queryClient } = renderPage(runtime);
 
-    expect(
-      await screen.findByTitle("Personal knowledge graph"),
-    ).toHaveAttribute("srcdoc", graphHtml);
+    expect(await screen.findByTitle("Timeline")).toHaveAttribute(
+      "srcdoc",
+      graphHtml,
+    );
     expect(
       await screen.findByText("Another Me is writing your Wiki"),
     ).toBeVisible();
@@ -383,7 +387,7 @@ describe("WikiGraphPage", () => {
       queryKey: ["teamhub", "tenant-northstar", "personal-wiki", "status"],
     });
     await waitFor(() =>
-      expect(screen.getByTitle("Personal knowledge graph")).toHaveAttribute(
+      expect(screen.getByTitle("Timeline")).toHaveAttribute(
         "srcdoc",
         graphHtml,
       ),

@@ -28,6 +28,7 @@ import {
   useDocumentRename,
 } from "@/features/library/use-document-rename";
 import { WORKSPACE_TREE_ID } from "@/features/library/workspace-tree";
+import { cn } from "@/lib/cn";
 import { writeDocumentLinkClipboard } from "@/features/rooms/files/document-clipboard-link";
 import { documentDetailPath } from "@/features/rooms/files/document-detail-routes";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
@@ -258,20 +259,25 @@ function UnifiedDocumentHeader({
         ) : null}
         {document ? (
           <div className="room-document-header-file">
-            <span className="truncate text-sm font-semibold text-app-ink">
+            <span
+              className={cn(
+                "truncate text-sm font-semibold text-app-ink",
+                // Wide headers show the Placement trail instead, and it ends
+                // with this same file name; narrow ones have room for one row.
+                !sidebar && "sm:hidden",
+              )}
+            >
               {documentFileName(document)}
             </span>
           </div>
         ) : null}
         {!sidebar && document ? (
-          <div className="sr-only">
-            <UnifiedDocumentBreadcrumb
-              document={document}
-              items={treeItems}
-              sharedDocument={sharedDocument}
-              sharedItems={sharedTreeItems}
-            />
-          </div>
+          <UnifiedDocumentBreadcrumb
+            document={document}
+            items={treeItems}
+            sharedDocument={sharedDocument}
+            sharedItems={sharedTreeItems}
+          />
         ) : (
           <span className="truncate text-sm font-semibold text-app-ink">
             {sidebar ? "" : "Document"}
@@ -283,7 +289,7 @@ function UnifiedDocumentHeader({
         {document && !isWikiPage ? (
           <Button
             aria-label="Share"
-            size="compactIcon"
+            size="icon"
             onClick={onShare}
             title="Share"
             tone="ghost"
@@ -433,7 +439,7 @@ function DocumentBreadcrumb<T extends { id: string; name: string }>({
   return (
     <nav
       aria-label="Breadcrumb"
-      className="hidden min-w-0 flex-1 items-center gap-1 overflow-hidden text-sm text-app-muted sm:flex"
+      className="hidden min-w-0 flex-1 items-center gap-1 overflow-hidden text-xs text-app-muted sm:flex"
     >
       {items.map((item, index) => (
         <span className="flex min-w-0 items-center gap-1" key={item.key}>
@@ -441,8 +447,8 @@ function DocumentBreadcrumb<T extends { id: string; name: string }>({
           <span
             className={
               index === items.length - 1
-                ? "truncate font-semibold text-app-ink"
-                : "max-w-32 truncate"
+                ? "truncate text-sm font-semibold text-app-ink"
+                : "max-w-24 truncate"
             }
             title={item.label}
           >

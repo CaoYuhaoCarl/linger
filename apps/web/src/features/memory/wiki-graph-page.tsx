@@ -1,10 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  HierarchySquare01Icon,
-  Loading03Icon,
-  RefreshIcon,
-} from "@hugeicons/core-free-icons";
+import { HierarchySquare01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
+import { Spinner } from "@/components/ui/spinner";
 import { lazy, Suspense, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 
@@ -77,7 +74,7 @@ export function WikiGraphPage() {
     <main className="wiki-graph-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-app-surface">
       <header className="wiki-graph-page-header px-4 pt-4 pb-6">
         <WikiBack />
-        <h1 className="mb-2 text-2xl text-foreground">Daily report</h1>
+        <h1 className="mb-2 text-2xl text-foreground">Timeline</h1>
         <p className="text-sm text-muted-foreground">
           {reports.isPending
             ? "Loading reports…"
@@ -97,7 +94,7 @@ export function WikiGraphPage() {
             aria-busy="true"
             className="flex h-full min-h-[480px] items-center justify-center gap-2 text-sm text-app-muted"
           >
-            <Icon icon={Loading03Icon} className="animate-spin" size={16} />
+            <Spinner size={16} />
             <span
               className={refresh.initializing ? "town-shimmer-text" : undefined}
             >
@@ -126,7 +123,7 @@ export function WikiGraphPage() {
               size="compact"
               tone="secondary"
             >
-              <Icon icon={RefreshIcon} size={14} /> Retry graph
+              <Icon icon={RefreshIcon} size={14} /> Retry
             </Button>
           </div>
         ) : filteredGraph ? (
@@ -178,8 +175,8 @@ export function WikiGraphPage() {
           />
         ) : Object.values(display.decisions).includes("delete") ? (
           <p role="alert" className="p-4 text-sm text-app-muted">
-            This graph cannot display your hidden-file preferences. Refresh the
-            graph to load the current view.
+            This timeline cannot display your hidden-file preferences. Refresh
+            the timeline to load the current view.
           </p>
         ) : (
           <iframe
@@ -187,7 +184,7 @@ export function WikiGraphPage() {
             key={tenantId}
             sandbox="allow-scripts"
             srcDoc={graph.data}
-            title="Personal knowledge graph"
+            title="Timeline"
           />
         )}
       </section>

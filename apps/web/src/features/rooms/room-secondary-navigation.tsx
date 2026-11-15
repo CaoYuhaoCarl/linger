@@ -186,10 +186,10 @@ export function RoomSecondaryNavigation({
         onOpenSearch?.();
         onCloseMobile();
       }}
-      title={`Search (${searchShortcutLabel()})`}
+      title={`Search everything (${searchShortcutLabel()})`}
       type="button"
     >
-      <span className="truncate">Search chats</span>
+      <span className="truncate">Search everything</span>
       <Icon className="shrink-0" icon={Search01Icon} size={14} />
     </button>
   );

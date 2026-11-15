@@ -118,6 +118,7 @@ describe("RoomSecondaryNavigation attention", () => {
   it("puts capture tools and Search in the header row and a plus beside AGENTS and ROOMS", () => {
     const queryClient = new QueryClient();
     const onCreateRoom = vi.fn();
+    const onOpenSearch = vi.fn();
     render(
       <QueryClientProvider client={queryClient}>
         <TeamHubRuntimeProvider runtime={liveRuntime()}>
@@ -128,6 +129,7 @@ describe("RoomSecondaryNavigation attention", () => {
                   <RoomSecondaryNavigation
                     onCloseMobile={() => undefined}
                     onCreateRoom={onCreateRoom}
+                    onOpenSearch={onOpenSearch}
                     rooms={[room("room-active", 0, 0)]}
                     tenant={{
                       created_at: "2026-07-24T09:00:00Z",
@@ -151,7 +153,10 @@ describe("RoomSecondaryNavigation attention", () => {
     expect(
       within(quickAccess).getByRole("button", { name: "Meetings" }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Search" })).toBeVisible();
+    fireEvent.click(
+      within(quickAccess).getByRole("button", { name: "Search" }),
+    );
+    expect(onOpenSearch).toHaveBeenCalledOnce();
     const chats = screen
       .getByRole("button", { name: "Messages" })
       .closest("section")!;
@@ -161,6 +166,43 @@ describe("RoomSecondaryNavigation attention", () => {
     expect(
       screen.queryByRole("textbox", { name: "Search Rooms" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("names the collapsed-navigation Search row for everything it searches", () => {
+    const onOpenSearch = vi.fn();
+    render(
+      <MemoryRouter initialEntries={["/t/tenant-a/rooms/room-active/chat"]}>
+        <Routes>
+          <Route
+            element={
+              <RoomSecondaryNavigation
+                onCloseMobile={() => undefined}
+                onCollapse={() => undefined}
+                onCreateRoom={() => undefined}
+                onOpenSearch={onOpenSearch}
+                rooms={[room("room-active", 0, 0)]}
+                tenant={{
+                  created_at: "2026-07-24T09:00:00Z",
+                  id: "tenant-a",
+                  name: "Northstar",
+                }}
+              />
+            }
+            path="/t/:tenantId/rooms/:roomId/chat"
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const search = screen.getByRole("button", { name: "Search" });
+    // The row names everything the dialog covers, not just Chats.
+    expect(search).toHaveTextContent("Search everything");
+    expect(search).toHaveAttribute(
+      "title",
+      expect.stringContaining("Search everything"),
+    );
+    fireEvent.click(search);
+    expect(onOpenSearch).toHaveBeenCalledOnce();
   });
 
   it("opens Local Agent setup from Create Agent without navigating away", async () => {
