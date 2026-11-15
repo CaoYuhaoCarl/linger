@@ -487,11 +487,12 @@ describe("MeetingPage", () => {
         ),
       )
       .mockResolvedValueOnce(entry);
-    renderPage(runtime, `?entry=${entry.id}`);
+    const router = renderPage(runtime, `?entry=${entry.id}`);
 
-    expect(
-      await screen.findByRole("alert", { name: "Meeting entry unavailable." }),
-    ).toBeVisible();
+    const alert = await screen.findByRole("alert", {
+      name: "Meeting entry unavailable.",
+    });
+    expect(alert).toBeVisible();
     expect(get).toHaveBeenCalledWith(
       expect.objectContaining({
         params: { entryId: entry.id, tenantId: "tenant-northstar" },
@@ -501,6 +502,99 @@ describe("MeetingPage", () => {
     expect(
       await screen.findByRole("article", { name: "Meeting" }),
     ).toBeVisible();
+    // A meeting that will not load is still one click from its collection.
+    fireEvent.click(screen.getByRole("link", { name: "Back to Meetings" }));
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        "/t/tenant-northstar/library",
+      ),
+    );
+  });
+
+  it("shows a live loading state before the meeting list resolves", async () => {
+    const runtime = await loggedInRuntime();
+    const entry = meetingEntry();
+    const pending = deferred<{ items: TeamHubMemoryEntry[] }>();
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/memory",
+      () => pending.promise,
+    );
+    serveMemoryEntry(runtime, () => entry);
+    renderPage(runtime, `?entry=${entry.id}`);
+
+    const loading = await screen.findByText("Loading meeting…");
+    expect(loading).toHaveAttribute("role", "status");
+    expect(loading).toHaveAttribute("aria-busy", "true");
+    pending.resolve({ items: [entry] });
+    expect(
+      await screen.findByRole("article", { name: "Meeting" }),
+    ).toBeVisible();
+    expect(screen.queryByText("Loading meeting…")).toBeNull();
+  });
+
+  it("recovers a failed Meetings list and offers the way back", async () => {
+    const runtime = await loggedInRuntime();
+    const entry = meetingEntry();
+    const list = vi
+      .fn<TestRouteHandler>()
+      .mockResolvedValueOnce(
+        teamHubErrorResponse(
+          500,
+          "MEETINGS_UNAVAILABLE",
+          "Meetings are unavailable.",
+        ),
+      )
+      .mockResolvedValueOnce({ items: [entry] });
+    runtime.server.on("GET", "/v0/tenants/{tenantId}/memory", list);
+    serveMemoryEntry(runtime, () => entry);
+    const router = renderPage(runtime, `?entry=${entry.id}`);
+
+    // The Meeting tree reports the same failure; the reader keeps its own.
+    const content = screen.getByRole("region", { name: "Meeting content" });
+    const alert = await within(content).findByRole("alert", {
+      name: "Meetings are unavailable.",
+    });
+    expect(alert).toHaveTextContent("Meetings are unavailable.");
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(
+      await screen.findByRole("article", { name: "Meeting" }),
+    ).toBeVisible();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(within(content).queryByRole("alert")).toBeNull();
+
+    fireEvent.click(screen.getByRole("link", { name: "Back to Meetings" }));
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        "/t/tenant-northstar/library",
+      ),
+    );
+    expect(router.state.location.search).toBe("?tab=meetings&meetings=all");
+  });
+
+  it("explains a hidden or unknown entry and returns to Meetings", async () => {
+    const runtime = await loggedInRuntime();
+    serveMeetings(runtime, [meetingEntry()]);
+    const router = renderPage(runtime, "?entry=meeting_not_listed");
+
+    const content = screen.getByRole("region", { name: "Meeting content" });
+    expect(
+      await within(content).findByRole("heading", {
+        name: "Meeting unavailable",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "This meeting could not be found or was hidden from your Meetings.",
+      ),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Meetings" }));
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        "/t/tenant-northstar/library",
+      ),
+    );
+    expect(router.state.location.search).toBe("?tab=meetings&meetings=all");
   });
 });
 
@@ -508,6 +602,15 @@ async function loggedInRuntime() {
   const runtime = createTestTeamHubRuntime();
 
   return runtime;
+}
+
+/** A promise the test settles, for observing a pending query. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 function renderPage(
@@ -522,6 +625,10 @@ function renderPage(
           {
             element: <MeetingPage />,
             path: "/t/:tenantId/library/meetings",
+          },
+          {
+            element: <p>Meetings tab</p>,
+            path: "/t/:tenantId/library",
           },
         ],
       },

@@ -2,13 +2,14 @@ import "./meeting-page.css";
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowLeft01Icon,
   BookOpen01Icon,
   LeftToRightListBulletIcon,
-  Loading03Icon,
   RefreshIcon,
   SidebarLeftIcon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
+import { Spinner } from "@/components/ui/spinner";
 import {
   useLayoutEffect,
   useRef,
@@ -16,7 +17,7 @@ import {
   type RefObject,
   type SyntheticEvent,
 } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useMeetings } from "./memory-queries";
 import { MeetingReader } from "./meeting-reader";
 import { meetingsTabPath } from "./meetings-panel";
@@ -28,7 +29,7 @@ import {
 import { DocumentTableOfContents } from "@/components/document-table-of-contents";
 import { useDocumentAnchorLinks } from "@/components/document-anchor-links";
 import { resolveMemoryDocumentLink } from "./memory-document-links";
-import { Button } from "@/components/ui/button";
+import { Button, buttonClassName } from "@/components/ui/button";
 import {
   WORKSPACE_TREE_ID,
   useWorkspaceTree,
@@ -61,6 +62,10 @@ export function MeetingPage() {
     refetchInterval: 15_000,
   });
   const readable = listed && selected.data && !selected.error;
+  const loading =
+    meetings.isPending || (listed !== undefined && selected.isPending);
+  // One link back to the collection, so a hidden or stale meeting is recoverable.
+  const backToMeetings = meetingsTabPath(tenantId, "all");
   const anchorLinks = useDocumentAnchorLinks(
     contentRef,
     readable ? `${tenantId}:${listed.id}` : undefined,
@@ -86,6 +91,14 @@ export function MeetingPage() {
             <Icon icon={SidebarLeftIcon} size={16} />
           </Button>
           <div className="flex items-center gap-2">
+            <Link
+              aria-label="Back to Meetings"
+              className={buttonClassName({ size: "icon", tone: "ghost" })}
+              title="Back to Meetings"
+              to={backToMeetings}
+            >
+              <Icon icon={ArrowLeft01Icon} size={16} />
+            </Link>
             <Icon icon={BookOpen01Icon} className="text-app-muted" size={16} />
             <h1 className="text-[15px] font-semibold text-app-ink">Meetings</h1>
           </div>
@@ -123,13 +136,40 @@ export function MeetingPage() {
               {anchorLinks.error}
             </p>
           ) : null}
-          {listed && selected.isPending ? (
+          {loading ? (
             <div
               aria-busy="true"
               className="flex min-h-[420px] items-center justify-center gap-2 text-sm text-app-muted"
+              role="status"
             >
-              <Icon icon={Loading03Icon} className="animate-spin" size={16} />
-              Loading meeting...
+              <Spinner size={16} />
+              Loading meeting…
+            </div>
+          ) : meetings.error ? (
+            <div
+              aria-label={meetings.error.message || "Meetings are unavailable."}
+              className="mx-auto max-w-3xl px-6 py-10"
+              role="alert"
+            >
+              <p className="text-sm text-app-danger">
+                {meetings.error.message || "Meetings are unavailable."}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={() => void meetings.refetch()}
+                  size="compact"
+                  tone="secondary"
+                >
+                  <Icon icon={RefreshIcon} size={14} /> Retry
+                </Button>
+                <Button
+                  onClick={() => void navigate(backToMeetings)}
+                  size="compact"
+                  tone="ghost"
+                >
+                  Back to Meetings
+                </Button>
+              </div>
             </div>
           ) : listed && selected.error ? (
             <div
@@ -140,14 +180,22 @@ export function MeetingPage() {
               <p className="text-sm text-app-danger">
                 {selected.error.message || "Meeting is unavailable."}
               </p>
-              <Button
-                className="mt-3"
-                onClick={() => void selected.refetch()}
-                size="compact"
-                tone="secondary"
-              >
-                <Icon icon={RefreshIcon} size={14} /> Retry meeting
-              </Button>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={() => void selected.refetch()}
+                  size="compact"
+                  tone="secondary"
+                >
+                  <Icon icon={RefreshIcon} size={14} /> Retry meeting
+                </Button>
+                <Button
+                  onClick={() => void navigate(backToMeetings)}
+                  size="compact"
+                  tone="ghost"
+                >
+                  Back to Meetings
+                </Button>
+              </div>
             </div>
           ) : listed && selected.data?.meeting ? (
             <MeetingReader
@@ -167,7 +215,25 @@ export function MeetingPage() {
               resolveLink={resolveMemoryDocumentLink}
               tenantId={tenantId}
             />
-          ) : null}
+          ) : (
+            <div className="mx-auto max-w-3xl px-6 py-10">
+              <h2 className="text-base font-semibold text-app-ink">
+                Meeting unavailable
+              </h2>
+              <p className="mt-2 text-sm text-app-muted">
+                This meeting could not be found or was hidden from your
+                Meetings.
+              </p>
+              <Button
+                className="mt-4"
+                onClick={() => void navigate(backToMeetings)}
+                size="compact"
+                tone="secondary"
+              >
+                Back to Meetings
+              </Button>
+            </div>
+          )}
         </section>
         {tocOpen && readable ? (
           <MeetingTableOfContents

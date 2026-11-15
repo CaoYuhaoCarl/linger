@@ -4,10 +4,20 @@ import {
   ArrowRight02Icon,
   Building03Icon,
 } from "@hugeicons/core-free-icons";
-import { lazy, type ReactNode, Suspense, useMemo } from "react";
+import {
+  lazy,
+  type KeyboardEvent,
+  type ReactNode,
+  Suspense,
+  useMemo,
+  useRef,
+} from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useTabIndicator } from "@/components/ui/tab-indicator";
+import { dateTimeFormat } from "@/lib/date-format";
 import { requireRoomRouteParam } from "@/features/rooms/room-route-params";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubDocument } from "@/features/teamhub/teamhub-types";
@@ -39,18 +49,16 @@ import {
 } from "@/features/memory/wiki-period-reports";
 import "./wiki-home-page.css";
 
+/** Town palette roles for the People and Companies cards. */
 const entityHues = [
-  "#1c509c",
-  "#9c731c",
-  "#4a1c9c",
-  "#1c9c2f",
-  "#9c2a1c",
-  "#5e9c1c",
+  "var(--color-bluebell-700)",
+  "var(--color-acorn-700)",
+  "var(--color-lavender-700)",
+  "var(--color-grass-700)",
+  "var(--color-sun-700)",
+  "var(--color-rain-700)",
 ];
-const dateFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-});
+const dateFormatter = dateTimeFormat({ day: "numeric", month: "short" });
 
 export function pageName(page: TeamHubDocument) {
   return documentFileName(page).replace(/\.md$/i, "");
@@ -71,7 +79,10 @@ function entityColors(key: number | string) {
   if (typeof key === "string")
     for (const char of key) index = (index * 31 + char.codePointAt(0)!) | 0;
   const color = entityHues[Math.abs(index) % entityHues.length]!;
-  return { background: `${color}1a`, color };
+  return {
+    background: `color-mix(in srgb, ${color} 14%, transparent)`,
+    color,
+  };
 }
 
 export function editedLabel(page: TeamHubDocument) {
@@ -116,6 +127,7 @@ export function useWikiCollectionPages(tenantId: string) {
   return {
     pending: documents.isPending,
     error: Boolean(documents.error),
+    refetch: () => void documents.refetch(),
     of,
     /** The collection's cards with the running refresh's pages in place. */
     entries: (collection: WikiCollection, previews: WikiPreviewPage[]) =>
@@ -148,6 +160,25 @@ export function WikiHomePage() {
     searchParams.get("tab") === "wiki" ? "wiki" : "profile";
   const refresh = usePersonalWikiRefresh(tenantId);
   const { tabRef, indicator } = useTabIndicator(tab);
+  const tabButtons = useRef(new Map<WikiHomeTab, HTMLButtonElement>());
+  function selectTab(next: WikiHomeTab) {
+    setSearchParams(next === "wiki" ? { tab: "wiki" } : {});
+  }
+  // The tab list is one Tab stop: arrows move focus and selection together.
+  function onTabKeyDown(event: KeyboardEvent<HTMLElement>) {
+    const current = homeTabs.findIndex((candidate) => candidate.id === tab);
+    let next: number | undefined;
+    if (event.key === "ArrowLeft")
+      next = (current - 1 + homeTabs.length) % homeTabs.length;
+    else if (event.key === "ArrowRight") next = (current + 1) % homeTabs.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = homeTabs.length - 1;
+    const target = next === undefined ? undefined : homeTabs[next]!;
+    if (!target) return;
+    event.preventDefault();
+    selectTab(target.id);
+    tabButtons.current.get(target.id)?.focus();
+  }
   return (
     <main className="workspace-content-viewport workspace-scrollbar wiki-landing min-w-0 flex-1 overflow-y-auto bg-app-surface [scrollbar-gutter:stable]">
       {/* Same column, heading and tabs as the Library page. */}
@@ -160,46 +191,110 @@ export function WikiHomePage() {
             className="workspace-file-tabs relative flex max-w-full gap-1 overflow-x-auto"
             role="tablist"
           >
-            {homeTabs.map((candidate) => (
-              <button
-                aria-selected={candidate.id === tab}
-                className="workspace-view-tab inline-flex h-8 shrink-0 items-center rounded-md px-3 text-lg font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                key={candidate.id}
-                onClick={() =>
-                  setSearchParams(
-                    candidate.id === "wiki" ? { tab: "wiki" } : {},
-                  )
-                }
-                ref={tabRef(candidate.id)}
-                role="tab"
-                type="button"
-              >
-                {candidate.label}
-              </button>
-            ))}
+            {homeTabs.map((candidate) => {
+              const indicatorRef = tabRef(candidate.id);
+              return (
+                <button
+                  aria-controls={`wiki-home-panel-${candidate.id}`}
+                  aria-selected={candidate.id === tab}
+                  className="workspace-view-tab inline-flex h-8 shrink-0 items-center rounded-md px-3 text-lg font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  id={`wiki-home-tab-${candidate.id}`}
+                  key={candidate.id}
+                  onClick={() => selectTab(candidate.id)}
+                  onKeyDown={onTabKeyDown}
+                  ref={(node) => {
+                    indicatorRef(node);
+                    if (node) tabButtons.current.set(candidate.id, node);
+                    else tabButtons.current.delete(candidate.id);
+                  }}
+                  role="tab"
+                  tabIndex={candidate.id === tab ? 0 : -1}
+                  type="button"
+                >
+                  {candidate.label}
+                </button>
+              );
+            })}
             {indicator}
           </div>
           {tab === "wiki" ? null : (
             <WikiProfileEditButton tenantId={tenantId} />
           )}
         </header>
-        {tab === "wiki" ? (
-          <WikiOverview refresh={refresh} tenantId={tenantId} />
-        ) : (
-          <div className="landing-profile-tab">
-            <Suspense
-              fallback={
-                <p role="status" className="text-sm text-app-muted">
-                  Loading Profile…
-                </p>
-              }
-            >
-              <ProfilePage />
-            </Suspense>
-          </div>
-        )}
+        <div
+          aria-labelledby={`wiki-home-tab-${tab}`}
+          id={`wiki-home-panel-${tab}`}
+          role="tabpanel"
+        >
+          {tab === "wiki" ? (
+            <WikiOverview refresh={refresh} tenantId={tenantId} />
+          ) : (
+            <div className="landing-profile-tab">
+              <Suspense fallback={<ProfileSkeleton />}>
+                <ProfilePage />
+              </Suspense>
+            </div>
+          )}
+        </div>
       </div>
     </main>
+  );
+}
+
+/** Card-shaped placeholders in a section's own grid, so loading never jumps. */
+function SectionSkeleton({
+  className,
+  count,
+  height,
+  label,
+}: {
+  className: string;
+  count: number;
+  height: string;
+  label: string;
+}) {
+  return (
+    <div aria-busy="true" role="status">
+      <span className="sr-only">{label}</span>
+      <div className={className}>
+        {Array.from({ length: count }, (_, index) => (
+          <Skeleton className={`${height} w-full rounded-[14px]`} key={index} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfileSkeleton() {
+  return (
+    <div aria-busy="true" className="flex flex-col gap-4" role="status">
+      <span className="sr-only">Loading Profile…</span>
+      <Skeleton className="h-7 w-48" />
+      <Skeleton className="h-4 w-72 max-w-full" />
+      <Skeleton className="h-40 w-full rounded-[14px]" />
+    </div>
+  );
+}
+
+/** A failed section, with the retry that recovers it. */
+function SectionError({
+  label,
+  onRetry,
+}: {
+  label: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      aria-label={label}
+      className="landing-empty flex flex-wrap items-center gap-3"
+      role="alert"
+    >
+      <span>{label}</span>
+      <Button onClick={onRetry} size="compact" tone="secondary">
+        Retry
+      </Button>
+    </div>
   );
 }
 
@@ -239,13 +334,15 @@ function WikiOverview({
   const subtitle = (entry: WikiEntry) =>
     description(entry) || (entry.published ? editedLabel(entry.published) : "");
   const card = { documentPath, tenantId };
-  const status = (empty: string) =>
+  // A collection section while its pages load, fail, or hold nothing yet.
+  const status = (empty: string, skeleton: ReactNode) =>
     collections.pending ? (
-      <p className="landing-empty">Loading…</p>
+      skeleton
     ) : collections.error ? (
-      <p role="alert" className="landing-empty">
-        Pages are unavailable.
-      </p>
+      <SectionError
+        label="Pages are unavailable."
+        onRetry={collections.refetch}
+      />
     ) : refreshing ? null : (
       <p className="landing-empty">{empty}</p>
     );
@@ -264,11 +361,17 @@ function WikiOverview({
               to={`${base}/graph`}
             />
             {reports.isPending ? (
-              <p className="landing-empty">Loading reports…</p>
+              <SectionSkeleton
+                className="daily-list"
+                count={2}
+                height="h-36"
+                label="Loading daily reports…"
+              />
             ) : reports.error ? (
-              <p role="alert" className="landing-empty">
-                Reports are unavailable.
-              </p>
+              <SectionError
+                label="Reports are unavailable."
+                onRetry={() => void reports.refetch()}
+              />
             ) : daily.length ? (
               <div className="daily-list">
                 {daily.slice(0, 2).map((entry) => {
@@ -298,7 +401,15 @@ function WikiOverview({
             title="Projects"
             to={`${base}/projects`}
             entries={projects}
-            empty={status("No projects yet.")}
+            empty={status(
+              "No projects yet.",
+              <SectionSkeleton
+                className="projects-grid"
+                count={3}
+                height="h-32"
+                label="Loading projects…"
+              />,
+            )}
             description={description}
             members={(entry) =>
               [
@@ -318,7 +429,15 @@ function WikiOverview({
             title="Topics"
             to={`${base}/topics`}
             entries={topics}
-            empty={status("No topics yet.")}
+            empty={status(
+              "No topics yet.",
+              <SectionSkeleton
+                className="projects-grid"
+                count={3}
+                height="h-32"
+                label="Loading topics…"
+              />,
+            )}
             description={description}
             members={() => []}
           />
@@ -348,7 +467,15 @@ function WikiOverview({
                 ))}
               </div>
             ) : (
-              status("No people yet.")
+              status(
+                "No people yet.",
+                <SectionSkeleton
+                  className="people-grid"
+                  count={4}
+                  height="h-[88px]"
+                  label="Loading people…"
+                />,
+              )
             )}
           </section>
           <section className="landing-section landing-companies">
@@ -377,7 +504,15 @@ function WikiOverview({
                 ))}
               </div>
             ) : (
-              status("No companies yet.")
+              status(
+                "No companies yet.",
+                <SectionSkeleton
+                  className="companies-grid"
+                  count={3}
+                  height="h-[55px]"
+                  label="Loading companies…"
+                />,
+              )
             )}
           </section>
         </div>
@@ -466,7 +601,7 @@ function EntryCards({
                       className="project-involver"
                       key={name}
                       style={{
-                        background: `color-mix(in srgb, ${entityColors(name).color} 22%, white)`,
+                        background: `color-mix(in srgb, ${entityColors(name).color} 18%, var(--app-surface))`,
                       }}
                       title={name}
                     >

@@ -9,7 +9,10 @@ import {
   serveWikiStatus,
   wikiDocument,
 } from "./wiki.test-support";
-import { teamHubErrorResponse } from "@/test/teamhub-test-server";
+import {
+  teamHubErrorResponse,
+  type TestRouteHandler,
+} from "@/test/teamhub-test-server";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -308,4 +311,143 @@ describe("Wiki source commands and shared file tree", () => {
       );
     },
   );
+});
+
+describe("Wiki home tabs, recovery and loading", () => {
+  it("moves between Profile and Wiki with Left, Right, Home and End", async () => {
+    const runtime = await loggedInWikiRuntime();
+    serveWikiDocuments(runtime).mockResolvedValue({
+      items: [],
+      page: { has_more: false },
+    });
+    const { router } = renderWikiSurfaces(runtime);
+
+    const profile = await screen.findByRole("tab", { name: "Profile" });
+    const wiki = screen.getByRole("tab", { name: "Wiki" });
+    expect(wiki).toHaveAttribute("aria-selected", "true");
+    expect(wiki).toHaveAttribute("tabindex", "0");
+    expect(profile).toHaveAttribute("tabindex", "-1");
+    expect(wiki).toHaveAttribute("aria-controls", "wiki-home-panel-wiki");
+    expect(wiki).toHaveAttribute("id", "wiki-home-tab-wiki");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "id",
+      "wiki-home-panel-wiki",
+    );
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "aria-labelledby",
+      "wiki-home-tab-wiki",
+    );
+
+    wiki.focus();
+    fireEvent.keyDown(wiki, { key: "ArrowLeft" });
+    expect(profile).toHaveFocus();
+    expect(profile).toHaveAttribute("aria-selected", "true");
+    expect(profile).toHaveAttribute("tabindex", "0");
+    expect(router.state.location.search).not.toContain("tab=wiki");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "id",
+      "wiki-home-panel-profile",
+    );
+
+    fireEvent.keyDown(profile, { key: "ArrowRight" });
+    expect(wiki).toHaveFocus();
+    expect(router.state.location.search).toBe("?tab=wiki");
+    fireEvent.keyDown(wiki, { key: "ArrowRight" });
+    expect(profile).toHaveFocus();
+    fireEvent.keyDown(profile, { key: "Home" });
+    expect(profile).toHaveFocus();
+    fireEvent.keyDown(profile, { key: "End" });
+    expect(wiki).toHaveFocus();
+  });
+
+  it("loads the Wiki overview behind card-shaped skeletons", async () => {
+    const runtime = await loggedInWikiRuntime();
+    const pendingDocuments = deferred<{
+      items: [];
+      page: { has_more: false };
+    }>();
+    serveWikiDocuments(runtime).mockReturnValue(pendingDocuments.promise);
+    const pendingReports = deferred<{ items: [] }>();
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/memory",
+      () => pendingReports.promise,
+    );
+    renderWikiSurfaces(runtime);
+
+    const daily = await screen.findByText("Loading daily reports…");
+    expect(daily).toHaveClass("sr-only");
+    const dailyStatus = daily.closest('[role="status"]');
+    expect(dailyStatus).toHaveAttribute("aria-busy", "true");
+    expect(dailyStatus?.querySelector(".daily-list")).not.toBeNull();
+    const projects = screen.getByText("Loading projects…");
+    expect(
+      projects.closest('[role="status"]')?.querySelector(".projects-grid"),
+    ).not.toBeNull();
+    const people = screen.getByText("Loading people…");
+    expect(
+      people.closest('[role="status"]')?.querySelector(".people-grid"),
+    ).not.toBeNull();
+    const companies = screen.getByText("Loading companies…");
+    expect(
+      companies.closest('[role="status"]')?.querySelector(".companies-grid"),
+    ).not.toBeNull();
+    expect(screen.queryByText("Loading…")).toBeNull();
+    expect(screen.queryByText("Loading reports…")).toBeNull();
+
+    pendingReports.resolve({ items: [] });
+    pendingDocuments.resolve({ items: [], page: { has_more: false } });
+    expect(await screen.findByText("No daily reports yet.")).toBeVisible();
+    expect(await screen.findByText("No projects yet.")).toBeVisible();
+    expect(screen.queryByText("Loading projects…")).toBeNull();
+  });
+
+  it("retries the failed reports query in place", async () => {
+    const runtime = await loggedInWikiRuntime();
+    serveWikiDocuments(runtime).mockResolvedValue({
+      items: [],
+      page: { has_more: false },
+    });
+    const reports = vi
+      .fn<TestRouteHandler>()
+      .mockResolvedValueOnce(
+        teamHubErrorResponse(500, "REPORTS_UNAVAILABLE", "Reports failed"),
+      )
+      .mockResolvedValueOnce({ items: [] });
+    runtime.server.on("GET", "/v0/tenants/{tenantId}/memory", reports);
+    renderWikiSurfaces(runtime);
+
+    const alert = await screen.findByRole("alert", {
+      name: "Reports are unavailable.",
+    });
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(reports).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("No daily reports yet.")).toBeVisible();
+    expect(
+      screen.queryByRole("alert", { name: "Reports are unavailable." }),
+    ).toBeNull();
+  });
+
+  it("retries the failed page collections in place", async () => {
+    const runtime = await loggedInWikiRuntime();
+    const page = wikiDocument("project-one", "Launch.md", "wiki_page");
+    page.from[0]!.page_key = "projects/launch.md";
+    const documents = serveWikiDocuments(runtime)
+      .mockResolvedValueOnce(
+        teamHubErrorResponse(500, "WIKI_UNAVAILABLE", "Wiki pages failed"),
+      )
+      .mockResolvedValue({ items: [page], page: { has_more: false } });
+    renderWikiSurfaces(runtime);
+
+    const alerts = await screen.findAllByRole("alert", {
+      name: "Pages are unavailable.",
+    });
+    expect(alerts).toHaveLength(4);
+    fireEvent.click(within(alerts[0]!).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(documents).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("link", { name: /Launch/ })).toBeVisible();
+    expect(
+      screen.queryByRole("alert", { name: "Pages are unavailable." }),
+    ).toBeNull();
+  });
 });
