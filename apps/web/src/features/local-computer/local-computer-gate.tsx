@@ -76,7 +76,7 @@ export function LocalComputerGate({
   const command = computerCommand();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-(--app-overlay) p-4 backdrop-blur-sm">
       <section
         aria-labelledby="local-computer-gate-title"
         aria-modal="true"
@@ -159,7 +159,12 @@ export function LocalComputerGate({
         )}
 
         <footer className="flex justify-end border-t border-border bg-muted/40 px-6 py-3">
-          <Button disabled={signingOut} onClick={onSignOut} tone="ghost">
+          <Button
+            disabled={signingOut}
+            loading={signingOut}
+            onClick={onSignOut}
+            tone="ghost"
+          >
             {signingOut ? "Signing out..." : "Sign out"}
           </Button>
         </footer>

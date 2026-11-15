@@ -1,8 +1,7 @@
-import { Tick02Icon } from "@hugeicons/core-free-icons";
-import { Icon } from "@/components/ui/icon";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { FormFeedback } from "@/components/ui/form-feedback";
 import { teamHubDone } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 
@@ -39,19 +38,14 @@ export function SecuritySettingsPage() {
             Change password
           </Button>
         </div>
+        {passwordChanged ? (
+          <div className="mt-4">
+            <FormFeedback tone="success">Password changed</FormFeedback>
+          </div>
+        ) : null}
       </section>
 
       <ApiKeysSettings />
-
-      {passwordChanged ? (
-        <p
-          className="flex items-center gap-2 text-sm text-app-success"
-          role="status"
-        >
-          <Icon icon={Tick02Icon} size={16} />
-          Password changed
-        </p>
-      ) : null}
 
       {changePasswordOpen ? (
         <ChangePasswordDialog

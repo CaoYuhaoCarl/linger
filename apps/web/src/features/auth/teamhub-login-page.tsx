@@ -48,7 +48,7 @@ export function TeamHubLoginPage({
     <AuthShell title="Log in">
       {authenticationNotice ? (
         <div className="mb-4">
-          <FormFeedback tone="danger">{authenticationNotice}</FormFeedback>
+          <FormFeedback tone="info">{authenticationNotice}</FormFeedback>
         </div>
       ) : null}
       {localAccount ? (
@@ -74,6 +74,7 @@ function LocalAccountSignIn({
       <Button
         className="w-full"
         disabled={authentication.state.isSubmitting}
+        loading={authentication.state.isSubmitting}
         onClick={() => {
           void authentication.signInWithDesktopAccount(account);
         }}
@@ -130,6 +131,7 @@ function AuthenticationForm({
         aria-label="Sign in"
         className="mt-2 w-full"
         disabled={isSubmitting}
+        loading={isSubmitting}
         size="large"
         type="submit"
         tone="primary"

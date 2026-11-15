@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -62,6 +68,57 @@ describe("ConnectComputerPage", () => {
       state: "s".repeat(43),
     });
     expect(callback.href).not.toContain("gateway");
+  });
+
+  it("retries the Space list in place when Spaces are unavailable", async () => {
+    const runtime = createTestTeamHubRuntime();
+
+    const tenants = vi
+      .fn<TestRouteHandler>()
+      .mockReturnValueOnce(
+        teamHubErrorResponse(500, "INTERNAL", "spaces failed"),
+      )
+      .mockReturnValue({ items: [runtime.seed.tenant] });
+    runtime.server.on("GET", "/v0/tenants", tenants);
+
+    renderPage(runtime, vi.fn(), validConnectPath());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Spaces are unavailable.");
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(tenants).toHaveBeenCalledTimes(2));
+    expect(
+      await screen.findByRole("combobox", { name: "Space" }),
+    ).toBeVisible();
+    expect(screen.queryByText("Spaces are unavailable.")).toBeNull();
+  });
+
+  it("spins on the primary action while the enrollment is pending", async () => {
+    const runtime = createTestTeamHubRuntime();
+
+    const createEnrollment = serveEnrollment(
+      runtime,
+      () => new Promise(() => {}),
+    );
+
+    renderPage(runtime, vi.fn(), validConnectPath());
+
+    const connectButton = await screen.findByRole("button", {
+      name: "Connect computer",
+    });
+    await waitFor(() => expect(connectButton).toBeEnabled());
+    expect(connectButton.querySelector(".town-spinner")).toBeNull();
+    fireEvent.click(connectButton);
+
+    await waitFor(() => expect(createEnrollment).toHaveBeenCalledOnce());
+    expect(connectButton).toBeDisabled();
+    expect(connectButton).toHaveAttribute("aria-busy", "true");
+    expect(connectButton).toHaveTextContent("Connecting...");
+    expect(connectButton.querySelector(".town-spinner")).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Use another account" }),
+    ).toBeDisabled();
   });
 
   it("fails closed before TeamHub when the callback is not exact loopback", async () => {

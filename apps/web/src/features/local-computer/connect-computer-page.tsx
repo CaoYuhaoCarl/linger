@@ -161,9 +161,19 @@ export function ConnectComputerPage({
               Loading spaces...
             </p>
           ) : tenants.error ? (
-            <p className="text-sm text-app-danger" role="alert">
-              Spaces are unavailable.
-            </p>
+            <div
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)] px-3 py-2 text-sm"
+              role="alert"
+            >
+              <span className="text-app-danger">Spaces are unavailable.</span>
+              <Button
+                onClick={() => void tenants.refetch()}
+                size="compact"
+                tone="ghost"
+              >
+                Retry
+              </Button>
+            </div>
           ) : tenants.data.items.length === 0 ? (
             <p className="text-sm text-muted-foreground" role="status">
               No space is available for this account.
@@ -248,6 +258,7 @@ export function ConnectComputerPage({
             disabled={
               !session.data || switchAccount.isPending || enrollment.isPending
             }
+            loading={switchAccount.isPending}
             onClick={() => switchAccount.mutate()}
             tone="ghost"
           >
@@ -261,6 +272,7 @@ export function ConnectComputerPage({
               enrollment.isPending ||
               replacementReason !== null
             }
+            loading={enrollment.isPending}
             onClick={() => enrollment.mutate()}
             tone="primary"
           >

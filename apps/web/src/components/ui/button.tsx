@@ -29,7 +29,7 @@ const spinnerSize: Record<ButtonSize, number> = {
 
 const toneClassName: Record<ButtonTone, string> = {
   danger:
-    "border border-destructive/40 bg-transparent text-destructive hover:border-foreground/15",
+    "border border-destructive/40 bg-transparent text-destructive hover:border-destructive hover:bg-destructive/[0.08]",
   ghost:
     "border border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
   info: "bg-app-info text-white hover:bg-app-info-hover",

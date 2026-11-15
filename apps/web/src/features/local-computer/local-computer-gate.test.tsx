@@ -1,14 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
-import { createMemoryRouter, RouterProvider } from "react-router";
-import { describe, expect, it } from "vitest";
+import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router";
+import { describe, expect, it, vi } from "vitest";
 
 import { anotherMeQueryKey } from "@/features/rooms/room-queries";
 import { RoomShell } from "@/features/rooms/room-shell";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubLocalComputerPage } from "@/features/teamhub/teamhub-types";
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
+
+import { LocalComputerGate } from "./local-computer-gate";
 
 type LocalComputer = TeamHubLocalComputerPage["items"][number];
 
@@ -84,6 +86,42 @@ describe("Local Computer gate", () => {
     expect(
       within(gate).getByRole("button", { name: "Sign out" }),
     ).toBeEnabled();
+    expect(gate.parentElement?.className).toContain("bg-(--app-overlay)");
+  });
+
+  it("spins on Sign out while the account is signing out", async () => {
+    const runtime = createTestTeamHubRuntime();
+    runtime.server
+      .on("GET", "/v0/tenants/{tenantId}/another-me", () => ({}))
+      .on("GET", "/v0/tenants/{tenantId}/local-computers", () => ({
+        items: [],
+      }));
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+          })
+        }
+      >
+        <TeamHubRuntimeProvider runtime={runtime}>
+          <MemoryRouter>
+            <LocalComputerGate
+              onSignOut={vi.fn()}
+              signingOut
+              tenantId="tenant-northstar"
+            />
+          </MemoryRouter>
+        </TeamHubRuntimeProvider>
+      </QueryClientProvider>,
+    );
+
+    const signOut = await screen.findByRole("button", {
+      name: "Signing out...",
+    });
+    expect(signOut).toBeDisabled();
+    expect(signOut).toHaveAttribute("aria-busy", "true");
+    expect(signOut.querySelector(".town-spinner")).not.toBeNull();
   });
 });
 

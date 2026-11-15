@@ -172,6 +172,20 @@ describe("TeamHubLoginPage", () => {
     fetchMock.mockRestore();
   });
 
+  it("shows a spinner inside the submit button while signing in", async () => {
+    renderAuthenticationPage({
+      login: () => new Promise(() => {}),
+    });
+    fillSignIn();
+    const button = screen.getByRole("button", { name: "Sign in" });
+    expect(button.querySelector(".town-spinner")).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".town-spinner")).not.toBeNull();
+    expect(button).toHaveTextContent("Working...");
+  });
+
   it("synchronously rejects duplicate form submissions", async () => {
     const login = vi
       .fn<TestRouteHandler>()
@@ -379,15 +393,16 @@ describe("TeamHubLoginPage", () => {
     );
   });
 
-  it("explains when the current Session expired", () => {
+  it("explains when the current Session expired without an alarm", () => {
     renderAuthenticationPage(
       {},
       { initialEntry: "/login?reason=session-expired" },
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
+    expect(screen.getByRole("status")).toHaveTextContent(
       "Your session has expired. Sign in again to continue.",
     );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 
