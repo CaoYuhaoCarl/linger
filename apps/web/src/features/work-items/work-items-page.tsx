@@ -146,33 +146,63 @@ export function WorkItemsPage() {
       </header>
 
       {items.length ? (
-        <div className="work-items-board workspace-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-4 sm:p-5">
-          <div className="grid h-full min-w-[1180px] grid-cols-5 gap-3">
-            {dashboardColumns.map((column) => (
-              <WorkItemColumn
-                column={column}
-                focusedCardRef={focusedCardRef}
-                focusedWorkItemId={focusedWorkItemId}
-                items={filteredItems.filter(
-                  (item) => dashboardColumnFor(item) === column.id,
-                )}
-                key={column.id}
-                originRoomLabel={roomFilter.originLabel}
-                search={dashboardSearch}
-                tenantId={tenantId}
-              />
-            ))}
+        filteredItems.length ? (
+          <div className="work-items-board workspace-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-4 sm:p-5">
+            <div className="grid h-full min-w-[920px] grid-cols-4 gap-3">
+              {dashboardColumns.map((column) => (
+                <WorkItemColumn
+                  column={column}
+                  focusedCardRef={focusedCardRef}
+                  focusedWorkItemId={focusedWorkItemId}
+                  items={filteredItems.filter(
+                    (item) => dashboardColumnFor(item) === column.id,
+                  )}
+                  key={column.id}
+                  originRoomLabel={roomFilter.originLabel}
+                  search={dashboardSearch}
+                  tenantId={tenantId}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          // Filtering to a Room without Work Items hides the four empty columns
+          // so the way back to the whole board is the only thing to read.
+          <div className="work-items-board flex min-h-0 flex-1 items-center justify-center px-6 py-12 text-center">
+            <div className="max-w-sm">
+              <span className="mx-auto flex size-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <Icon icon={CheckListIcon} size={16} />
+              </span>
+              <h2 className="mt-3 text-sm font-semibold text-app-ink">
+                No Work Items in this Room
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Switch back to all rooms to see every Task and Issue.
+              </p>
+              <Button
+                className="mt-4"
+                onClick={() => setRoomFilter("")}
+                size="compact"
+                tone="secondary"
+              >
+                Show all rooms
+              </Button>
+            </div>
+          </div>
+        )
       ) : (
         <section className="flex min-h-0 flex-1 items-center justify-center px-6 py-12 text-center">
-          <div>
+          <div className="max-w-sm">
             <span className="mx-auto flex size-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
               <Icon icon={CheckListIcon} size={16} />
             </span>
             <h2 className="mt-3 text-sm font-semibold text-app-ink">
               No Work Items yet
             </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Tasks and Issues tracked by Humans and Agents in your Rooms appear
+              here.
+            </p>
           </div>
         </section>
       )}
@@ -373,6 +403,11 @@ function WorkItemColumn({
                           />
                         </span>
                       ))}
+                      {item.assignees.length > 4 ? (
+                        <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium leading-none text-muted-foreground ring-2 ring-app-surface">
+                          +{item.assignees.length - 4}
+                        </span>
+                      ) : null}
                     </span>
                   ) : null}
                 </span>

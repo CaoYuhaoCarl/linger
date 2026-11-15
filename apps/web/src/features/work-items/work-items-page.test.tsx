@@ -22,7 +22,7 @@ import { tenantWorkItemTargetQueryKey } from "./work-item-queries";
 import { WorkItemsPage } from "./work-items-page";
 
 describe("Dashboard page", () => {
-  it("renders the authoritative lifecycle as a five-column read-only board", async () => {
+  it("renders the authoritative lifecycle as a four-column read-only board", async () => {
     const runtime = await testRuntime();
     const identity = runtime.seed.identity;
     const human = identity.actors[0]!;
@@ -72,8 +72,76 @@ describe("Dashboard page", () => {
         "Retire old release",
       ),
     ).toBeVisible();
+    // Four statuses share the board, so no column is left empty on the right.
+    const board = screen.getByRole("region", { name: "Todo" }).parentElement;
+    expect(board).toHaveClass("grid-cols-4");
+    expect(board).not.toHaveClass("grid-cols-5");
     expect(
       screen.queryByRole("button", { name: "Create Work Item" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers a one-click way back when a Room filter matches no Work Items", async () => {
+    const runtime = await testRuntime();
+    const identity = runtime.seed.identity;
+    const human = identity.actors[0]!;
+    seedWorkItems(runtime, [
+      workItem(human, {
+        origin_room_id: "room-all",
+        title: "General room work",
+      }),
+    ]);
+
+    renderPage(runtime, "/t/tenant-northstar/dashboard?room=room-gtm-launch");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "No Work Items in this Room",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Switch back to all rooms to see every Task and Issue."),
+    ).toBeVisible();
+    expect(screen.queryByText("General room work")).not.toBeInTheDocument();
+    expect(screen.getByText("0 of 1 items")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all rooms" }));
+
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      /^\/t\/tenant-northstar\/dashboard$/,
+    );
+    expect(screen.getByText("General room work")).toBeVisible();
+    expect(screen.getByText("1 item")).toBeVisible();
+  });
+
+  it("indicates assignees beyond the four avatars a card shows", async () => {
+    const runtime = await testRuntime();
+    const identity = runtime.seed.identity;
+    const human = identity.actors[0]!;
+    const assignees = Array.from({ length: 6 }, (_, index) => ({
+      actor: {
+        ...human,
+        display_name: `Assignee ${index + 1}`,
+        id: `actor-assignee-${index + 1}`,
+      },
+      assigned_at: "2026-07-30T00:00:00Z",
+      assigned_by: human,
+    }));
+    seedWorkItems(runtime, [workItem(human, { assignees })]);
+
+    renderPage(runtime);
+
+    const card = await screen.findByRole("link", { name: /Fix login failure/ });
+    expect(within(card).getByText("+2")).toBeVisible();
+    expect(
+      within(card).getByRole("group", {
+        name: `Assigned to ${assignees
+          .map(({ actor }) => actor.display_name)
+          .join(", ")}`,
+      }),
+    ).toBeVisible();
+    expect(
+      within(card).queryByRole("img", { name: "Assignee 5 avatar" }),
     ).not.toBeInTheDocument();
   });
 
@@ -412,6 +480,11 @@ describe("Dashboard page", () => {
     renderPage(runtime);
 
     expect(await screen.findByText("No Work Items yet")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Tasks and Issues tracked by Humans and Agents in your Rooms appear here.",
+      ),
+    ).toBeVisible();
     expect(screen.getByText("0 items")).toBeVisible();
   });
 

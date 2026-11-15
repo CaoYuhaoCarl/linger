@@ -1,11 +1,13 @@
+import { Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { DesktopBarTitle } from "@/app/desktop-frame";
-import { type MouseEvent, type ReactNode, useState } from "react";
+import { type MouseEvent, useState } from "react";
 import { useSearchParams } from "react-router";
 
 import { ActionMenu } from "@/components/ui/action-menu";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
+import { Icon } from "@/components/ui/icon";
+import { Skeleton } from "@/components/ui/skeleton";
 import { UnderlineTabs } from "@/components/ui/underline-tabs";
 import { cn } from "@/lib/cn";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -43,6 +45,7 @@ export function ConnectedAppsPage() {
   // "all" shows every group; otherwise one group's id.
   const [filter, setFilter] = useState("all");
   const [connectedOnly, setConnectedOnly] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
   // TeamHub lists only Connections that are not revoked.
   const visibleConnections = connections.data?.connections ?? [];
   const allApps = apps.data?.apps ?? [];
@@ -65,11 +68,32 @@ export function ConnectedAppsPage() {
     { id: "all", label: "All" },
     ...groups.map(({ group }) => ({ id: group.id, label: group.title })),
   ];
+  const query = searchInput.trim().toLowerCase();
+  const matchesSearch = (app: TeamHubExternalApp) =>
+    !query ||
+    [app.display_name, app.description, appSummary(app)].some((text) =>
+      text.toLowerCase().includes(query),
+    );
+  const matchesView = (app: TeamHubExternalApp) =>
+    matchesSearch(app) && (!connectedOnly || connectedApps.includes(app));
   const groupApps = groups.find((entry) => entry.group.id === filter)?.apps;
+  const categoryApps = (groupApps ?? []).filter(matchesView);
   // Connected only narrows whichever view is open; with All it is one grid.
-  const filteredApps = connectedOnly
-    ? (groupApps ?? connectedApps).filter((app) => connectedApps.includes(app))
-    : groupApps;
+  const flatApps = connectedApps.filter(matchesView);
+  // A search keeps the sections it still fills and drops the ones it empties.
+  const searchGroups =
+    filter === "all" && !connectedOnly
+      ? groups.flatMap((entry) => {
+          const apps = entry.apps.filter(matchesSearch);
+          return apps.length ? [{ ...entry, apps }] : [];
+        })
+      : [];
+  const hasResults =
+    filter === "all"
+      ? connectedOnly
+        ? flatApps.length > 0
+        : searchGroups.length > 0
+      : categoryApps.length > 0;
 
   function renderApp(app: TeamHubExternalApp) {
     return (
@@ -88,6 +112,11 @@ export function ConnectedAppsPage() {
   // Groups decide only what the grid offers; the dialog opens for any app
   // TeamHub lists, so links like Agent Info's `?app=googledrive` still work.
   const selectedApp = apps.data?.apps.find((app) => app.key === requestedApp);
+
+  function showAllConnectors() {
+    setConnectedOnly(false);
+    setSearchInput("");
+  }
 
   function openApp(appKey: TeamHubExternalAppKey) {
     setSearchParams(
@@ -118,7 +147,14 @@ export function ConnectedAppsPage() {
           <h1 className="mb-5 text-2xl text-foreground">Connectors</h1>
         </DesktopBarTitle>
         {apps.isPending || connections.isPending ? (
-          <PageMessage busy>Loading connectors...</PageMessage>
+          <div aria-busy="true" role="status">
+            <span className="sr-only">Loading connectors...</span>
+            <div className={APP_GRID_CLASS}>
+              {Array.from({ length: 6 }, (_, index) => (
+                <Skeleton className="h-[68px]" key={index} />
+              ))}
+            </div>
+          </div>
         ) : apps.error || connections.error ? (
           <div className="py-10 text-center" role="alert">
             <p className="text-sm text-app-danger">
@@ -140,7 +176,7 @@ export function ConnectedAppsPage() {
           <>
             {/* The toggle is as tall as the tabs and lines up with them; the
                 tab row keeps its own bottom margin. */}
-            <div className="flex items-start gap-3">
+            <div className="flex flex-wrap items-start gap-3">
               <UnderlineTabs
                 className="min-w-0 flex-1"
                 items={filters}
@@ -148,6 +184,29 @@ export function ConnectedAppsPage() {
                 onChange={setFilter}
                 value={filter}
               />
+              <div className="ui-field-frame w-full shrink-0 sm:w-[220px]">
+                <span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-muted-foreground">
+                  <Icon icon={Search01Icon} size={16} />
+                </span>
+                <input
+                  aria-label="Search connectors"
+                  className="ui-field-control h-9 w-full pr-10 pl-10 text-sm text-foreground placeholder:text-muted-foreground"
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="Search connectors…"
+                  type="search"
+                  value={searchInput}
+                />
+                {searchInput ? (
+                  <button
+                    aria-label="Clear connector search"
+                    className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    onClick={() => setSearchInput("")}
+                    type="button"
+                  >
+                    <Icon icon={Cancel01Icon} size={14} />
+                  </button>
+                ) : null}
+              </div>
               <Button
                 aria-pressed={connectedOnly}
                 className="shrink-0"
@@ -158,37 +217,71 @@ export function ConnectedAppsPage() {
                 Connected only
               </Button>
             </div>
-            {filteredApps ? (
-              filteredApps.length ? (
+            {!hasResults ? (
+              <div className="py-12 text-center">
+                <p className="text-sm text-muted-foreground" role="status">
+                  {query
+                    ? `No connectors match “${searchInput.trim()}”`
+                    : connectedOnly
+                      ? "No connected apps yet."
+                      : "No connectors to show."}
+                </p>
+                {query ? (
+                  <Button
+                    className="mt-3"
+                    onClick={() => setSearchInput("")}
+                    size="compact"
+                    tone="secondary"
+                  >
+                    Clear search
+                  </Button>
+                ) : connectedOnly ? (
+                  <Button
+                    className="mt-3"
+                    onClick={showAllConnectors}
+                    size="compact"
+                    tone="secondary"
+                  >
+                    Show all connectors
+                  </Button>
+                ) : null}
+              </div>
+            ) : filter === "all" ? (
+              connectedOnly ? (
                 <section
                   aria-label="Application connections"
                   className={APP_GRID_CLASS}
                 >
-                  {filteredApps.map(renderApp)}
+                  {flatApps.map(renderApp)}
                 </section>
               ) : (
-                <PageMessage>No connected apps yet.</PageMessage>
+                <div aria-label="Application connections" role="region">
+                  {searchGroups.map(({ group, apps: groupApps }) => (
+                    <section
+                      aria-labelledby={`connector-group-${group.id}`}
+                      className="mb-7 last:mb-0"
+                      key={group.id}
+                    >
+                      <h2
+                        className="mb-2.5 text-[14px] font-medium text-muted-foreground"
+                        id={`connector-group-${group.id}`}
+                      >
+                        {group.title}
+                      </h2>
+                      <div className={APP_GRID_CLASS}>
+                        {groupApps.map(renderApp)}
+                      </div>
+                    </section>
+                  ))}
+                </div>
               )
             ) : (
-              <div aria-label="Application connections" role="region">
-                {groups.map(({ group, apps: groupApps }) => (
-                  <section
-                    aria-labelledby={`connector-group-${group.id}`}
-                    className="mb-7 last:mb-0"
-                    key={group.id}
-                  >
-                    <h2
-                      className="mb-2.5 text-[14px] font-medium text-muted-foreground"
-                      id={`connector-group-${group.id}`}
-                    >
-                      {group.title}
-                    </h2>
-                    <div className={APP_GRID_CLASS}>
-                      {groupApps.map(renderApp)}
-                    </div>
-                  </section>
-                ))}
-              </div>
+              <section
+                aria-label="Application connections"
+                className={APP_GRID_CLASS}
+              >
+                {categoryApps.map(renderApp)}
+              </section>
             )}
           </>
         )}
@@ -313,6 +406,22 @@ function CatalogAppCard({
           label={`Actions for ${app.display_name}`}
         />
       ) : null}
+      {canConnect && active.length >= 2 ? (
+        // Several accounts on one connector still need a trailing way in, so
+        // the card keeps a Manage affordance instead of dropping it.
+        <Button
+          aria-label={`Manage ${app.display_name}`}
+          className="px-2.5"
+          onClick={(event) => {
+            stopCardClick(event);
+            onOpen();
+          }}
+          size="compact"
+          tone="secondary"
+        >
+          Manage
+        </Button>
+      ) : null}
       <ConnectAppStatus className="basis-full" flow={connectFlow} />
       {disconnecting ? (
         <DisconnectConnectionDialog
@@ -321,24 +430,5 @@ function CatalogAppCard({
         />
       ) : null}
     </article>
-  );
-}
-
-function PageMessage({
-  busy,
-  children,
-}: {
-  busy?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <p
-      aria-busy={busy}
-      className="flex items-center justify-center gap-2 py-12 text-center text-sm text-muted-foreground"
-      role="status"
-    >
-      {busy ? <Spinner size={16} /> : null}
-      {children}
-    </p>
   );
 }

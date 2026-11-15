@@ -179,7 +179,9 @@ describe("Connected apps", () => {
 
     expect(await screen.findByRole("button", { name: "Gmail" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Connectors" })).toBeVisible();
-    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(
+      screen.getByRole("searchbox", { name: "Search connectors" }),
+    ).toBeVisible();
     expect(
       screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent),
     ).toEqual(["Mail & Calendar", "Meetings", "Productivity", "Messaging"]);
@@ -447,6 +449,80 @@ describe("Connected apps", () => {
     expect(await within(dialog).findByText("Jenny's workspace")).toBeVisible();
     expect(within(dialog).queryByRole("switch")).toBeNull();
     expect(within(dialog).queryByText("Agent access")).toBeNull();
+  });
+
+  it("keeps a Manage action on a connector with several connected accounts", async () => {
+    const runtime = await testRuntime();
+    const existing = (await runtime.client.listExternalConnections())
+      .connections[0]!;
+    vi.spyOn(runtime.client, "listExternalConnections").mockResolvedValue({
+      connections: [
+        existing,
+        {
+          ...existing,
+          id: "external-connection-gmail-work",
+          identity_label: "work@linger.test",
+        },
+      ],
+    });
+
+    renderPage(runtime);
+
+    const card = await screen.findByRole("button", { name: "Gmail" });
+    expect(within(card).getByText("2 accounts")).toBeVisible();
+    const manage = screen.getByRole("button", { name: "Manage Gmail" });
+    fireEvent.click(manage);
+
+    const dialog = await screen.findByRole("dialog", { name: "Gmail" });
+    expect(within(dialog).getByText("work@linger.test")).toBeVisible();
+  });
+
+  it("filters connectors as the query is typed and clears the query again", async () => {
+    const runtime = await testRuntime();
+
+    renderPage(runtime);
+    await screen.findByRole("button", { name: "Gmail" });
+
+    const search = screen.getByRole("searchbox", { name: "Search connectors" });
+    fireEvent.change(search, { target: { value: "repositor" } });
+
+    expect(screen.getByRole("button", { name: "GitHub" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Gmail" })).toBeNull();
+    expect(
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["Productivity"]);
+
+    fireEvent.change(search, { target: { value: "zoom" } });
+
+    expect(screen.getByText("No connectors match “zoom”")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+
+    expect(screen.getByRole("button", { name: "Gmail" })).toBeVisible();
+    expect(search).toHaveValue("");
+  });
+
+  it("offers every connector when none is connected", async () => {
+    const runtime = await testRuntime();
+    vi.spyOn(runtime.client, "listExternalConnections").mockResolvedValue({
+      connections: [],
+    });
+
+    renderPage(runtime);
+    await screen.findByRole("button", { name: "Gmail" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Connected only" }));
+
+    expect(screen.getByText("No connected apps yet.")).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show all connectors" }),
+    );
+
+    expect(screen.getByRole("button", { name: "Gmail" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Connected only" }),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 
   it("starts a connection through the generic app endpoint", async () => {
