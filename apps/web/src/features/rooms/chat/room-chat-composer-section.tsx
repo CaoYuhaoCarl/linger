@@ -11,7 +11,10 @@ import type { MessageDocumentOption } from "./message-composer-references";
 import { RoomChatComposerNotices } from "./room-chat-composer-notices";
 import { BackgroundTasksIndicator } from "./background-tasks-indicator";
 import { SharedStreamingStatus } from "./shared-streaming-status";
-import { AgentStreamingStatusDock } from "./message-timeline";
+import {
+  AgentStreamingStatusDock,
+  ComposerStatusColumn,
+} from "./message-timeline";
 import { roomOffersVoiceMaterials } from "./voice-mode/voice-materials-context";
 import { RoomComposerDock } from "./room-composer-dock";
 import type { RoomChatData } from "./use-room-chat-data";
@@ -89,14 +92,16 @@ export function RoomChatComposerSection({
           </button>
         </p>
       ) : null}
-      <BackgroundTasksIndicator
-        client={client}
-        roomId={roomId}
-        tenantId={tenantId}
-      />
-      <SharedStreamingStatus surface="chat">
-        <AgentStreamingStatusDock {...dock} />
-      </SharedStreamingStatus>
+      <ComposerStatusColumn>
+        <BackgroundTasksIndicator
+          client={client}
+          roomId={roomId}
+          tenantId={tenantId}
+        />
+        <SharedStreamingStatus surface="chat">
+          <AgentStreamingStatusDock {...dock} />
+        </SharedStreamingStatus>
+      </ComposerStatusColumn>
       <RoomMessageComposer
         agentPeek={{
           busyAgentIds: agentStreaming.runStatuses.flatMap((runStatus) =>

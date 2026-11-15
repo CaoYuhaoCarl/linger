@@ -63,9 +63,12 @@ it("stops only the selected Run and keeps uncertain cancellation distinct from s
   fireEvent.click(
     await screen.findByRole("button", { name: "Stop Local's task" }),
   );
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Stop not confirmed",
+  const stopAlert = await screen.findByRole("alert");
+  // The whole sentence stays readable instead of being cut to fit the row.
+  expect(stopAlert).toHaveTextContent(
+    "Stop not confirmed. Check the task status, then retry.",
   );
+  expect(stopAlert.className).not.toMatch(/truncate|max-w-/);
   expect(cancel).toHaveBeenCalledTimes(1);
   const requestId = (cancel.mock.calls[0]![0].body as { request_id: string })
     .request_id;
@@ -138,7 +141,9 @@ it("resends once, waits while pending, surfaces a failure and hides after succes
   );
   const name = "Resend unconfirmed follow-up to Local";
   fireEvent.click(await screen.findByRole("button", { name }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Resend failed");
+  const resendAlert = await screen.findByRole("alert");
+  expect(resendAlert).toHaveTextContent("Resend failed. Try again.");
+  expect(resendAlert.className).not.toMatch(/truncate|max-w-/);
   expect(redeliver).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole("button", { name }));
   await waitFor(() =>

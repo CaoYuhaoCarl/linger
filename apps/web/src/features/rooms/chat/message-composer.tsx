@@ -724,7 +724,6 @@ function ComposerSendControls({
     send,
     submitLabel,
     submitting,
-    voiceHasMaterials,
     voiceMode,
     voiceModeEmpty,
     voiceModeTarget,
@@ -740,12 +739,12 @@ function ComposerSendControls({
     voiceModeTarget?.tenantId ?? "",
     Boolean(voiceModeTarget),
   );
-  // A deployment that cannot run voice has no Voice Mode, so the empty
-  // composer keeps its send button; one that can shows Voice Mode even before
-  // a key exists, and the button asks for the key. Older servers without
-  // `voice_available` offer it only once Soniox or xAI is configured. Until
-  // the policy answers the voice entry keeps the slot, so a deployment with
-  // voice never flashes the send button first.
+  // A deployment that cannot run voice has no Voice Mode, so the composer
+  // offers only its send button. One that runs voice shows Voice Mode beside
+  // the send button, even before a key exists; the button then asks for the
+  // key. Older servers without `voice_available` offer it only once Soniox or
+  // xAI is configured. Send keeps its own control either way, so neither
+  // action stands in for the other.
   const voiceOff =
     voicePolicy !== undefined &&
     !(
@@ -781,7 +780,6 @@ function ComposerSendControls({
       }
       modelSwitch={modelSwitch}
       voiceModeEntered={voiceMode.entered}
-      keepSendWithVoice={voiceHasMaterials && !voiceMode.entered}
       sendDisabled={
         disabled ||
         submitting ||
@@ -1257,7 +1255,6 @@ function ComposerToolbar({
   submitLabel,
   voiceModeControls,
   voiceModeEntered,
-  keepSendWithVoice,
 }: {
   attachmentEnabled: boolean;
   disabled: boolean;
@@ -1270,7 +1267,6 @@ function ComposerToolbar({
   submitLabel?: string;
   voiceModeControls?: ReactNode;
   voiceModeEntered?: boolean;
-  keepSendWithVoice?: boolean;
 }) {
   const showAttach = attachmentEnabled && !voiceModeEntered;
   const showTools = !submitLabel && !voiceModeEntered && Boolean(modelSwitch);
@@ -1329,10 +1325,10 @@ function ComposerToolbar({
         ) : (
           <>
             {voiceModeControls}
-            {!voiceModeControls || keepSendWithVoice ? (
+            {voiceModeEntered ? null : (
               <Button
                 aria-label="Send message"
-                className="message-composer-send disabled:!opacity-100"
+                className="message-composer-send"
                 disabled={sendDisabled}
                 onClick={onSend}
                 size="compactIcon"
@@ -1340,7 +1336,7 @@ function ComposerToolbar({
               >
                 <Icon icon={ArrowUp02Icon} size={16} />
               </Button>
-            ) : null}
+            )}
           </>
         )}
       </div>

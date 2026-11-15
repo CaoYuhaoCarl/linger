@@ -112,6 +112,9 @@ export function RoomChatTimelineSection({
       focusedMessageHighlight={
         linkedInTimeline ? navigation.linkedMessageHighlight : undefined
       }
+      followingLatest={timeline.followingLatest}
+      newMessageCount={timeline.unreadWhileScrolledUp}
+      onJumpToLatest={timeline.scrollToLatest}
       viewportOnScroll={(event) => {
         timeline.recordTimelineScroll(event.currentTarget);
         actions.loadOlderNearTop(event.currentTarget);

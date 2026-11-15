@@ -106,6 +106,19 @@ describe("MessageComposer", () => {
     );
   });
 
+  it("keeps a disabled Send visually distinct from a ready one", () => {
+    render(<MessageComposer onSend={vi.fn()} />);
+    const send = screen.getByRole("button", { name: "Send message" });
+    expect(send).toBeDisabled();
+    // The disabled look comes from its own muted surface, not from forcing
+    // the filled primary ink of a ready Send at full strength.
+    expect(send).not.toHaveClass("disabled:!opacity-100");
+    fireEvent.change(screen.getByLabelText("Message Room"), {
+      target: { value: "Ready to send" },
+    });
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+  });
+
   it("keeps overflowing mention results inside a shrinkable scroll region", () => {
     const mentionOptions = Array.from({ length: 20 }, (_, index) => ({
       display_name: `Person ${index + 1}`,

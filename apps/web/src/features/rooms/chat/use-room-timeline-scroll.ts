@@ -61,6 +61,11 @@ export function useRoomTimelineScroll({
   const previousTimelineRef = useRef<HTMLDivElement | null>(null);
   const [initialScrollReady, setInitialScrollReady] = useState(false);
   const shouldAutoFollowRef = useRef(true);
+  const [followingLatest, setFollowingLatest] = useState(true);
+  const [unreadWhileScrolledUp, setUnreadWhileScrolledUp] = useState(0);
+  const previousMessageCountRef = useRef(messageCount);
+  // A smooth jump is still travelling; its frames are not the reader's choice.
+  const jumpToLatestRef = useRef<{ top: number } | null>(null);
   const pendingPrependRef = useRef<PendingPrepend | null>(null);
   const readingAnchorRef = useRef<ReadingAnchor | null>(null);
   // The scroll event of a resize correction arrives a frame late, after the
@@ -71,8 +76,18 @@ export function useRoomTimelineScroll({
     positioned: boolean;
   } | null>(null);
 
+  /** Publishes the ref's answer, and drops the unread count at the newest Message. */
+  function syncFollowingLatest() {
+    setFollowingLatest(shouldAutoFollowRef.current);
+    if (shouldAutoFollowRef.current) setUnreadWhileScrolledUp(0);
+  }
+
   useLayoutEffect(() => {
     const timeline = timelineElement;
+    // Messages added since the last render: a tail append, or a prepend
+    // handled below before anything counts as unread.
+    const appended = messageCount - previousMessageCountRef.current;
+    previousMessageCountRef.current = messageCount;
 
     if (!timeline) {
       return;
@@ -105,6 +120,7 @@ export function useRoomTimelineScroll({
         (timeline.scrollHeight - pendingPrepend.scrollHeight);
       pendingPrependRef.current = null;
       shouldAutoFollowRef.current = isNearTimelineBottom(timeline);
+      syncFollowingLatest();
       setInitialScrollReady(true);
       return;
     }
@@ -119,6 +135,7 @@ export function useRoomTimelineScroll({
         timeline.scrollTop = 0;
       }
       shouldAutoFollowRef.current = false;
+      syncFollowingLatest();
       setInitialScrollReady(true);
       return;
     }
@@ -128,6 +145,12 @@ export function useRoomTimelineScroll({
     }
 
     shouldAutoFollowRef.current = isNearTimelineBottom(timeline);
+    syncFollowingLatest();
+    // Tail Messages that arrived while the reader was above the newest one
+    // are new to them; a prepend never counts.
+    if (appended > 0 && !shouldAutoFollowRef.current) {
+      setUnreadWhileScrolledUp((current) => current + appended);
+    }
     setInitialScrollReady(true);
   }, [
     timelineElement,
@@ -155,6 +178,8 @@ export function useRoomTimelineScroll({
     let lastInputAt = -Infinity;
     const noteInput = () => {
       lastInputAt = performance.now();
+      // The reader took over, so a smooth jump no longer owns the position.
+      jumpToLatestRef.current = null;
     };
     const correct = (scrollTop: number) => {
       const before = timeline.scrollTop;
@@ -197,10 +222,20 @@ export function useRoomTimelineScroll({
     for (const child of timeline.children) observer.observe(child);
     timeline.addEventListener("pointerdown", noteInput, true);
     timeline.addEventListener("keydown", noteInput, true);
+    timeline.addEventListener("wheel", noteInput, {
+      capture: true,
+      passive: true,
+    });
+    timeline.addEventListener("touchstart", noteInput, {
+      capture: true,
+      passive: true,
+    });
     return () => {
       observer.disconnect();
       timeline.removeEventListener("pointerdown", noteInput, true);
       timeline.removeEventListener("keydown", noteInput, true);
+      timeline.removeEventListener("wheel", noteInput, true);
+      timeline.removeEventListener("touchstart", noteInput, true);
     };
   }, [timelineElement]);
 
@@ -227,7 +262,21 @@ export function useRoomTimelineScroll({
     const corrected = correctedScrollTopRef.current === timeline.scrollTop;
     correctedScrollTopRef.current = null;
     if (!corrected) {
+      // A jump in flight moves toward the newest Message; those frames are not
+      // the reader settling into history. A reader who takes the timeline back
+      // mid-jump, or a jump that lands, is handled normally.
+      const jump = jumpToLatestRef.current;
+      if (jump) {
+        const arrived = isNearTimelineBottom(timeline);
+        const travelledBack = timeline.scrollTop < jump.top;
+        if (!arrived && !travelledBack) {
+          jump.top = timeline.scrollTop;
+          return;
+        }
+        jumpToLatestRef.current = null;
+      }
       shouldAutoFollowRef.current = isNearTimelineBottom(timeline);
+      syncFollowingLatest();
       readingAnchorRef.current = shouldAutoFollowRef.current
         ? null
         : readingAnchor(timeline);
@@ -247,6 +296,30 @@ export function useRoomTimelineScroll({
 
   function pinToLatest() {
     shouldAutoFollowRef.current = true;
+    syncFollowingLatest();
+  }
+
+  /** Returns to the newest Message, smoothly unless motion is reduced. */
+  function scrollToLatest() {
+    const timeline = timelineElement;
+
+    if (!timeline) {
+      return;
+    }
+    readingAnchorRef.current = null;
+    shouldAutoFollowRef.current = true;
+    syncFollowingLatest();
+    const behavior: ScrollBehavior = prefersReducedMotion()
+      ? "instant"
+      : "smooth";
+    if (typeof timeline.scrollTo === "function") {
+      jumpToLatestRef.current =
+        behavior === "smooth" ? { top: timeline.scrollTop } : null;
+      timeline.scrollTo({ behavior, top: timeline.scrollHeight });
+    } else {
+      // Without element scrolling the jump is immediate.
+      timeline.scrollTop = timeline.scrollHeight;
+    }
   }
 
   /** Whether the reader follows the newest Message rather than history. */
@@ -260,14 +333,25 @@ export function useRoomTimelineScroll({
 
   return {
     cancelOlderMessagesIfUnchanged,
+    followingLatest,
     initialScrollReady,
     isFollowingLatest,
     pinToLatest,
     prepareForOlderMessages,
     recordTimelineScroll,
+    scrollToLatest,
     timelineElement,
     timelineRef: setTimelineElement,
+    unreadWhileScrolledUp,
   };
+}
+
+function prefersReducedMotion() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
 }
 
 function readingAnchor(timeline: HTMLDivElement): ReadingAnchor | null {

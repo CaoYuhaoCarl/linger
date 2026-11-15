@@ -409,6 +409,38 @@ describe("Voice Mode controls", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("offers its entry as a secondary control, never as the composer's send button", async () => {
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/voice-media-policy",
+      () => ({
+        voice_available: true,
+        voice_media_supported: true,
+        live_supported: false,
+      }),
+    );
+    render(
+      <TeamHubRuntimeProvider runtime={runtime}>
+        <VoiceModeSessionProvider>
+          <BoundControls
+            target={{ tenantId: "tenant-northstar", roomId: "room-another-me" }}
+            disabled={false}
+            empty
+            onChange={vi.fn()}
+            onSend={vi.fn()}
+          />
+        </VoiceModeSessionProvider>
+      </TeamHubRuntimeProvider>,
+    );
+    const start = await screen.findByRole("button", {
+      name: "Start Voice Mode",
+    });
+    expect(start).toHaveClass("composer-voice-button");
+    expect(start).not.toHaveClass("message-composer-send");
+    expect(start).toBeEnabled();
+  });
+
   it("shows no entry when the deployment has no voice media", async () => {
     const runtime = createTestTeamHubRuntime();
     runtime.server.on(

@@ -2389,6 +2389,51 @@ describe("Room Chat", () => {
     await waitFor(() => expect(timeline.scrollTop).toBe(320));
   });
 
+  it("offers a way back to the newest Message once the reader is in history", async () => {
+    const fixture = createTestTeamHubRuntime();
+    const runtime = withoutRealtime(fixture);
+    const queryClient = testQueryClient();
+    // jsdom has no layout: a 1000px lane in a 200px viewport puts a reader at
+    // 100px well away from the newest Message.
+    vi.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(1000);
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(200);
+    try {
+      renderRoomChat(runtime, queryClient);
+      await screen.findByText(/Keep the first release focused/);
+      const timeline = screen.getByLabelText("Room timeline");
+      expect(
+        screen.queryByRole("button", { name: "Jump to latest" }),
+      ).toBeNull();
+
+      timeline.scrollTop = 100;
+      fireEvent.scroll(timeline);
+      expect(
+        await screen.findByRole("button", { name: "Jump to latest" }),
+      ).toBeVisible();
+
+      // An Agent reply arrives while the reader is still reading history.
+      appendCommittedMessage(
+        queryClient,
+        message("message-newer", "One more note before we ship."),
+      );
+      expect(
+        await screen.findByRole("button", { name: "1 new message" }),
+      ).toBeVisible();
+      expect(timeline.scrollTop).toBe(100);
+
+      fireEvent.click(screen.getByRole("button", { name: "1 new message" }));
+      expect(screen.queryByRole("button", { name: /new message/ })).toBeNull();
+      expect(timeline.scrollTop).toBe(1000);
+      // The jump's own scroll event lands at the bottom and keeps it there.
+      fireEvent.scroll(timeline);
+      expect(screen.queryByRole("button", { name: /new message/ })).toBeNull();
+    } finally {
+      vi.restoreAllMocks();
+      cleanup();
+      queryClient.clear();
+    }
+  });
+
   it("positions initial history at the bottom before revealing the timeline", async () => {
     const fixture = createTestTeamHubRuntime();
 

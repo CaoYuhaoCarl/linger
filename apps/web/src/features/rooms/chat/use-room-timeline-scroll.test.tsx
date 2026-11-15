@@ -45,6 +45,9 @@ function Timeline({
       >
         Latest
       </button>
+      <button onClick={scroll.scrollToLatest}>Jump</button>
+      <span data-testid="following">{String(scroll.followingLatest)}</span>
+      <span data-testid="unread">{scroll.unreadWhileScrolledUp}</span>
       <div
         aria-label="Room timeline"
         ref={scroll.timelineRef}
@@ -337,5 +340,130 @@ describe("Room timeline lane resize", () => {
     fireEvent.scroll(timeline);
     reflow(500, [0, 650, 1150], 1500);
     expect(timeline.scrollTop).toBe(1500);
+  });
+});
+
+describe("Jump to latest", () => {
+  function setupLane() {
+    vi.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(1000);
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(200);
+  }
+
+  it("counts Messages that arrive while the reader is in history and clears them on return", () => {
+    setupLane();
+    const view = render(<Timeline visible messageCount={10} />);
+    const timeline = screen.getByLabelText("Room timeline");
+    expect(screen.getByTestId("following")).toHaveTextContent("true");
+    expect(screen.getByTestId("unread")).toHaveTextContent("0");
+
+    timeline.scrollTop = 120;
+    fireEvent.scroll(timeline);
+    expect(screen.getByTestId("following")).toHaveTextContent("false");
+
+    view.rerender(<Timeline visible messageCount={11} />);
+    expect(screen.getByTestId("unread")).toHaveTextContent("1");
+    view.rerender(<Timeline visible messageCount={13} />);
+    expect(screen.getByTestId("unread")).toHaveTextContent("3");
+    // Reading history stays put while the Agent writes.
+    expect(timeline.scrollTop).toBe(120);
+
+    fireEvent.click(screen.getByRole("button", { name: "Jump" }));
+    expect(screen.getByTestId("following")).toHaveTextContent("true");
+    expect(screen.getByTestId("unread")).toHaveTextContent("0");
+    expect(timeline.scrollTop).toBe(1000);
+  });
+
+  it("clears the count when the reader scrolls back to the newest Message", () => {
+    setupLane();
+    const view = render(<Timeline visible messageCount={10} />);
+    const timeline = screen.getByLabelText("Room timeline");
+    timeline.scrollTop = 120;
+    fireEvent.scroll(timeline);
+    view.rerender(<Timeline visible messageCount={12} />);
+    expect(screen.getByTestId("unread")).toHaveTextContent("2");
+
+    timeline.scrollTop = 800;
+    fireEvent.scroll(timeline);
+    expect(screen.getByTestId("following")).toHaveTextContent("true");
+    expect(screen.getByTestId("unread")).toHaveTextContent("0");
+  });
+
+  it("does not count a prepended page of older Messages", () => {
+    let height = 1000;
+    vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(
+      () => height,
+    );
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(200);
+    const view = render(<Timeline visible messageCount={10} />);
+    const timeline = screen.getByLabelText("Room timeline");
+    timeline.scrollTop = 120;
+    fireEvent.scroll(timeline);
+    fireEvent.click(screen.getByRole("button", { name: "Load older" }));
+    height = 1500;
+    view.rerender(
+      <Timeline visible firstMessageId="older" messageCount={20} />,
+    );
+    expect(screen.getByTestId("unread")).toHaveTextContent("0");
+    expect(timeline.scrollTop).toBe(620);
+  });
+
+  it("ignores its own jump frames but hears a reader who takes the timeline back", () => {
+    setupLane();
+    Object.defineProperty(Element.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      render(<Timeline visible />);
+      const timeline = screen.getByLabelText("Room timeline");
+      timeline.scrollTop = 120;
+      fireEvent.scroll(timeline);
+      expect(screen.getByTestId("following")).toHaveTextContent("false");
+
+      fireEvent.click(screen.getByRole("button", { name: "Jump" }));
+      // The animation's own frames keep following the newest Message.
+      timeline.scrollTop = 500;
+      fireEvent.scroll(timeline);
+      expect(screen.getByTestId("following")).toHaveTextContent("true");
+      timeline.scrollTop = 900;
+      fireEvent.scroll(timeline);
+      expect(screen.getByTestId("following")).toHaveTextContent("true");
+
+      // A reader who scrolls back mid-jump is heard, not swallowed.
+      timeline.scrollTop = 300;
+      fireEvent.scroll(timeline);
+      expect(screen.getByTestId("following")).toHaveTextContent("false");
+    } finally {
+      Reflect.deleteProperty(Element.prototype, "scrollTo");
+    }
+  });
+
+  it("scrolls smoothly unless motion is reduced", () => {
+    setupLane();
+    const scrollTo = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+    try {
+      render(<Timeline visible />);
+      fireEvent.click(screen.getByRole("button", { name: "Jump" }));
+      expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 1000 });
+
+      const matchMedia = vi
+        .spyOn(window, "matchMedia")
+        .mockReturnValue({ matches: true } as MediaQueryList);
+      try {
+        fireEvent.click(screen.getByRole("button", { name: "Jump" }));
+        expect(scrollTo).toHaveBeenLastCalledWith({
+          behavior: "instant",
+          top: 1000,
+        });
+      } finally {
+        matchMedia.mockRestore();
+      }
+    } finally {
+      Reflect.deleteProperty(Element.prototype, "scrollTo");
+    }
   });
 });

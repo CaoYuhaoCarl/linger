@@ -1,4 +1,4 @@
-import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import {
   formatMessageTime,
   isRoomNotice,
@@ -144,6 +144,12 @@ interface MessageTimelineProps {
   focusedMessageId?: string | null;
   focusedMessageHighlight?: string | null;
   workspaceAgentIds?: ReadonlySet<string>;
+  /** Whether the reader follows the newest Message rather than history. */
+  followingLatest?: boolean;
+  /** Messages that arrived while the reader was above the newest one. */
+  newMessageCount?: number;
+  /** Returns the timeline to the newest Message; the pill needs it to appear. */
+  onJumpToLatest?: () => void;
 }
 
 export function MessageTimeline({
@@ -185,6 +191,9 @@ export function MessageTimeline({
   focusedMessageId,
   focusedMessageHighlight,
   workspaceAgentIds = EMPTY_STATIC_AGENT_ACTOR_IDS,
+  followingLatest = true,
+  newMessageCount = 0,
+  onJumpToLatest,
 }: MessageTimelineProps) {
   const { filePreviewError, previewMessageFile } =
     useMessageFilePreview(onOpenMessageFile);
@@ -366,6 +375,24 @@ export function MessageTimeline({
           <MessageTimelineEmptyState />
         )}
       </div>
+      {onJumpToLatest &&
+      !followingLatest &&
+      (newMessageCount > 0 || hasTimelineContent) ? (
+        <div className="pointer-events-none sticky bottom-12 z-10 flex justify-center">
+          <Button
+            className="pointer-events-auto shadow-sm"
+            onClick={onJumpToLatest}
+            size="compact"
+            title="Scroll to the newest Message"
+            tone="subtle"
+          >
+            <Icon icon={ArrowDown01Icon} size={14} />
+            {newMessageCount > 0
+              ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"}`
+              : "Jump to latest"}
+          </Button>
+        </div>
+      ) : null}
       {filePreviewError ? (
         <p className="room-readable mb-2 text-xs text-app-danger" role="alert">
           {filePreviewError}
@@ -926,89 +953,98 @@ export function AgentStreamingStatusDock({
     : undefined;
 
   return (
-    // The status floats over the timeline's bottom padding instead of taking
-    // layout height, so its arrival never pushes the last Message up.
-    <div className="relative h-0">
-      <div
-        className="room-readable absolute inset-x-0 bottom-1 bg-app-surface"
-        data-testid="agent-streaming-status-dock"
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget))
-            setHovered(false);
-        }}
-        onFocus={() => setHovered(true)}
-        onPointerEnter={() => setHovered(true)}
-        onPointerLeave={() => setHovered(false)}
-      >
-        <div className="flex min-h-7 max-w-full items-center gap-1">
-          <button
-            aria-label={`Open ${statusLabel} activity`}
-            className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left text-xs text-app-muted transition-colors hover:bg-app-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus disabled:hover:bg-transparent"
-            disabled={!shownActivity}
-            onClick={() => {
-              // The status line opens the shown Agent's Activity panel.
-              if (!shownActivity || !shownEntry) return;
-              if (shownActivity.runId)
-                onViewActivity?.(
-                  shownActivity.runStatusId,
-                  shownEntry.agent,
-                  shownActivity.runId,
-                );
-              else
-                onViewActivity?.(shownActivity.runStatusId, shownEntry.agent);
-            }}
-            title={
-              shownEntry && line.current
-                ? `${shownEntry.agent.display_name}: ${statusLineText(line.current.content)}`
-                : undefined
-            }
-            type="button"
-          >
-            <StatusLineRoll
-              className="size-5 shrink-0"
-              current={line.current}
-              previous={line.previous}
-              itemKey={(shown) => shown.id}
-              render={(shown) => {
-                const entry = entries.find((item) => item.key === shown.id);
-                return (
-                  <ActorAvatar
-                    actorId={shown.id}
-                    kind="agent"
-                    name={entry?.agent.display_name ?? ""}
-                    size="xxs"
-                  />
-                );
-              }}
-            />
-            <StatusLineRoll
-              className="h-4 min-w-0 flex-1"
-              current={line.current}
-              previous={line.previous}
-              itemKey={(shown) => `${shown.id}:${shown.key}`}
-              render={(shown) => (
-                <StatusLineText
-                  content={shown.content}
-                  minutes={shown.minutes}
+    // Status rows stack in the composer's floating column; the row keeps its
+    // own surface so a line stays readable over the Messages behind it.
+    <div
+      className="room-readable pointer-events-auto bg-app-surface"
+      data-testid="agent-streaming-status-dock"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget))
+          setHovered(false);
+      }}
+      onFocus={() => setHovered(true)}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
+      <div className="flex min-h-7 max-w-full items-center gap-1">
+        <button
+          aria-label={`Open ${statusLabel} activity`}
+          className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left text-xs text-app-muted transition-colors hover:bg-app-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus disabled:hover:bg-transparent"
+          disabled={!shownActivity}
+          onClick={() => {
+            // The status line opens the shown Agent's Activity panel.
+            if (!shownActivity || !shownEntry) return;
+            if (shownActivity.runId)
+              onViewActivity?.(
+                shownActivity.runStatusId,
+                shownEntry.agent,
+                shownActivity.runId,
+              );
+            else onViewActivity?.(shownActivity.runStatusId, shownEntry.agent);
+          }}
+          title={
+            shownEntry && line.current
+              ? `${shownEntry.agent.display_name}: ${statusLineText(line.current.content)}`
+              : undefined
+          }
+          type="button"
+        >
+          <StatusLineRoll
+            className="size-5 shrink-0"
+            current={line.current}
+            previous={line.previous}
+            itemKey={(shown) => shown.id}
+            render={(shown) => {
+              const entry = entries.find((item) => item.key === shown.id);
+              return (
+                <ActorAvatar
+                  actorId={shown.id}
+                  kind="agent"
+                  name={entry?.agent.display_name ?? ""}
+                  size="xxs"
                 />
-              )}
+              );
+            }}
+          />
+          <StatusLineRoll
+            className="h-4 min-w-0 flex-1"
+            current={line.current}
+            previous={line.previous}
+            itemKey={(shown) => `${shown.id}:${shown.key}`}
+            render={(shown) => (
+              <StatusLineText content={shown.content} minutes={shown.minutes} />
+            )}
+          />
+        </button>
+        {shownEntry ? (
+          <>
+            <DockEntryStop
+              cancelRoomRun={cancelRoomRun}
+              entry={shownEntry}
+              scopeKey={scopeKey}
             />
-          </button>
-          {shownEntry ? (
-            <>
-              <DockEntryStop
-                cancelRoomRun={cancelRoomRun}
-                entry={shownEntry}
-                scopeKey={scopeKey}
-              />
-              <DockEntryResend
-                entry={shownEntry}
-                redeliverRoomRun={redeliverRoomRun}
-                scopeKey={scopeKey}
-              />
-            </>
-          ) : null}
-        </div>
+            <DockEntryResend
+              entry={shownEntry}
+              redeliverRoomRun={redeliverRoomRun}
+              scopeKey={scopeKey}
+            />
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The floating column just above a composer. Every indicator inside it flows
+ * in order, so a background Task line never covers the Agent's status line,
+ * and only the indicators themselves take pointer input.
+ */
+export function ComposerStatusColumn({ children }: { children: ReactNode }) {
+  return (
+    <div className="relative h-0">
+      <div className="pointer-events-none absolute inset-x-2.5 bottom-1.5 z-20 flex flex-col gap-1.5">
+        {children}
       </div>
     </div>
   );

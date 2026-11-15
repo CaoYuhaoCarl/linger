@@ -54,7 +54,7 @@ export function AgentRunStopButton({
   const stopped =
     result?.status === "canceled" || result?.status === "already_terminal";
   return (
-    <span className="inline-flex min-w-0 shrink-0 items-center gap-1">
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
       <Button
         type="button"
         tone="ghost"
@@ -77,7 +77,7 @@ export function AgentRunStopButton({
       {state.status === "error" ? (
         <span
           role="alert"
-          className="max-w-28 truncate text-[12px] text-app-danger"
+          className="min-w-0 text-[12px] leading-tight text-app-danger"
         >
           Stop not confirmed. Check the task status, then retry.
         </span>
@@ -131,7 +131,7 @@ export function AgentRunResendButton({
       </span>
     );
   return (
-    <span className="inline-flex min-w-0 shrink-0 items-center gap-1">
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
       <Button
         type="button"
         tone="ghost"
@@ -146,7 +146,7 @@ export function AgentRunResendButton({
       {state.status === "error" ? (
         <span
           role="alert"
-          className="max-w-28 truncate text-[12px] text-app-danger"
+          className="min-w-0 text-[12px] leading-tight text-app-danger"
         >
           Resend failed. Try again.
         </span>

@@ -13,9 +13,10 @@ import {
 } from "./use-room-background-tasks";
 
 /**
- * One floating line above the composer while this Room's Meta has background
- * Tasks running. It opens a short list of what each one is doing, where
- * each can be opened or canceled, and disappears once every Task is done.
+ * One line in the composer's status column while this Room's Meta has
+ * background Tasks running. It opens a short list of what each one is doing,
+ * where each can be opened or canceled, and disappears once every Task is
+ * done.
  */
 export function BackgroundTasksIndicator({
   client,
@@ -33,14 +34,11 @@ export function BackgroundTasksIndicator({
   return (
     <>
       {tasks.length ? (
-        // Floats over the bottom of the timeline instead of pushing the composer.
-        <div className="relative h-0">
-          <BackgroundTasksPill
-            onCancel={cancel}
-            onOpen={setOpened}
-            tasks={tasks}
-          />
-        </div>
+        <BackgroundTasksPill
+          onCancel={cancel}
+          onOpen={setOpened}
+          tasks={tasks}
+        />
       ) : null}
       {opened ? (
         <TaskConversationDialog
@@ -89,13 +87,14 @@ export function BackgroundTasksPill({
   const count = tasks.length;
   return (
     <div
-      className="absolute bottom-2 left-1/2 z-20 -translate-x-1/2"
+      className="pointer-events-auto relative self-start"
+      data-testid="background-tasks-pill"
       ref={root}
     >
       {open ? (
         <section
           aria-label="Background tasks"
-          className="absolute bottom-full left-1/2 mb-1.5 w-[min(360px,calc(100vw-48px))] -translate-x-1/2 rounded-xl bg-popover p-1.5 shadow-md"
+          className="absolute bottom-full left-0 mb-1.5 w-[min(360px,calc(100vw-48px))] rounded-xl bg-popover p-1.5 shadow-md"
           id={listId}
         >
           <p className="px-2 pt-1 pb-1.5 text-[12px] leading-[18px] font-[470] text-app-muted">

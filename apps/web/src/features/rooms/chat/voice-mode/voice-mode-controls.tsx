@@ -121,11 +121,10 @@ export function VoiceModeControls(props: {
                     ? "Voice Mode: sends when you finish speaking"
                     : "Voice Mode: add a Soniox or xAI key to start"
           }
-          className="message-composer-send"
+          className="composer-voice-button"
           disabled={closing || props.disabled || Boolean(elsewhere)}
           onClick={() => enter()}
           size="compactIcon"
-          tone="primary"
         >
           <Icon icon={AudioWave01Icon} size={16} />
         </Button>

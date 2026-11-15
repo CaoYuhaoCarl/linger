@@ -16,6 +16,10 @@ import {
   BackgroundTasksPill,
   runningFor,
 } from "./background-tasks-indicator";
+import {
+  AgentStreamingStatusDock,
+  ComposerStatusColumn,
+} from "./message-timeline";
 
 const now = Date.parse("2026-10-28T14:31:00Z");
 
@@ -151,6 +155,44 @@ describe("BackgroundTasksIndicator", () => {
       await screen.findByRole("button", {
         name: "1 task running in the background",
       }),
+    ).toBeVisible();
+  });
+});
+
+describe("Composer status column", () => {
+  it("stacks background Tasks above the Agent status line instead of covering it", () => {
+    render(
+      <ComposerStatusColumn>
+        <BackgroundTasksPill now={now} tasks={tasks} />
+        <AgentStreamingStatusDock
+          typingAgent={{ display_name: "Codex", id: "actor-codex" }}
+        />
+      </ComposerStatusColumn>,
+    );
+    const pill = screen.getByRole("button", {
+      name: "2 tasks running in the background",
+    });
+    const dock = screen.getByTestId("agent-streaming-status-dock");
+    const pillRoot = pill.parentElement!;
+    expect(pill).toBeVisible();
+    expect(dock).toBeVisible();
+    // One column of flow rows: neither indicator reserves its own anchor above
+    // the composer, so the Task line cannot land on the Agent's status line.
+    expect(pillRoot.parentElement).toBe(dock.parentElement);
+    expect(dock.parentElement).toHaveClass("flex-col");
+    expect(
+      pill.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(pillRoot.className).not.toMatch(/absolute|bottom-/);
+    expect(dock.className).not.toMatch(/absolute|bottom-/);
+    // The column itself ignores pointer input so Messages behind it stay
+    // reachable; only the indicators take clicks.
+    expect(pillRoot).toHaveClass("pointer-events-auto");
+    expect(dock).toHaveClass("pointer-events-auto");
+
+    fireEvent.click(pill);
+    expect(
+      screen.getByRole("region", { name: "Background tasks" }),
     ).toBeVisible();
   });
 });

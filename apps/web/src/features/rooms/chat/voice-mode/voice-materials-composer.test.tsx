@@ -145,9 +145,16 @@ describe("voice material composer", () => {
         </TeamHubRuntimeProvider>,
       );
       expect(await screen.findByRole("button", { name: shown })).toBeVisible();
-      const other =
-        shown === "Send message" ? "Start Voice Mode" : "Send message";
-      expect(screen.queryByRole("button", { name: other })).toBeNull();
+      // Send keeps its own control beside Voice Mode, so the corner never
+      // makes one action look like the other; it is disabled until text exists.
+      const send = screen.getByRole("button", { name: "Send message" });
+      expect(send).toBeVisible();
+      expect(send).toBeDisabled();
+      if (shown === "Send message") {
+        expect(
+          screen.queryByRole("button", { name: "Start Voice Mode" }),
+        ).toBeNull();
+      }
       view.unmount();
     },
   );
