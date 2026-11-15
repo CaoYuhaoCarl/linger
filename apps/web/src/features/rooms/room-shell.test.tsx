@@ -96,10 +96,14 @@ describe("Room shell Account menu", () => {
       },
     });
     const content = screen.getByText("Shell content");
-    expect(
-      await screen.findByRole("button", { name: "Retry Rooms" }),
-    ).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Retry Rooms" }));
+    const retry = await screen.findByRole("button", { name: "Retry Rooms" });
+    expect(retry).toBeVisible();
+    // The failed list reports itself as one alert block in the sidebar, with
+    // the retry beside its message rather than as loose inline text.
+    const alert = screen.getByRole("alert");
+    expect(alert).toContainElement(retry);
+    expect(alert).toHaveTextContent("Rooms could not be loaded.");
+    fireEvent.click(retry);
     expect(await screen.findByRole("link", { name: "all" })).toBeVisible();
     expect(screen.getByText("Shell content")).toBe(content);
     expect(

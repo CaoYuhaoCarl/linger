@@ -756,12 +756,15 @@ function NotFoundRoute({ inShell = false }: { inShell?: boolean }) {
       className={`flex flex-col items-center justify-center gap-4 bg-app-canvas px-8 text-center text-app-ink ${inShell ? "h-full min-h-0 flex-1" : "min-h-dvh"}`}
     >
       <h1 className="text-lg">Page not found</h1>
+      <p className="max-w-sm text-sm leading-6 text-app-muted">
+        The link may be broken, or the page may have been removed.
+      </p>
       <Button
         onClick={() => {
           void navigate(tenantId ? `/t/${tenantId}/rooms` : "/");
         }}
       >
-        Open Message
+        Back to Messages
       </Button>
     </main>
   );

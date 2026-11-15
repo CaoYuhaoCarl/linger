@@ -1,4 +1,10 @@
-import { Message01Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import {
+  BookOpen01Icon,
+  LibrariesIcon,
+  Message01Icon,
+  Plug01Icon,
+  Settings01Icon,
+} from "@hugeicons/core-free-icons";
 import {
   isRouteErrorResponse,
   NavLink,
@@ -48,13 +54,9 @@ function PanelRouteErrorContent() {
 function ApplicationRouteErrorSurface({ tenantId }: { tenantId?: string }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { roomId } = useParams();
   const content = useRouteErrorContent(true);
-  const roomsPath = tenantId
-    ? roomId
-      ? `/t/${tenantId}/rooms/${roomId}/chat`
-      : `/t/${tenantId}/rooms`
-    : undefined;
+  // A broken Room leaves by its Space, never by the Room that failed to load.
+  const roomsPath = tenantId ? `/t/${tenantId}/rooms` : undefined;
   const showRoomList = Boolean(
     tenantId && location.pathname.startsWith(`/t/${tenantId}/rooms`),
   );
@@ -73,8 +75,23 @@ function ApplicationRouteErrorSurface({ tenantId }: { tenantId?: string }) {
           <div className="mt-4 flex w-full flex-1 flex-col items-center gap-2">
             <ErrorRailLink
               icon={<Icon icon={Message01Icon} size={16} />}
-              label="Rooms"
+              label="Messages"
               to={roomsPath}
+            />
+            <ErrorRailLink
+              icon={<Icon icon={LibrariesIcon} size={16} />}
+              label="Library"
+              to={tenantId ? `/t/${tenantId}/library` : undefined}
+            />
+            <ErrorRailLink
+              icon={<Icon icon={BookOpen01Icon} size={16} />}
+              label="Wiki"
+              to={tenantId ? `/t/${tenantId}/library/wiki` : undefined}
+            />
+            <ErrorRailLink
+              icon={<Icon icon={Plug01Icon} size={16} />}
+              label="Connectors"
+              to={tenantId ? `/t/${tenantId}/apps` : undefined}
             />
             <div className="mt-auto">
               <ErrorRailLink
@@ -215,11 +232,6 @@ function useRouteErrorContent(fullPage: boolean) {
   return {
     restricted: false,
     message,
-    title:
-      status === 404
-        ? "Room unavailable"
-        : fullPage
-          ? "TeamHub unavailable"
-          : "This view could not be loaded",
+    title: fullPage ? "TeamHub unavailable" : "This view could not be loaded",
   };
 }

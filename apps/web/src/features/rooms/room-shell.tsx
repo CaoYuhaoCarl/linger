@@ -172,9 +172,17 @@ function RoomShellReady({
                 <RoomNavigationLoading />
               </>
             ) : roomsQuery.isError ? (
-              <div role="alert">
-                Rooms could not be loaded.{" "}
-                <Button onClick={() => void roomsQuery.refetch()}>
+              <div
+                className="mx-1 rounded-xl border border-app-border bg-muted/40 p-3 text-xs text-muted-foreground"
+                role="alert"
+              >
+                <p>Rooms could not be loaded.</p>
+                <Button
+                  className="mt-2"
+                  onClick={() => void roomsQuery.refetch()}
+                  size="compact"
+                  tone="secondary"
+                >
                   Retry Rooms
                 </Button>
               </div>

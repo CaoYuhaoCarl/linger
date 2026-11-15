@@ -1,3 +1,4 @@
+import { secondaryNavigationHeaderClass } from "@/components/ui/secondary-navigation";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { TeamHubRoomListItem } from "@/features/teamhub/teamhub-types";
 
@@ -75,8 +76,12 @@ export function AuthenticatedRouteLoading({
         <DashboardLoading />
       ) : route.kind === "library" ? (
         <LibraryLoading />
+      ) : route.kind === "connectors" ? (
+        <ConnectorsLoading />
+      ) : route.kind === "settings" ? (
+        <SettingsLoading />
       ) : route.kind === "document" ? (
-        <DocumentLoading />
+        <DocumentLoading heading={route.label} />
       ) : (
         <PageLoading />
       )}
@@ -85,11 +90,13 @@ export function AuthenticatedRouteLoading({
 }
 
 type LoadingRoute =
+  | { kind: "connectors"; label: string }
   | { kind: "dashboard"; label: string }
   | { kind: "document"; label: string }
   | { kind: "library"; label: string }
   | { kind: "page"; label: string }
-  | { kind: "room"; label: string };
+  | { kind: "room"; label: string }
+  | { kind: "settings"; label: string };
 
 function classifyRoute(
   pathname: string,
@@ -109,14 +116,23 @@ function classifyRoute(
   if (roomsIndex >= 0) {
     return { kind: "page", label: "Rooms" };
   }
+  // Settings sections include Computers, so Settings is read before it.
+  if (segments.includes("settings")) {
+    return { kind: "settings", label: "Settings" };
+  }
   if (segments.includes("computers")) {
     return { kind: "page", label: "Local computers" };
   }
   if (segments.includes("apps")) {
-    return { kind: "page", label: "Apps" };
+    return { kind: "connectors", label: "Connectors" };
   }
   if (segments.includes("dashboard")) {
     return { kind: "dashboard", label: "Dashboard" };
+  }
+  // An open meeting keeps the Library sidebar beside the reader, so it loads
+  // like a Document rather than like the Library landing pages.
+  if (segments.includes("meetings")) {
+    return { kind: "document", label: "Meeting" };
   }
   if (segments.includes("library")) {
     return {
@@ -220,8 +236,11 @@ function DashboardLoading() {
         <Skeleton className="h-6 w-32" />
         <Skeleton className="mt-2 h-3 w-20" />
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-hidden p-4 lg:grid-cols-5">
-        {[0, 1, 2, 3, 4].map((column) => (
+      <div
+        className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-hidden p-4 lg:grid-cols-4"
+        data-testid="loading-dashboard-columns"
+      >
+        {[0, 1, 2, 3].map((column) => (
           <section
             className="min-w-0 rounded-xl bg-app-sidebar p-3"
             key={column}
@@ -238,53 +257,225 @@ function DashboardLoading() {
 
 /**
  * The Library sidebar is chrome, so it stays in place while the route module
- * loads and only the content column reads as pending.
+ * loads and only the content column reads as pending. Its geometry follows
+ * {@link LibrarySidebar}: a Back to Library header over a tree of rows.
  */
 function WorkspaceSidebarLoading() {
   return (
     <>
       <aside
         aria-hidden="true"
-        className="hidden w-[220px] shrink-0 bg-app-sidebar px-2 py-3 sm:block"
+        className="workspace-scrollbar shrink-0 overflow-y-auto bg-app-surface px-2 pb-3 max-sm:hidden sm:w-[calc(var(--sidebar-width)+20px)] sm:pl-[10px] sm:pr-[18px]"
+        data-testid="loading-workspace-sidebar"
       >
-        <div className="space-y-0.5 text-sm text-app-body">
-          {["Overview", "Search", "Wiki"].map((item) => (
-            <div className="flex h-9 items-center px-2" key={item}>
-              {item}
+        <div
+          className={`${secondaryNavigationHeaderClass} sticky top-0 z-10 bg-app-surface`}
+        >
+          <Skeleton className="h-8 w-32 rounded-lg" />
+        </div>
+        <div className="space-y-0.5 pt-2">
+          {TREE_LOADING_ROWS.map((row) => (
+            <div
+              className={`flex h-8 items-center gap-2 ${row.indent}`}
+              key={row.id}
+            >
+              <Skeleton className="size-3.5 shrink-0 rounded-[3px]" />
+              <Skeleton className={`h-3 ${row.width}`} />
             </div>
           ))}
         </div>
-        <div className="mt-4 space-y-0.5 text-sm font-medium text-app-body">
-          <div className="flex h-9 items-center px-2">My pages</div>
-          <div className="flex h-9 items-center px-2">Shared with me</div>
+        <div className="mt-4 space-y-0.5">
+          {TREE_LOADING_MEETINGS.map((width) => (
+            <div className="flex h-8 items-center gap-2 px-1.5" key={width}>
+              <Skeleton className="size-3.5 shrink-0 rounded-[3px]" />
+              <Skeleton className={`h-3 ${width}`} />
+            </div>
+          ))}
         </div>
       </aside>
-      <div className="hidden w-px shrink-0 bg-border/60 sm:block" />
+      <div className="relative hidden w-px shrink-0 bg-border sm:block" />
     </>
   );
 }
 
+/** Collapsible tree rows: a folder, the pages inside it, then two more folders. */
+const TREE_LOADING_ROWS: ReadonlyArray<{
+  id: string;
+  indent: string;
+  width: string;
+}> = [
+  { id: "folder-1", indent: "px-1.5", width: "w-24" },
+  { id: "page-1", indent: "pl-6 pr-1.5", width: "w-32" },
+  { id: "page-2", indent: "pl-6 pr-1.5", width: "w-20" },
+  { id: "page-3", indent: "pl-6 pr-1.5", width: "w-28" },
+  { id: "folder-2", indent: "px-1.5", width: "w-20" },
+  { id: "folder-3", indent: "px-1.5", width: "w-28" },
+];
+
+const TREE_LOADING_MEETINGS: ReadonlyArray<string> = ["w-24", "w-32", "w-20"];
+
+const LIBRARY_LOADING_ROWS: ReadonlyArray<{ id: string; width: string }> = [
+  { id: "file-1", width: "w-1/2" },
+  { id: "file-2", width: "w-2/5" },
+  { id: "file-3", width: "w-3/5" },
+  { id: "file-4", width: "w-1/3" },
+  { id: "file-5", width: "w-1/2" },
+  { id: "file-6", width: "w-2/5" },
+];
+
+/**
+ * The Library and Wiki landing pages render no sidebar, so their pending state
+ * is one centered file browser. Keeping the sidebar out here avoids a horizontal
+ * snap when the real page arrives without one.
+ */
 function LibraryLoading() {
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden" aria-hidden="true">
-      <WorkspaceSidebarLoading />
-      <section className="workspace-content-viewport min-w-0 flex-1 px-6 py-7">
-        <Skeleton className="h-5 w-32" />
-        <div className="mt-5 flex gap-3">
-          <Skeleton className="h-8 w-28" />
-          <Skeleton className="h-8 w-40" />
-        </div>
-        <div className="mt-6 space-y-2">
-          {["w-full", "w-[92%]", "w-[96%]", "w-[84%]"].map((width) => (
-            <Skeleton className={`h-12 ${width}`} key={width} />
+    <main
+      aria-hidden="true"
+      className="workspace-content-viewport workspace-scrollbar min-w-0 flex-1 overflow-y-auto bg-app-surface [scrollbar-gutter:stable]"
+    >
+      <div className="workspace-file-browser">
+        <header className="workspace-files-heading">
+          <Skeleton className="h-7 w-24" />
+          <div className="ml-auto flex items-center gap-1">
+            <Skeleton className="h-8 w-28 rounded-lg" />
+          </div>
+        </header>
+        <section className="workspace-recent">
+          <Skeleton className="mb-2 h-3.5 w-16" />
+          <div className="workspace-recent-cards">
+            {[0, 1, 2, 3].map((card) => (
+              <div className="workspace-recent-card" key={card}>
+                <div className="workspace-recent-link">
+                  <div className="workspace-recent-icon">
+                    <Skeleton className="size-4 rounded-[3px]" />
+                  </div>
+                  <Skeleton className="h-3.5 w-4/5" />
+                  <Skeleton className="h-3 w-2/3" />
+                  <Skeleton className="mt-2 h-2.5 w-16" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <div
+          className="workspace-file-tabs relative flex max-w-full gap-1 overflow-x-auto"
+          data-testid="loading-library-tabs"
+        >
+          {["w-16", "w-24", "w-20"].map((width) => (
+            <div
+              className="inline-flex h-9 shrink-0 items-center px-3"
+              key={width}
+            >
+              <Skeleton className={`h-3.5 ${width}`} />
+            </div>
           ))}
         </div>
-      </section>
+        <div className="workspace-file-filters">
+          <Skeleton className="h-8 w-24 rounded-full" />
+          <Skeleton className="h-8 w-36 rounded-full" />
+        </div>
+        <div className="workspace-file-list">
+          {LIBRARY_LOADING_ROWS.map(({ id, width }) => (
+            <div className="workspace-file-row" key={id}>
+              <div className="workspace-file-name">
+                <Skeleton className="size-4 shrink-0 rounded-[3px]" />
+                <Skeleton className={`h-3.5 ${width}`} />
+              </div>
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="size-4 justify-self-end rounded-[3px]" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+/**
+ * Connectors is one centered browser column: a title, the category tabs with
+ * the Connected only toggle, then the three-column card grid.
+ */
+function ConnectorsLoading() {
+  return (
+    <main
+      aria-hidden="true"
+      className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto bg-background [scrollbar-gutter:stable]"
+    >
+      <div className="workspace-file-browser">
+        <Skeleton className="mb-5 h-8 w-40" />
+        <div className="flex items-start gap-3">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+            {["w-10", "w-20", "w-24", "w-16"].map((width) => (
+              <div
+                className="inline-flex h-9 shrink-0 items-center px-3"
+                key={width}
+              >
+                <Skeleton className={`h-3.5 ${width}`} />
+              </div>
+            ))}
+          </div>
+          <Skeleton className="h-8 w-32 rounded-lg" />
+        </div>
+        <div
+          className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          data-testid="loading-connector-cards"
+        >
+          {[0, 1, 2, 3, 4, 5].map((card) => (
+            <div
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-card px-4 py-3"
+              key={card}
+            >
+              <Skeleton className="size-8 shrink-0 rounded-lg" />
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <Skeleton className="h-3.5 w-24" />
+                <Skeleton className="h-3 w-32" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+/**
+ * Settings is a page in the Space shell: its own sections beside the rail and
+ * one centered column of content, so no Library chrome appears here.
+ */
+function SettingsLoading() {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex min-h-0 flex-1 flex-col md:flex-row"
+    >
+      <aside className="flex shrink-0 flex-col border-b border-border px-3 py-4 md:w-[228px] md:border-r md:border-b-0">
+        <div className="flex items-center pt-0.5 pb-3.5">
+          <Skeleton className="h-6 w-20" />
+        </div>
+        <div className="flex gap-0.5 overflow-x-auto md:flex-col">
+          {["w-16", "w-20", "w-24"].map((width) => (
+            <div
+              className="flex h-[33px] shrink-0 items-center gap-2 px-2 py-1.5"
+              key={width}
+            >
+              <Skeleton className="size-3.5 shrink-0 rounded-[3px]" />
+              <Skeleton className={`h-3 ${width}`} />
+            </div>
+          ))}
+        </div>
+      </aside>
+      <div className="workspace-content-viewport workspace-scrollbar flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-6 md:px-8">
+        <div className="mx-auto w-full max-w-(--app-settings-width) space-y-4">
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      </div>
     </div>
   );
 }
 
-function DocumentLoading() {
+function DocumentLoading({ heading }: { heading: string }) {
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       <WorkspaceSidebarLoading />
@@ -293,10 +484,10 @@ function DocumentLoading() {
           aria-hidden="true"
           className="flex h-(--app-header-height) shrink-0 items-center gap-2 border-b border-border/60 px-3 sm:px-5"
         >
-          <span className="text-sm font-medium text-foreground">Document</span>
+          <span className="text-sm font-medium text-foreground">{heading}</span>
         </header>
         <div
-          aria-label="Loading Document body"
+          aria-label={`Loading ${heading} body`}
           className="workspace-content px-5 py-12 sm:px-0"
           role="status"
         >
