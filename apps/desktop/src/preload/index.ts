@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC,
   type ComputerStatus,
+  type IMessageStatus,
   type LingerDesktopApi,
 } from "../shared/api.js";
 
@@ -42,6 +43,19 @@ const api: LingerDesktopApi = {
     ? {
         permissions: {
           act: (step) => ipcRenderer.invoke(IPC.permissionAct, step),
+        },
+        imessage: {
+          getStatus: () => ipcRenderer.invoke(IPC.imessageStatus),
+          onStatus: (callback) => {
+            const listener = (_event: unknown, status: IMessageStatus): void =>
+              callback(status);
+            ipcRenderer.on(IPC.imessageStatusEvent, listener);
+            return () => {
+              ipcRenderer.off(IPC.imessageStatusEvent, listener);
+            };
+          },
+          set: (patch) => ipcRenderer.invoke(IPC.imessageSet, patch),
+          act: (action) => ipcRenderer.invoke(IPC.imessageAct, action),
         },
       }
     : {}),

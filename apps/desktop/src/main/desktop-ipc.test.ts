@@ -98,3 +98,76 @@ describe("DesktopIpcModule local account", () => {
     await f.host.stop("quit");
   });
 });
+
+describe("DesktopIpcModule iMessage", () => {
+  const imessageFixture = async () => {
+    const imessage = {
+      ...stubModule("IMessage"),
+      refresh: vi.fn(async () => ({ enabled: false })),
+      set: vi.fn(() => ({ ok: true })),
+      act: vi.fn(async () => ({ enabled: false })),
+    };
+    const host = testHost(
+      [
+        stubModule("Enrollment"),
+        stubModule("PowerGuard"),
+        stubModule("ComputerDaemon"),
+        {
+          ...stubModule("WindowManager"),
+          webContents: () => undefined,
+        } as never,
+        stubModule("WorkspaceGrants"),
+        stubModule("LocalServer"),
+        imessage as never,
+        new DesktopIpcModule({ defaultDisplayName: "Desk", imessage: true }),
+      ],
+      { serverUrl: SERVER },
+    );
+    await host.start();
+    const invoke = (channel: string, arg?: unknown, origin = SERVER) =>
+      handlers.get(channel)!({ senderFrame: { origin } }, arg);
+    return { host, imessage, invoke };
+  };
+
+  it("registers no iMessage channels without the module", async () => {
+    const f = await fixture();
+    expect(handlers.has(IPC.imessageStatus)).toBe(false);
+    expect(handlers.has(IPC.imessageSet)).toBe(false);
+    await f.host.stop("quit");
+  });
+
+  it("rejects other origins and bad input", async () => {
+    const f = await imessageFixture();
+    const evil = "https://evil.example.com";
+    expect(() => f.invoke(IPC.imessageStatus, undefined, evil)).toThrow(
+      "Not allowed",
+    );
+    expect(() => f.invoke(IPC.imessageSet, { enabled: true }, evil)).toThrow(
+      "Not allowed",
+    );
+    expect(() => f.invoke(IPC.imessageAct, "retry_install", evil)).toThrow(
+      "Not allowed",
+    );
+    expect(() => f.invoke(IPC.imessageSet, { enabled: "yes" })).toThrow();
+    expect(() => f.invoke(IPC.imessageSet, { extra: 1 })).toThrow();
+    expect(() => f.invoke(IPC.imessageSet, { handles: [1] })).toThrow();
+    expect(() => f.invoke(IPC.imessageAct, "run_shell")).toThrow();
+    expect(f.imessage.set).not.toHaveBeenCalled();
+    expect(f.imessage.act).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("passes valid calls to the module", async () => {
+    const f = await imessageFixture();
+    await f.invoke(IPC.imessageStatus);
+    expect(f.imessage.refresh).toHaveBeenCalledOnce();
+    f.invoke(IPC.imessageSet, { enabled: true, handles: ["a@b.co"] });
+    expect(f.imessage.set).toHaveBeenCalledWith({
+      enabled: true,
+      handles: ["a@b.co"],
+    });
+    await f.invoke(IPC.imessageAct, "request_automation");
+    expect(f.imessage.act).toHaveBeenCalledWith("request_automation");
+    await f.host.stop("quit");
+  });
+});

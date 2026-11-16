@@ -11,6 +11,7 @@ import {
 import type { ComputerDaemonModule } from "./computer-daemon.js";
 import type { WorkspaceGrant } from "./config.js";
 import type { EnrollmentModule } from "./enrollment.js";
+import type { IMessageModule } from "./imessage.js";
 import type { LocalServerModule } from "./local-server.js";
 import type { Module, ModuleContext } from "./modules.js";
 import { sameOrigin } from "./navigation.js";
@@ -50,21 +51,30 @@ const permissionStepInput = z.discriminatedUnion("action", [
     .strict(),
 ]);
 
+const imessagePatchInput = z
+  .object({
+    enabled: z.boolean().optional(),
+    // The module checks each handle; this only bounds the input.
+    handles: z.array(z.string().max(320)).max(50).optional(),
+  })
+  .strict();
+const imessageActionInput = z.enum([
+  "request_automation",
+  "open_full_disk_settings",
+  "open_automation_settings",
+  "retry_install",
+]);
+
 const view = (grant: WorkspaceGrant): WorkspaceGrantView => ({ ...grant });
 
 // The preload API handlers. Every call must come from a frame on
 // the configured server origin; inputs are validated with zod.
 export class DesktopIpcModule implements Module {
   readonly name = "DesktopIpc";
-  readonly dependsOn = [
-    "Enrollment",
-    "LocalServer",
-    "PowerGuard",
-    "ComputerDaemon",
-    "WindowManager",
-    "WorkspaceGrants",
-  ];
+  readonly dependsOn: readonly string[];
   readonly #defaultDisplayName: string;
+  // Whether the IMessage module runs (macOS only).
+  readonly #imessage: boolean;
   // Set on macOS only.
   readonly #permissions: DesktopPermissionHost | undefined;
   readonly #unsubscribe: (() => void)[] = [];
@@ -72,8 +82,19 @@ export class DesktopIpcModule implements Module {
   constructor(options: {
     defaultDisplayName: string;
     permissions?: DesktopPermissionHost;
+    imessage?: boolean;
   }) {
     this.#defaultDisplayName = options.defaultDisplayName;
+    this.#imessage = options.imessage ?? false;
+    this.dependsOn = [
+      "Enrollment",
+      "LocalServer",
+      "PowerGuard",
+      "ComputerDaemon",
+      "WindowManager",
+      "WorkspaceGrants",
+      ...(this.#imessage ? ["IMessage"] : []),
+    ];
     this.#permissions = options.permissions;
   }
 
@@ -158,6 +179,22 @@ export class DesktopIpcModule implements Module {
       handle(IPC.permissionAct, (step) =>
         runDesktopPermissionStep(permissions, permissionStepInput.parse(step)),
       );
+
+    if (this.#imessage) {
+      const imessage = ctx.get<IMessageModule>("IMessage");
+      handle(IPC.imessageStatus, () => imessage.refresh());
+      handle(IPC.imessageSet, (patch) =>
+        imessage.set(imessagePatchInput.parse(patch)),
+      );
+      handle(IPC.imessageAct, (action) =>
+        imessage.act(imessageActionInput.parse(action)),
+      );
+      this.#unsubscribe.push(
+        ctx.bus.on("imessage.changed", (next) => {
+          windows.webContents()?.send(IPC.imessageStatusEvent, next);
+        }),
+      );
+    }
 
     const push = (): void => {
       windows.webContents()?.send(IPC.computerStatusEvent, status());

@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 
+import type { IMessageStatus } from "../shared/api.js";
 import type { ConfigStore } from "./config.js";
 import type { Logger } from "./log.js";
 
@@ -20,6 +21,7 @@ export interface BusEvents {
   "computer.failed": [reason: string | undefined];
   "computer.renamed": [];
   "grants.changed": [];
+  "imessage.changed": [status: IMessageStatus];
   "local-server.changed": [];
   // Forget the installation the window used and set this computer up again.
   "local-server.reset": [];
