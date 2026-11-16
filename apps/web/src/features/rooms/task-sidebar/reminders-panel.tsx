@@ -8,6 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import {
   SettingsGroup,
@@ -222,19 +223,12 @@ function RoutineAgenda({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-5 pb-6 font-(family-name:--app-room-font)">
       {scheduled.length === 0 && listeners.length === 0 ? (
-        <SettingsGroup ariaLabel="No routines">
-          <SettingsRow icon={<Icon icon={Clock01Icon} size={16} />}>
-            <span className="min-w-0 flex-1 py-1">
-              <span className="block text-[14px] font-medium leading-[18px] text-foreground">
-                No routines in this room yet.
-              </span>
-              <span className="mt-0.5 block text-xs leading-[17px] text-muted-foreground">
-                Run something once at a set time, or daily, weekly, or every few
-                hours.
-              </span>
-            </span>
-          </SettingsRow>
-        </SettingsGroup>
+        <EmptyState
+          className="min-h-40"
+          detail="Run something once at a set time, or daily, weekly, or every few hours."
+          icon={Clock01Icon}
+          title="No routines in this room yet."
+        />
       ) : null}
       {listeners.length > 0 ? (
         <SettingsGroup label="Watching">

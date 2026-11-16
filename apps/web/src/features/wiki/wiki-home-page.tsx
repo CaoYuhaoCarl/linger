@@ -14,6 +14,7 @@ import {
 } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
+import { EmptyNote } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTabIndicator } from "@/components/ui/tab-indicator";
@@ -344,7 +345,7 @@ function WikiOverview({
         onRetry={collections.refetch}
       />
     ) : refreshing ? null : (
-      <p className="landing-empty">{empty}</p>
+      <EmptyNote className="landing-empty">{empty}</EmptyNote>
     );
 
   return (
@@ -392,7 +393,9 @@ function WikiOverview({
                 })}
               </div>
             ) : (
-              <p className="landing-empty">No daily reports yet.</p>
+              <EmptyNote className="landing-empty">
+                No daily reports yet.
+              </EmptyNote>
             )}
           </section>
           <EntryCards

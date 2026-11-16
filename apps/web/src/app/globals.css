@@ -1921,6 +1921,23 @@ a[href][aria-disabled="true"],
   max-width: 640px;
 }
 
+/* A Thread panel is narrower than the chat lane, so its Messages fit the panel
+   rather than the chat's card width and never force a sideways scroll that
+   moves the reply dock. */
+[data-voice-scroll="thread"] {
+  --chat-card-width: 100%;
+  --room-readable-width: 100%;
+}
+
+[data-voice-scroll="thread"] .message-row .agent-status-card,
+[data-voice-scroll="thread"] .room-message-card {
+  max-width: 100%;
+}
+
+[data-voice-scroll="thread"] .room-message-content {
+  min-width: 0;
+}
+
 /* Keep compact hover tools at the 24px minimum target. */
 .message-row-actions button {
   min-width: 24px;
@@ -1928,10 +1945,12 @@ a[href][aria-disabled="true"],
 }
 
 /* The timeline fades out under the header's bottom edge instead of meeting it
-   at a hard divider line. */
+   at a hard divider line. An anchored scroll stops above the status rows that
+   float over the timeline's end, so a jump never parks text under them. */
 .room-timeline {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
   mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+  scroll-padding-bottom: 5rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3503,6 +3522,30 @@ input:focus-visible + .select-pill {
 }
 
 @media (hover: none) {
+  /* A touch screen never hovers, so a Message's actions cannot wait for it.
+     They stay visible, and they sit on the row's own edge instead of hanging
+     past the lane's end; the hover hints would overflow, so they are dropped. */
+  .message-row-actions {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
+  .room-message-body-line > .message-row-actions,
+  .room-message-bubble > .message-row-actions,
+  .room-message-card[data-current-actor="true"]
+    :is(.room-message-body-line, .room-message-bubble)
+    > .message-row-actions {
+    top: -28px;
+    right: 0;
+    left: auto;
+    margin: 0;
+    transform: none;
+  }
+
+  .message-action-tooltip {
+    display: none;
+  }
+
   .wiki-generated-row.group > .wiki-display-actions {
     pointer-events: auto;
     opacity: 1;

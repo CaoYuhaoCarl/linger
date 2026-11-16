@@ -2,7 +2,6 @@ import {
   ArrowRight01Icon,
   ArrowTurnBackwardIcon,
   Clock01Icon,
-  Search01Icon,
 } from "@hugeicons/core-free-icons";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -23,44 +22,6 @@ import {
 import type { SearchTarget } from "./global-search-recent";
 import { HighlightedText } from "./search-highlight";
 import { relativeTimeLabel, snippetAround } from "./search-text";
-
-export function EmptyState({
-  action,
-  detail,
-  title,
-  tone = "muted",
-}: {
-  action?: { label: string; onSelect: () => void };
-  detail: string;
-  title: string;
-  tone?: "danger" | "muted";
-}) {
-  return (
-    <div
-      className="global-search-enter flex h-full flex-col items-center justify-center gap-1 px-6 text-center"
-      role={tone === "danger" ? "alert" : "status"}
-    >
-      <span className="mb-2 grid size-10 place-items-center rounded-xl bg-(--app-field-surface) text-muted-foreground shadow-outline">
-        <Icon icon={Search01Icon} size={20} />
-      </span>
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <p
-        className={`text-sm ${tone === "danger" ? "text-app-danger" : "text-muted-foreground"}`}
-      >
-        {detail}
-      </p>
-      {action ? (
-        <button
-          className="mt-3 h-8 rounded-full border border-border px-3 text-xs font-medium text-foreground transition-colors duration-150 hover:border-foreground/15 hover:bg-accent"
-          onClick={action.onSelect}
-          type="button"
-        >
-          {action.label}
-        </button>
-      ) : null}
-    </div>
-  );
-}
 
 /** Placeholder rows with the real row geometry, so results replace them in place. */
 export function SkeletonRows() {

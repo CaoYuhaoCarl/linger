@@ -318,7 +318,7 @@ export function MessageTimeline({
         />
       ) : null}
       <div
-        className={`room-readable px-0 ${hasTimelineContent || canLoadOlder ? "pt-3 pb-8" : "my-auto py-5"}`}
+        className={`room-readable px-0 ${hasTimelineContent || canLoadOlder ? "pt-3 pb-20" : "my-auto py-5"}`}
       >
         {/* Earlier Messages load as the reader scrolls near the top. */}
         {loadingOlder ? <LoadingOlderMessages /> : null}

@@ -1,7 +1,7 @@
 import { BotIcon } from "@hugeicons/core-free-icons";
 import { useState } from "react";
 
-import { Icon } from "@/components/ui/icon";
+import { EmptyNote } from "@/components/ui/empty-state";
 import { ActorAvatar } from "@/features/rooms/members/actor-avatar";
 import type { TeamHubTenantAgent } from "@/features/teamhub/teamhub-types";
 import { cn } from "@/lib/cn";
@@ -41,10 +41,9 @@ export function AgentChips({
   const [expanded, setExpanded] = useState(false);
   if (agents.length === 0)
     return (
-      <p className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
-        <Icon icon={BotIcon} size={16} />
+      <EmptyNote className="px-2 py-2" icon={BotIcon}>
         No Agents on this computer yet. Create one from Chats.
-      </p>
+      </EmptyNote>
     );
   const sorted = [...agents].sort(
     (left, right) =>

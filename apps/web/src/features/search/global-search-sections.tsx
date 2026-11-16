@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 
+import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -19,7 +20,6 @@ import {
   type TargetContext,
 } from "./global-search-model";
 import {
-  EmptyState,
   ResultRow,
   ScopeCard,
   ShortcutKey,
@@ -176,7 +176,9 @@ export function GlobalSearchResultList({
         />
         {error ? (
           <EmptyState
+            className="global-search-enter"
             detail={error.message || "Search is unavailable."}
+            icon={Search01Icon}
             title="Search failed"
             tone="danger"
           />
@@ -190,7 +192,9 @@ export function GlobalSearchResultList({
                   }
                 : undefined
             }
+            className="global-search-enter"
             detail={emptyDetail(tab, debouncedQuery)}
+            icon={Search01Icon}
             title={
               debouncedQuery === ""
                 ? `Search ${scope?.label.toLocaleLowerCase() ?? ""}`.trim()
