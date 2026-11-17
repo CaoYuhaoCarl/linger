@@ -71,7 +71,10 @@ Gateway and runs Agents. The daemon exits with the app.
   installed runtime's executable and profile paths
   (`GET /api/instances/desktop/runtime`) as `runtimeEnvironment` in the
   Desktop config, and the runtime its `setupChoice` runs (`local-models` runs
-  on Pi) as `preferredRuntime`. The daemon config carries that as
+  on Pi) as `preferredRuntime`. Setup checks for existing runtime executables
+  using the terminal's search path. The daemon prefers a usable Codex, Claude,
+  or Pi on the computer over a saved installer-managed executable and keeps
+  the saved runtime profile. The daemon config carries the preference as
   `preferred_runtime`, and the daemon marks that runtime's diagnostic
   `preferred`, so TeamHub creates Another Me and the starter Agents on it
   while it is ready instead of on the first ready runtime. Then it signs in

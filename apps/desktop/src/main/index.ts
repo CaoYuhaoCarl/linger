@@ -183,8 +183,12 @@ async function main(): Promise<void> {
   };
   // The default LINGER_HOME of the installer.
   const home = lingerHome();
+  const daemonEnvironment = daemonEnv(log);
   const localServer = new LocalServerModule({
     home,
+    ...(process.platform !== "win32"
+      ? { runtimePath: daemonEnvironment.then((env) => env.PATH) }
+      : {}),
     installerDirectory: path.join(here, "../installer"),
     ...(__SOURCE_ARCHIVE__ ? { sourceArchive: __SOURCE_ARCHIVE__ } : {}),
     ...(__SOURCE_DEPENDENCIES__
@@ -285,7 +289,7 @@ async function main(): Promise<void> {
       // with a matching version and the computer needs no Node.
       teamhubCliDirectory: path.join(here, "../teamhub-cli"),
       defaultDisplayName,
-      env: daemonEnv(log),
+      env: daemonEnvironment,
       ...(process.platform === "win32"
         ? { protect: protectWithDaemon(daemonExecutable()) }
         : {}),

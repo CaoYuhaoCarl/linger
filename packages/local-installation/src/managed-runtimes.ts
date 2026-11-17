@@ -200,63 +200,89 @@ export async function installNativeRuntime(
   const temporary = await realpath(await mkdtemp(path.join(plans, "plan-")));
   try {
     await privateDirectory(temporary);
-    const file = path.join(temporary, "plan.json");
-    const planned = await tool(
-      options.home,
-      [
-        "harness",
-        "plan",
-        "--runtime",
-        runtime,
-        "--root",
-        root(options.home),
-        "--node",
-        process.execPath,
-        "--out",
-        file,
-        "--json",
-      ],
-      {
-        signal: options.signal,
-        env: options.env,
-        timeoutMs: 120000,
-        onEvent: options.onEvent,
-      },
-    );
-    if (planned.code !== 0)
-      throw unavailable({
-        args: ["harness", "plan"],
-        result: planned,
-        onEvent: options.onEvent,
-      });
-    const plan = JSON.parse(await readFile(file, "utf8")) as {
-      schema: string;
-      id: string;
-      runtime: string;
-    };
-    if (
-      plan.schema !== "localmodels.harness-plan/v1" ||
-      plan.runtime !== runtime ||
-      !/^[a-f0-9]{64}$/.test(plan.id)
-    )
-      throw unavailable();
-    options.signal.throwIfAborted();
-    const applied = await tool(
-      options.home,
-      ["harness", "apply", file, "--approve", plan.id, "--jsonl"],
-      {
-        signal: options.signal,
-        env: options.env,
-        timeoutMs: 20 * 60000,
-        onEvent: options.onEvent,
-      },
-    );
-    if (applied.code !== 0)
-      throw unavailable({
+    let before: string | undefined;
+    for (let attempt = 0; ; attempt++) {
+      options.signal.throwIfAborted();
+      const file = path.join(temporary, `${attempt}.json`);
+      const planned = await tool(
+        options.home,
+        [
+          "harness",
+          "plan",
+          "--runtime",
+          runtime,
+          "--root",
+          root(options.home),
+          "--node",
+          process.execPath,
+          "--out",
+          file,
+          "--json",
+          ...(before ? ["--before-version", before] : []),
+        ],
+        {
+          signal: options.signal,
+          env: options.env,
+          timeoutMs: 120000,
+          onEvent: options.onEvent,
+        },
+      );
+      if (planned.code !== 0)
+        throw unavailable({
+          args: ["harness", "plan"],
+          result: planned,
+          onEvent: options.onEvent,
+        });
+      const plan = JSON.parse(await readFile(file, "utf8")) as {
+        schema: string;
+        id: string;
+        runtime: string;
+        version?: string;
+        action?: string;
+        artifactSource?: string;
+      };
+      if (
+        plan.schema !== "localmodels.harness-plan/v1" ||
+        plan.runtime !== runtime ||
+        !/^[a-f0-9]{64}$/.test(plan.id)
+      )
+        throw unavailable();
+      options.signal.throwIfAborted();
+      const applied = await tool(
+        options.home,
+        ["harness", "apply", file, "--approve", plan.id, "--jsonl"],
+        {
+          signal: options.signal,
+          env: options.env,
+          timeoutMs: 20 * 60000,
+          onEvent: options.onEvent,
+        },
+      );
+      if (applied.code === 0) break;
+      const error = unavailable({
         args: ["harness", "apply"],
         result: applied,
         onEvent: options.onEvent,
       });
+      const stableSource =
+        runtime === "codex" ? "codex-stable-npm" : `${runtime}-stable`;
+      if (
+        plan.action !== "install" ||
+        plan.artifactSource !== stableSource ||
+        !plan.version ||
+        !/^\d+\.\d+\.\d+$/.test(plan.version) ||
+        runtimeVersionFailure(error)?.code !==
+          "RUNTIME_VERSION_EXECUTION_FAILED" ||
+        attempt >= 2
+      )
+        throw error;
+      before = plan.version;
+      options.onEvent?.({
+        kind: "log",
+        stage: "runtime",
+        message: `${runtime} ${before} could not start on this computer. Trying an earlier stable release.`,
+      });
+    }
     const state = await inspectRuntime(runtime, options, dependencies);
     if (!state.installed) throw unavailable();
     return {

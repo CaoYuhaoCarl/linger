@@ -137,6 +137,51 @@ func discoverResolved(ctx context.Context, options DiscoveryOptions) DiscoveryRe
 }
 
 func diagnose(ctx context.Context, kind, executable, protocol string, options DiscoveryOptions, budget time.Duration) RuntimeDiagnostic {
+	selected := options.ConfiguredPaths[kind]
+	if selected != "" && !managedHarnessPath(kind, selected) {
+		return diagnoseExecutable(ctx, kind, executable, protocol, options, budget)
+	}
+	// A path saved by the installer is a fallback, not an explicit
+	// executable selection. Keep the installed profile for either binary.
+	var first *RuntimeDiagnostic
+	local := options
+	for _, entry := range hostExecutableEntries(kind, executable, options.Environment) {
+		if entry == selected {
+			continue
+		}
+		local.ConfiguredPaths = map[string]string{kind: entry}
+		observed := diagnoseExecutable(ctx, kind, executable, protocol, local, budget)
+		if observed.Status == "ready" || observed.Status == "authentication_required" {
+			return observed
+		}
+		if first == nil {
+			first = &observed
+		}
+		if observed.Version != "" && observed.Status != "incompatible" {
+			break
+		}
+	}
+	if selected == "" && first != nil {
+		return *first
+	}
+	return diagnoseExecutable(ctx, kind, executable, protocol, options, budget)
+}
+
+func managedHarnessPath(kind, selected string) bool {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(selected)), "/")
+	filename := parts[len(parts)-1]
+	if filename != kind && filename != kind+".exe" {
+		return false
+	}
+	if kind == "codex" {
+		return len(parts) >= 10 && slices.Equal(parts[len(parts)-10:len(parts)-6], []string{"runtime", "harness", "tools", kind}) &&
+			slices.Equal(parts[len(parts)-5:len(parts)-3], []string{"package", "vendor"}) && parts[len(parts)-2] == "bin"
+	}
+	return (kind == "claude" || kind == "pi") && len(parts) >= 6 &&
+		slices.Equal(parts[len(parts)-6:len(parts)-2], []string{"runtime", "harness", "tools", kind})
+}
+
+func diagnoseExecutable(ctx context.Context, kind, executable, protocol string, options DiscoveryOptions, budget time.Duration) RuntimeDiagnostic {
 	observation := RuntimeDiagnostic{Type: kind, Protocol: protocol, CheckedAt: time.Now().UTC(), Models: []RuntimeModel{}}
 	reject := func(status, code, message string) RuntimeDiagnostic {
 		observation.Status = status
@@ -302,30 +347,39 @@ func resolveExecutableEntry(ctx context.Context, kind, name string, options Disc
 	if selected := options.ConfiguredPaths[kind]; selected != "" {
 		return selected, nil
 	}
-	path := options.Environment["PATH"]
+	if entries := hostExecutableEntries(kind, name, options.Environment); len(entries) > 0 {
+		return entries[0], nil
+	}
+	return "", os.ErrNotExist
+}
+
+func hostExecutableEntries(kind, name string, environment map[string]string) []string {
+	path := environment["PATH"]
 	if path == "" {
 		path = os.Getenv("PATH")
 	}
-	for _, directory := range executableDirectories(path, options.Environment) {
+	var entries []string
+	seen := map[string]bool{}
+	add := func(candidate string) {
+		if canonical, err := canonicalExecutable(candidate); err == nil && !seen[canonical] {
+			entries = append(entries, candidate)
+			seen[canonical] = true
+		}
+	}
+	for _, directory := range executableDirectories(path, environment) {
 		if !filepath.IsAbs(directory) {
 			continue
 		}
 		for _, filename := range executableNames(name) {
-			candidate := filepath.Join(directory, filename)
-			if _, err := canonicalExecutable(candidate); err == nil {
-				return candidate, nil
-			}
+			add(filepath.Join(directory, filename))
 		}
 	}
 	if bundle := applicationBundles[kind]; bundle != "" && runtime.GOOS == "darwin" {
-		for _, parent := range []string{"/", options.Environment["HOME"]} {
-			candidate := filepath.Join(parent, "Applications", bundle, "Contents", "Resources", name)
-			if _, err := canonicalExecutable(candidate); err == nil {
-				return candidate, nil
-			}
+		for _, parent := range []string{"/", environment["HOME"]} {
+			add(filepath.Join(parent, "Applications", bundle, "Contents", "Resources", name))
 		}
 	}
-	return "", os.ErrNotExist
+	return entries
 }
 
 // macOS desktop apps ship their CLI inside the bundle, outside PATH.

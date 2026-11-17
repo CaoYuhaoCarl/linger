@@ -11,6 +11,12 @@ stop unrelated processes, pull mutable images, or delete volumes as recovery.
 Every installation runs natively from a Linger source checkout; Docker is not
 used.
 
+For the standalone Codex, Claude and Pi choices, use the localmodels Harness
+plan to reuse a compatible local runtime or resolve a stable release. If the
+verified executable cannot start, request a new plan for an earlier release
+and approve its exact digest before applying it. Local Models uses its own
+stack plan.
+
 Each instance directory holds `user.env` (0600), the only file a person edits:
 `COMPOSIO_API_KEY`, `SONIOX_API_KEY`, `XAI_API_KEY` and `TZ`
 (`user-environment.ts`). Every mode merges it into the generated

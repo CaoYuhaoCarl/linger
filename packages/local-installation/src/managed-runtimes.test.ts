@@ -110,6 +110,59 @@ it("approves the exact upstream install plan and delegates apply", async () => {
   ]);
   expect(localmodels.mock.calls[0]![1]).toContain(process.execPath);
 });
+it.each(["codex", "claude", "pi"] as const)(
+  "tries a separately approved older stable %s when the first cannot launch",
+  async (runtime) => {
+    const options = await fixture();
+    const localmodels = vi.fn(async (_home: string, args: string[]) => {
+      if (args[1] === "plan") {
+        const retry = args.includes("--before-version");
+        await writeFile(
+          args[args.indexOf("--out") + 1]!,
+          JSON.stringify({
+            schema: "localmodels.harness-plan/v1",
+            id: (retry ? "b" : "a").repeat(64),
+            runtime,
+            action: "install",
+            artifactSource:
+              runtime === "codex" ? "codex-stable-npm" : `${runtime}-stable`,
+            version: retry ? "0.168.0" : "0.169.0",
+          }),
+        );
+      }
+      const failed = args[1] === "apply" && args.includes("a".repeat(64));
+      return {
+        code: failed ? 1 : 0,
+        stdout: failed
+          ? JSON.stringify({
+              schema: "localmodels.harness-error/v1",
+              code: "RUNTIME_VERSION_EXECUTION_FAILED",
+            })
+          : args[1] === "status"
+            ? JSON.stringify(status(runtime, true))
+            : "",
+        stderr: "",
+      };
+    });
+    await expect(
+      installNativeRuntime(runtime, options, { localmodels }),
+    ).resolves.toMatchObject({ state: "ready" });
+    expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+      "plan",
+      "apply",
+      "plan",
+      "apply",
+      "status",
+    ]);
+    expect(localmodels.mock.calls[2]![1]).toEqual(
+      expect.arrayContaining(["--before-version", "0.169.0"]),
+    );
+    expect(localmodels.mock.calls[3]![1]).toEqual(
+      expect.arrayContaining(["--approve", "b".repeat(64)]),
+    );
+  },
+);
+
 it("does not fall back to an installer when upstream fails", async () => {
   const options = await fixture();
   const run = vi.fn();

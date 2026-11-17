@@ -53,6 +53,11 @@
 
 ## Runtime And Safety
 
+An explicit executable path takes precedence. An executable under the
+desktop installer's `runtime/harness/tools` directory is a fallback:
+discover a compatible runtime on the computer first, without changing
+the configured authentication profile.
+
 - Default tests use deterministic providers and real fixture child processes;
   they never call a live model.
 - Process-test watchdogs are harness budgets for loaded developer machines, not

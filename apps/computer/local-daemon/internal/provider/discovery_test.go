@@ -48,6 +48,25 @@ esac
 	if len(result.Diagnostics) != 3 || result.Diagnostics[0].Status != "ready" || result.Installations["codex"].ExecutablePath != canonical {
 		t.Fatalf("result=%+v", result)
 	}
+	managed := filepath.Join(root, "runtime", "harness", "tools", "codex", "0.150.1", "package", "vendor", "fixture-target", "bin", "codex")
+	if err := os.MkdirAll(filepath.Dir(managed), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managed, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	options := DiscoveryOptions{Runtimes: []string{"codex"}, ConfiguredPaths: map[string]string{"codex": managed}, Environment: map[string]string{"PATH": root, "HOME": root}}
+	preferred := discoverResolved(t.Context(), options).Installations["codex"]
+	if preferred.Status != "ready" || preferred.EntryPath != codex {
+		t.Fatalf("managed install shadowed local Codex: %+v", preferred)
+	}
+	if err := os.WriteFile(codex, []byte("#!/bin/sh\nexit 2\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fallback := discoverResolved(t.Context(), options).Installations["codex"]
+	if fallback.Status != "ready" || fallback.EntryPath != managed {
+		t.Fatalf("did not fall back to managed Codex: %+v", fallback)
+	}
 }
 
 func TestDiscoverFindsCLIsInsideMacApplicationBundles(t *testing.T) {
@@ -398,6 +417,19 @@ exit 2
 	}
 	if _, err := os.Stat(promptMarker); !os.IsNotExist(err) {
 		t.Fatal("Claude prompt protocol probe ran before authentication")
+	}
+	oldDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(oldDir, "claude"), []byte("#!/bin/sh\necho 'claude 2.0.24'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	options := DiscoveryOptions{
+		Runtimes:        []string{"claude"},
+		ConfiguredPaths: map[string]string{"claude": filepath.Join(root, "runtime", "harness", "tools", "claude", "2.1.310", "claude")},
+		Environment:     map[string]string{"PATH": oldDir + string(os.PathListSeparator) + root, "HOME": root, "PROMPT_MARKER": promptMarker},
+	}
+	preferred := discoverResolved(t.Context(), options).Diagnostics[0]
+	if preferred.EntryPath != claude || preferred.Status != "authentication_required" {
+		t.Fatalf("managed Claude path did not yield to the local runtime: %+v", preferred)
 	}
 }
 

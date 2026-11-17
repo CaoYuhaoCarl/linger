@@ -100,6 +100,12 @@ done
 	if d := initial.Diagnostics[2]; d.Status != "authentication_required" || len(d.Models) != 0 {
 		t.Fatalf("signed-out Pi: %+v", d)
 	}
+	managed := options
+	managed.Runtimes = []string{"pi"}
+	managed.ConfiguredPaths = map[string]string{"pi": filepath.Join(root, "runtime", "harness", "tools", "pi", "1.3.0", "pi")}
+	if d := discoverResolved(t.Context(), managed).Diagnostics[0]; d.EntryPath != executable || d.Status != "authentication_required" {
+		t.Fatalf("managed Pi path did not yield to the local runtime: %+v", d)
+	}
 	if err := os.WriteFile(filepath.Join(root, "logged-in"), []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}

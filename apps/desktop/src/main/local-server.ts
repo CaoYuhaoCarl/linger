@@ -270,6 +270,8 @@ export interface LocalServerOptions {
   // The desktop keeps its Node runtime and its record here wherever the
   // installation goes.
   readonly home: string;
+  // The same executable search path used by the embedded computer daemon.
+  readonly runtimePath?: Promise<string | undefined>;
   // The bundled installer (installer.js, web/, native-process-worker.mjs).
   readonly installerDirectory: string;
   readonly sourceArchive?: SourceArchive;
@@ -550,6 +552,8 @@ export class LocalServerModule implements Module {
   ): Promise<LocalModelsCheck> {
     // The app's own Node runs the check, so it needs no download of its own;
     // installing still uses the pinned Node runtime.
+    const env = await this.#installerEnvironment(this.#home);
+    signal.throwIfAborted();
     const output = await new Promise<string>((resolve, reject) => {
       const child = spawn(
         process.execPath,
@@ -558,9 +562,8 @@ export class LocalServerModule implements Module {
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
           env: {
-            ...process.env,
+            ...env,
             ELECTRON_RUN_AS_NODE: "1",
-            LINGER_HOME: this.#home,
           },
           signal,
         },
@@ -1734,6 +1737,8 @@ export class LocalServerModule implements Module {
     repo: string,
     signal: AbortSignal,
   ): Promise<InstallerApi> {
+    const env = await this.#installerEnvironment(home);
+    signal.throwIfAborted();
     const child = spawn(
       node,
       [
@@ -1752,7 +1757,7 @@ export class LocalServerModule implements Module {
         // A detached Windows process otherwise opens its own console window.
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, LINGER_HOME: home },
+        env,
       },
     );
     const log = this.#ctx?.log;
@@ -2016,6 +2021,7 @@ export class LocalServerModule implements Module {
   ): Promise<void> {
     await this.#adoptSourceKeys(record.home);
     const node = await this.#ensureNode(signal);
+    const env = await this.#installerEnvironment(record.home);
     const outcome = await new Promise<{ code: number; message: string }>(
       (resolve, reject) => {
         const child = spawn(
@@ -2036,7 +2042,7 @@ export class LocalServerModule implements Module {
             // The pinned Node is a console program; without this Windows
             // opens a console window for it.
             windowsHide: true,
-            env: { ...process.env, LINGER_HOME: record.home },
+            env,
             signal,
           },
         );
@@ -2057,6 +2063,15 @@ export class LocalServerModule implements Module {
     );
     if (outcome.code !== 0)
       throw new Error(outcome.message || "The installation stopped");
+  }
+
+  async #installerEnvironment(home: string): Promise<NodeJS.ProcessEnv> {
+    const PATH = await this.#options.runtimePath;
+    return {
+      ...process.env,
+      ...(PATH === undefined ? {} : { PATH }),
+      LINGER_HOME: home,
+    };
   }
 
   // Kept in the default home, wherever the installation went.

@@ -72,6 +72,7 @@ if (args.includes("--user-keys")) {
 }
 fs.mkdirSync(path.join(home, "installer"), { recursive: true });
 fs.writeFileSync(path.join(home, "installer", "args.json"), JSON.stringify(args));
+fs.writeFileSync(path.join(home, "installer", "path.txt"), process.env.PATH ?? "");
 if (args.includes("--inspect")) {
   const hardware = { totalMemoryBytes: 64 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3, gpus: [{ name: "RTX 4090" }] };
   const eligible = !fs.existsSync(path.join(home, "small-computer"));
@@ -1259,7 +1260,11 @@ describe("LocalServerModule", () => {
 
   it("checks once whether this computer can serve a local model", async () => {
     const info = vi.spyOn(silentLog, "info");
-    const f = fixture({ checkout: "/src" });
+    const runtimePath = path.resolve("terminal-runtime-path");
+    const f = fixture({
+      checkout: "/src",
+      runtimePath: Promise.resolve(runtimePath),
+    });
     // The app's own Node runs the check; the Node runtime is not needed.
     rmSync(path.join(f.home, "desktop", "node"), {
       recursive: true,
@@ -1287,6 +1292,9 @@ describe("LocalServerModule", () => {
       }),
     );
     expect(installerArgs(f.home)).toEqual(["--home", f.home, "--inspect"]);
+    expect(
+      readFileSync(path.join(f.home, "installer", "path.txt"), "utf8"),
+    ).toBe(runtimePath);
     // How long the check took, as the installer reported it.
     expect(info).toHaveBeenCalledWith("local_server.inspect_log", {
       line: "Checked this computer in 1.5s.",
