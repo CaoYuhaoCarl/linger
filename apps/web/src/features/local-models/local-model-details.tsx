@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { cn } from "@/lib/cn";
-import { formatBytes } from "@/lib/format-bytes";
 
 import {
   modelErrorCopy,
@@ -16,6 +15,7 @@ import type { LocalModelPool, LocalModelsView } from "./local-models-queries";
 import {
   agentNames,
   contextLabel,
+  formatGigabytes,
   placeName,
   poolFreeBytes,
   poolLabel,
@@ -75,7 +75,7 @@ export function ModelFacts({
     <div className="divide-y divide-border">
       <Fact label="Version">{model.quant}</Fact>
       <Fact label="Memory">
-        {formatBytes(model.memory_bytes)}
+        {formatGigabytes(model.memory_bytes)}
         {onComputer && pool
           ? ` on ${poolLabel(view, pool)}`
           : plannedPlace
@@ -83,7 +83,7 @@ export function ModelFacts({
             : ""}
       </Fact>
       <Fact label={onComputer ? "On disk" : "Download"}>
-        {formatBytes(model.download_bytes)}
+        {formatGigabytes(model.download_bytes)}
       </Fact>
       <Fact label="Context">{contextLabel(model.context_tokens)}</Fact>
       {model.tokens_per_second ? (
@@ -151,7 +151,7 @@ function PoolBar({
         {pool.kind === "gpu" ? `GPU ${pool.gpu_index}` : label}
       </span>
       <span
-        aria-label={`${label}: ${formatBytes(pool.used_bytes)} of ${formatBytes(pool.total_bytes)} in use`}
+        aria-label={`${label}: ${formatGigabytes(pool.used_bytes)} of ${formatGigabytes(pool.total_bytes)} in use`}
         className="flex h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"
         role="img"
       >
@@ -163,19 +163,19 @@ function PoolBar({
             )}
             key={holder.id}
             style={{ width: width(holder.bytes) }}
-            title={`${holder.name} · ${formatBytes(holder.bytes)}`}
+            title={`${holder.name} · ${formatGigabytes(holder.bytes)}`}
           />
         ))}
         {otherBytes ? (
           <span
             className="h-full bg-muted-foreground/30"
             style={{ width: width(otherBytes) }}
-            title={`Other apps · ${formatBytes(otherBytes)}`}
+            title={`Other apps · ${formatGigabytes(otherBytes)}`}
           />
         ) : null}
       </span>
       <span className="w-24 shrink-0 text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground">
-        {formatBytes(poolFreeBytes(pool))} free
+        {formatGigabytes(poolFreeBytes(pool))} free
       </span>
     </div>
   );
@@ -240,13 +240,17 @@ export function AdvancedDialog({
               Hardware
             </h3>
             <div className="divide-y divide-border">
-              <Fact label="Memory">{formatBytes(host.ram_total_bytes)}</Fact>
+              <Fact label="Memory">
+                {formatGigabytes(host.ram_total_bytes)}
+              </Fact>
               {host.gpus.map((gpu) => (
                 <Fact key={gpu.index} label={`GPU ${gpu.index}`}>
-                  {gpu.name} · {formatBytes(gpu.total_bytes)}
+                  {gpu.name} · {formatGigabytes(gpu.total_bytes)}
                 </Fact>
               ))}
-              <Fact label="Free disk">{formatBytes(host.disk_free_bytes)}</Fact>
+              <Fact label="Free disk">
+                {formatGigabytes(host.disk_free_bytes)}
+              </Fact>
             </div>
           </>
         ) : null}

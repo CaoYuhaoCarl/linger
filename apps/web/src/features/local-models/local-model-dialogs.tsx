@@ -5,11 +5,11 @@ import { FormFeedback } from "@/components/ui/form-feedback";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { sourceCheckClassName } from "@/features/settings/provider-selection-picker";
 import { cn } from "@/lib/cn";
-import { formatBytes } from "@/lib/format-bytes";
 
 import type { LocalModelsView } from "./local-models-queries";
 import {
   agentNames,
+  formatGigabytes,
   makeRoomSelection,
   makesRoom,
   poolLabel,
@@ -63,7 +63,7 @@ export function MakeRoomDialog({
 
   return (
     <ModalDialog
-      description={`${entry.model.name} needs ${formatBytes(check.needBytes)} on ${poolLabel(view, check.pool)}; ${formatBytes(check.freeBytes)} is free.`}
+      description={`${entry.model.name} needs ${formatGigabytes(check.needBytes)} on ${poolLabel(view, check.pool)}; ${formatGigabytes(check.freeBytes)} is free.`}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
@@ -117,7 +117,7 @@ export function MakeRoomDialog({
                     : "Not used"}
                 </span>
                 <span className="w-16 text-right text-xs tabular-nums text-muted-foreground">
-                  {formatBytes(item.model.memory_bytes)}
+                  {formatGigabytes(item.model.memory_bytes)}
                 </span>
               </label>
             ))}
@@ -157,7 +157,7 @@ export function UnloadModelDialog({
   const pool = poolOf(view, entry.model.pool);
   return (
     <ModalDialog
-      description={`Frees ${formatBytes(entry.model.memory_bytes)} of ${
+      description={`Frees ${formatGigabytes(entry.model.memory_bytes)} of ${
         pool ? poolLabel(view, pool) : "memory"
       }. It stays on disk, so you can load it again later.`}
       footer={
@@ -199,7 +199,7 @@ export function RemoveModelDialog({
         entry.status === "loaded"
           ? "Unloads it, deletes its files"
           : "Deletes its files"
-      } and frees ${formatBytes(entry.model.download_bytes)} of disk on ${view.computer.display_name}. You can download it again later.`}
+      } and frees ${formatGigabytes(entry.model.download_bytes)} of disk on ${view.computer.display_name}. You can download it again later.`}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>

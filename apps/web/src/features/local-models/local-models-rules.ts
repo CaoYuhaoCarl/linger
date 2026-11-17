@@ -86,6 +86,15 @@ export function placeName(view: LocalModelsView, poolId: string | undefined) {
   return pool.kind === "system" ? "system memory" : "memory";
 }
 
+/**
+ * Model and memory sizes always read in GB with at most one decimal, so a
+ * small model and an empty pool compare at a glance with the rest: 0.6 GB and
+ * 0 GB, not 614.4 MB and 0 B.
+ */
+export function formatGigabytes(bytes: number) {
+  return `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
+}
+
 export function poolFreeBytes(pool: LocalModelPool) {
   return Math.max(0, pool.total_bytes - pool.used_bytes);
 }

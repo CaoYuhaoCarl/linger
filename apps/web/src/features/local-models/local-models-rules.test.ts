@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   downloadPercent,
+  formatGigabytes,
   loadCheck,
   makeRoomSelection,
   makesRoom,
@@ -46,6 +47,13 @@ describe("local models rules", () => {
       "Llama 3.3 70B: available",
       "Llama 3.1 405B: unavailable",
     ]);
+  });
+
+  it("formats every size in GB with at most one decimal", () => {
+    expect(formatGigabytes(gb(0.6))).toBe("0.6 GB");
+    expect(formatGigabytes(0)).toBe("0 GB");
+    expect(formatGigabytes(gb(46))).toBe("46 GB");
+    expect(formatGigabytes(gb(21.44))).toBe("21.4 GB");
   });
 
   it("names pools from what the Computer reported", () => {

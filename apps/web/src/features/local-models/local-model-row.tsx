@@ -5,13 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
 
-import { formatBytes } from "@/lib/format-bytes";
-
 import { ModelFacts } from "./local-model-details";
 import { unavailableShortCopy } from "./local-models-copy";
 import type { LocalModelsView } from "./local-models-queries";
 import {
   downloadPercent,
+  formatGigabytes,
   placeName,
   type ModelEntry,
   type ModelStatus,
@@ -73,7 +72,7 @@ export function ModelRow({
   const where = placeName(view, model.pool);
   const tag = statusTags[status];
   const progress = downloadPercent(model);
-  const download = formatBytes(model.download_bytes);
+  const download = formatGigabytes(model.download_bytes);
   const detail = {
     available: model.recommended
       ? `${download} · Recommended`
@@ -86,7 +85,7 @@ export function ModelRow({
     idle: model.note ? "no room to load yet" : null,
     loaded: [
       where ? `${where[0]!.toUpperCase()}${where.slice(1)}` : undefined,
-      formatBytes(model.memory_bytes),
+      formatGigabytes(model.memory_bytes),
     ]
       .filter(Boolean)
       .join(" · "),

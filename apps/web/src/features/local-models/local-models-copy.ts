@@ -1,6 +1,6 @@
 import type { components } from "@linger/wire-contracts/teamhub-public/types";
 
-import { formatBytes } from "@/lib/format-bytes";
+import { formatGigabytes } from "./local-models-rules";
 
 type Schemas = components["schemas"];
 
@@ -94,7 +94,7 @@ export function unavailableShortCopy(reason: AvailabilityReason | undefined) {
   if (reason?.code === "PLATFORM_UNSUPPORTED" || !reason)
     return "not for this computer";
   const need =
-    reason.need_bytes === undefined ? "" : formatBytes(reason.need_bytes);
+    reason.need_bytes === undefined ? "" : formatGigabytes(reason.need_bytes);
   if (!need)
     return reason.code === "DISK_INSUFFICIENT"
       ? "needs more disk"
@@ -109,11 +109,11 @@ export function unavailableCopy(reason: AvailabilityReason | undefined) {
   const need =
     reason?.need_bytes === undefined
       ? undefined
-      : formatBytes(reason.need_bytes);
+      : formatGigabytes(reason.need_bytes);
   const have =
     reason?.have_bytes === undefined
       ? undefined
-      : formatBytes(reason.have_bytes);
+      : formatGigabytes(reason.have_bytes);
   switch (reason?.code) {
     case "MEMORY_INSUFFICIENT":
       return need && have

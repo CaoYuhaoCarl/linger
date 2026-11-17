@@ -19,7 +19,6 @@ import { localComputersQueryOptions } from "@/features/local-computer/local-comp
 import { requireRoomRouteParam } from "@/features/rooms/room-route-params";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
-import { formatBytes } from "@/lib/format-bytes";
 
 import { AdvancedDialog } from "./local-model-details";
 import { ModelRow } from "./local-model-row";
@@ -38,6 +37,7 @@ import {
   type LocalModelsView,
 } from "./local-models-queries";
 import {
+  formatGigabytes,
   loadCheck,
   memorySummary,
   modelEntries,
@@ -209,8 +209,8 @@ function ComputerModels({
           <h1 className="text-2xl text-foreground">Local models</h1>
           {summary?.totalBytes ? (
             <p className="mt-1.5 text-sm text-muted-foreground">
-              {formatBytes(summary.usedBytes)} of{" "}
-              {formatBytes(summary.totalBytes)}{" "}
+              {formatGigabytes(summary.usedBytes)} of{" "}
+              {formatGigabytes(summary.totalBytes)}{" "}
               {summary.gpu ? "GPU memory" : "memory"} in use
             </p>
           ) : null}
