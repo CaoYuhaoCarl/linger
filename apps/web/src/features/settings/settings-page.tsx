@@ -48,7 +48,7 @@ export function SettingsLayout() {
           />
         </nav>
       </aside>
-      <div className="workspace-content-viewport workspace-scrollbar flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-6 md:px-8">
+      <div className="workspace-content-viewport workspace-scrollbar flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-6 [scrollbar-gutter:stable] md:px-8">
         <Suspense
           fallback={
             <SettingsSectionLoading
