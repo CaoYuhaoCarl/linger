@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   createHash,
   createHmac,
@@ -25,6 +25,7 @@ import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 import { createZstdDecompress } from "node:zlib";
 
 import {
@@ -2107,6 +2108,10 @@ export class LocalServerModule implements Module {
     try {
       this.#set("preparing", "Updating Linger on this computer…");
       const repo = await this.#ensureSource(record.home, signal);
+      // Even unchanged service binaries can have supervisors from the
+      // previous app directory. Stop that installation before the new one
+      // adopts its data; the normal startup path still reuses live services.
+      await this.#stopInstalledServices(record, signal);
       await this.#runResume(record, repo, signal);
       await this.#moved(record, repo);
       this.#outdated = undefined;
@@ -2125,6 +2130,33 @@ export class LocalServerModule implements Module {
       );
     } finally {
       if (!signal.aborted) windows?.loadServer();
+    }
+  }
+
+  async #stopInstalledServices(
+    record: LocalRecord,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const node = await this.#ensureNode(signal);
+    try {
+      await promisify(execFile)(
+        node,
+        [
+          this.#installerScript(),
+          "--home",
+          record.home,
+          "--instance",
+          LOCAL_INSTANCE,
+          "--stop",
+        ],
+        { signal, windowsHide: true },
+      );
+    } catch (error) {
+      if (signal.aborted) throw error;
+      throw new Error(
+        "Could not stop the previous local services. Check the installer logs before trying again.",
+        { cause: error },
+      );
     }
   }
 

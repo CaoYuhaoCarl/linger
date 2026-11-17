@@ -17,6 +17,11 @@ The newest stable packages are always at
 <https://github.com/simplexai-labs/linger/releases/latest>; a prerelease never
 becomes the latest release. Link there, not to a version.
 
+When replacing a desktop installation, open its tray menu and choose
+**Update Linger on This Computer** to update the local services as well.
+That step stops the previous service processes before starting the new
+services with the existing workspace.
+
 ## Releasing
 
 In a checkout of simplexai-labs/linger:
