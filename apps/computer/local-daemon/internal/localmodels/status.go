@@ -35,7 +35,16 @@ var errorCodes = []string{
 	"GATEWAY_REGISTRATION_FAILED", "CANCELLED",
 }
 
-var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$`)
+var (
+	families      = []string{"qwen", "gemma", "llama", "openai", "deepseek", "mistral", "phi", "glm", "kimi", "claude", "grok", "other"}
+	architectures = []string{"dense", "moe"}
+	capabilities  = []string{"vision", "tool_use", "reasoning", "coding", "multilingual"}
+)
+
+var (
+	modelIDPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$`)
+	sourceURLPattern = regexp.MustCompile(`^https://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$`)
+)
 
 // ValidModelID reports whether id is a LocalModelId the tool may be given as
 // an argument.
@@ -123,6 +132,14 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		})
 	}
 	for _, model := range status.Models {
+		model.Publisher = clip(strings.TrimSpace(model.Publisher), 120)
+		model.Parameters = clip(strings.TrimSpace(model.Parameters), 32)
+		model.ActiveParameters = clip(strings.TrimSpace(model.ActiveParameters), 32)
+		model.License = clip(strings.TrimSpace(model.License), 120)
+		model.SourceURL = strings.TrimSpace(model.SourceURL)
+		if len(model.Capabilities) == 0 {
+			model.Capabilities = nil
+		}
 		if err := checkModel(model); err != nil {
 			return wire.LocalModelsSnapshot{}, err
 		}
@@ -188,8 +205,25 @@ func checkModel(model wire.LocalModel) error {
 	if len(model.PiModel) > 200 {
 		return invalid("pi_model", model.PiModel)
 	}
-	if model.TokensPerSecond != nil && (math.IsNaN(*model.TokensPerSecond) || *model.TokensPerSecond < 0) {
+	if model.TokensPerSecond != nil && (math.IsNaN(*model.TokensPerSecond) || math.IsInf(*model.TokensPerSecond, 0) || *model.TokensPerSecond < 0) {
 		return errors.New("model tokens_per_second is outside the contract")
+	}
+	if model.Family != "" && !slices.Contains(families, model.Family) {
+		return invalid("family", model.Family)
+	}
+	if model.Architecture != "" && !slices.Contains(architectures, model.Architecture) {
+		return invalid("architecture", model.Architecture)
+	}
+	for index, capability := range model.Capabilities {
+		if !slices.Contains(capabilities, capability) || slices.Contains(model.Capabilities[:index], capability) {
+			return invalid("capabilities", capability)
+		}
+	}
+	if model.SourceURL != "" && (len(model.SourceURL) > 2048 || !sourceURLPattern.MatchString(model.SourceURL)) {
+		return invalid("source_url", model.SourceURL)
+	}
+	if model.PromptTokensPerSecond != nil && (math.IsNaN(*model.PromptTokensPerSecond) || math.IsInf(*model.PromptTokensPerSecond, 0) || *model.PromptTokensPerSecond < 0) {
+		return errors.New("model prompt_tokens_per_second is outside the contract")
 	}
 	return nil
 }

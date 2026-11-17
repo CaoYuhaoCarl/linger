@@ -97,7 +97,10 @@ Progress and outcomes travel back only as snapshots:
    from `localmodels.library-status/v1`: after `runner.hello`, after every
    library change, and at most every 2 seconds while a download or load runs.
    A Computer without the tool reports `available: false` with
-   `TOOL_NOT_INSTALLED`.
+   `TOOL_NOT_INSTALLED`. Each `LocalModel` may also carry optional model-card
+   metadata (`family`, `publisher`, `architecture`, `parameters`,
+   `active_parameters`, `capabilities`, `license`, `source_url`,
+   `prompt_tokens_per_second`).
 2. Agent Service records it through TeamHub `recordAgentRuntimeLocalModels`
    (`POST /v0/agent-runtime/local-computers/local-models`). TeamHub keeps the
    latest snapshot per Computer, so an offline Computer shows what it last

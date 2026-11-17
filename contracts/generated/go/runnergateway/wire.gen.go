@@ -1157,25 +1157,34 @@ func (LocalModelNote) RequiredFields() []string { return []string{"code"} }
 
 // LocalModel mirrors the LocalModel schema shape.
 type LocalModel struct {
-	ID              string                      `json:"id"`
-	Name            string                      `json:"name"`
-	Description     string                      `json:"description"`
-	Quant           string                      `json:"quant"`
-	ContextTokens   uint64                      `json:"context_tokens"`
-	Vision          bool                        `json:"vision"`
-	DownloadBytes   uint64                      `json:"download_bytes"`
-	MemoryBytes     uint64                      `json:"memory_bytes"`
-	Fit             string                      `json:"fit"`
-	Recommended     bool                        `json:"recommended"`
-	Availability    LocalModelAvailability      `json:"availability"`
-	Pool            string                      `json:"pool,omitempty"`
-	State           string                      `json:"state"`
-	Download        *LocalModelDownloadProgress `json:"download,omitempty"`
-	Endpoint        *LocalModelEndpoint         `json:"endpoint,omitempty"`
-	PiModel         string                      `json:"pi_model,omitempty"`
-	TokensPerSecond *float64                    `json:"tokens_per_second,omitempty"`
-	Error           *LocalModelError            `json:"error,omitempty"`
-	Note            *LocalModelNote             `json:"note,omitempty"`
+	ID                    string                      `json:"id"`
+	Name                  string                      `json:"name"`
+	Description           string                      `json:"description"`
+	Quant                 string                      `json:"quant"`
+	ContextTokens         uint64                      `json:"context_tokens"`
+	Vision                bool                        `json:"vision"`
+	DownloadBytes         uint64                      `json:"download_bytes"`
+	MemoryBytes           uint64                      `json:"memory_bytes"`
+	Fit                   string                      `json:"fit"`
+	Recommended           bool                        `json:"recommended"`
+	Availability          LocalModelAvailability      `json:"availability"`
+	Pool                  string                      `json:"pool,omitempty"`
+	State                 string                      `json:"state"`
+	Download              *LocalModelDownloadProgress `json:"download,omitempty"`
+	Endpoint              *LocalModelEndpoint         `json:"endpoint,omitempty"`
+	PiModel               string                      `json:"pi_model,omitempty"`
+	TokensPerSecond       *float64                    `json:"tokens_per_second,omitempty"`
+	Error                 *LocalModelError            `json:"error,omitempty"`
+	Note                  *LocalModelNote             `json:"note,omitempty"`
+	Family                string                      `json:"family,omitempty"`
+	Publisher             string                      `json:"publisher,omitempty"`
+	Architecture          string                      `json:"architecture,omitempty"`
+	Parameters            string                      `json:"parameters,omitempty"`
+	ActiveParameters      string                      `json:"active_parameters,omitempty"`
+	Capabilities          []string                    `json:"capabilities,omitempty"`
+	License               string                      `json:"license,omitempty"`
+	SourceURL             string                      `json:"source_url,omitempty"`
+	PromptTokensPerSecond *float64                    `json:"prompt_tokens_per_second,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModel.

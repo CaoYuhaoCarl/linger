@@ -1,3 +1,6 @@
+import { formatBytes } from "@/lib/format-bytes";
+
+import { architectureCopy, capabilityCopy } from "./local-models-copy";
 import type {
   LocalModel,
   LocalModelPool,
@@ -198,4 +201,113 @@ export function contextLabel(tokens: number) {
 /** Agent names joined for a sentence. */
 export function agentNames(entry: Pick<LocalModelView, "used_by">) {
   return entry.used_by.map((user) => user.name).join(", ");
+}
+
+export type LocalModelCapability = NonNullable<
+  LocalModel["capabilities"]
+>[number];
+
+export const capabilityOrder: readonly LocalModelCapability[] = [
+  "vision",
+  "tool_use",
+  "reasoning",
+  "coding",
+  "multilingual",
+];
+
+/** Ordered capabilities of a model, uniting `capabilities` with legacy `vision`. */
+export function modelCapabilities(model: LocalModel): LocalModelCapability[] {
+  const present = new Set<LocalModelCapability>(model.capabilities ?? []);
+  if (model.vision) present.add("vision");
+  return capabilityOrder.filter((capability) => present.has(capability));
+}
+
+/** Parameter scale and activation topology for details: "30B · 3B active (MoE)". */
+export function parametersLabel(model: LocalModel) {
+  const scale = [
+    model.parameters,
+    model.active_parameters ? `${model.active_parameters} active` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const arch = model.architecture
+    ? architectureCopy(model.architecture)
+    : undefined;
+  if (scale && arch) return `${scale} (${arch})`;
+  return scale || arch;
+}
+
+/** Concise badges for the collapsed row: parameter scale (when distinct) and capabilities. */
+export function rowBadges(model: LocalModel): string[] {
+  const badges: string[] = [];
+  if (model.active_parameters) {
+    badges.push(`${model.active_parameters} active`);
+  } else if (
+    model.parameters &&
+    !model.name.toLowerCase().includes(model.parameters.toLowerCase())
+  ) {
+    badges.push(model.parameters);
+  }
+  for (const capability of modelCapabilities(model)) {
+    badges.push(capabilityCopy(capability));
+  }
+  if (badges.length > 3) {
+    return [...badges.slice(0, 3), `+${badges.length - 3}`];
+  }
+  return badges;
+}
+
+function formatRemainingTime(seconds: number) {
+  if (seconds < 60) return `${seconds}s left`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m left`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.ceil((seconds % 3600) / 60);
+  if (minutes >= 60) return `${hours + 1}h left`;
+  return minutes > 0 ? `${hours}h ${minutes}m left` : `${hours}h left`;
+}
+
+/** Live download progress summary: "checking file", or "25% · 50 MB/s · 5m left". */
+export function downloadStatusDetail(model: LocalModel) {
+  const download = model.download;
+  if (download?.step === "verify") return "checking file";
+  const parts = [`${downloadPercent(model)}%`];
+  if (download?.bytes_per_second && download.bytes_per_second > 0) {
+    parts.push(`${formatBytes(download.bytes_per_second)}/s`);
+    const remaining = download.total_bytes - download.done_bytes;
+    if (remaining > 0) {
+      parts.push(
+        formatRemainingTime(Math.ceil(remaining / download.bytes_per_second)),
+      );
+    }
+  }
+  return parts.join(" · ");
+}
+
+/** Measured generation and prompt-processing throughput for model details. */
+export function speedLabel(model: LocalModel) {
+  const parts: string[] = [];
+  if (model.tokens_per_second && model.tokens_per_second > 0) {
+    parts.push(`${Math.round(model.tokens_per_second)} tokens/s`);
+  }
+  if (model.prompt_tokens_per_second && model.prompt_tokens_per_second > 0) {
+    parts.push(`${Math.round(model.prompt_tokens_per_second)} prompt tokens/s`);
+  }
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
+/** Returns `url` only when it parses as an `https:` URL. */
+export function safeModelSourceUrl(url: string | undefined) {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Compact display label for a validated `https:` model card URL. */
+export function modelSourceLabel(url: string) {
+  const parsed = new URL(url);
+  return `${parsed.host}${parsed.pathname.replace(/\/+$/, "")}`;
 }

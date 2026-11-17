@@ -812,4 +812,78 @@ describe("LocalModelsPage", () => {
       expect(statuses()[0]).toBe("GPT-OSS 20B: Loaded · Memory · 14.3 GB"),
     );
   });
+
+  it("shows rich model card icons, capability badges, and expanded metadata", async () => {
+    const richLab = withModel(labView(), "qwen3-coder-30b:Q4_K_M", {
+      active_parameters: "3B",
+      architecture: "moe",
+      capabilities: ["coding", "tool_use", "reasoning"],
+      family: "qwen",
+      license: "Apache-2.0",
+      parameters: "30B",
+      prompt_tokens_per_second: 612.5,
+      publisher: "Alibaba Cloud",
+      source_url: "https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    });
+    const visionLab = withModel(richLab, "gemma3-4b:Q4_K_M", {
+      family: "gemma",
+      vision: true,
+    });
+    renderPage(setup([visionLab]));
+    await findModels();
+
+    const coderCard = card("Qwen3 Coder 30B");
+    expect(coderCard.querySelector('[data-family="qwen"]')).toBeInTheDocument();
+    expect(within(coderCard).getByText("3B active")).toBeVisible();
+    expect(within(coderCard).getByText("Tool use")).toBeVisible();
+    expect(within(coderCard).getByText("Reasoning")).toBeVisible();
+    expect(within(coderCard).getByText("+1")).toBeVisible();
+
+    const gemmaCard = card("Gemma 3 4B");
+    expect(
+      gemmaCard.querySelector('[data-family="gemma"]'),
+    ).toBeInTheDocument();
+    expect(within(gemmaCard).getByText("Vision")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Qwen3 Coder 30B" }));
+    const details = screen.getByRole("region", {
+      name: "Qwen3 Coder 30B details",
+    });
+    expect(details).toHaveTextContent("PublisherAlibaba Cloud");
+    expect(details).toHaveTextContent("Parameters30B · 3B active (MoE)");
+    expect(details).toHaveTextContent("Coding");
+    expect(details).toHaveTextContent("46 tokens/s · 613 prompt tokens/s");
+    expect(details).toHaveTextContent("LicenseApache-2.0");
+    const link = within(details).getByRole("link", {
+      name: "huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    );
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("shows live download rate and ETA when bytes_per_second is reported", async () => {
+    const mb = 1024 * 1024;
+    renderPage(
+      setup([
+        withModel(labView(), "gpt-oss-20b:Q4_K_M", {
+          download: {
+            bytes_per_second: 50 * mb,
+            done_bytes: 5_000 * mb,
+            step: "download",
+            total_bytes: 20_000 * mb,
+          },
+          state: "downloading",
+        }),
+      ]),
+    );
+    await findModels();
+
+    expect(statuses()).toContain(
+      "GPT-OSS 20B: Downloading · 25% · 50 MB/s · 5m left",
+    );
+  });
 });

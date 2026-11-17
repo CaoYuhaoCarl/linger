@@ -417,6 +417,14 @@ const localModelsSnapshot = {
         endpoint: { base_url: "http://127.0.0.1:18100/v1" },
         pi_model: "localmodels-library/qwen3-4b",
         tokens_per_second: 142.5,
+        family: "qwen",
+        publisher: "Alibaba Cloud",
+        architecture: "dense",
+        parameters: "4B",
+        capabilities: ["tool_use", "reasoning", "coding"],
+        license: "Apache-2.0",
+        source_url: "https://huggingface.co/Qwen/Qwen3-4B",
+        prompt_tokens_per_second: 980.4,
       },
       {
         id: "qwen3-235b:Q4_K_M",
@@ -1167,6 +1175,42 @@ describe("Runner Gateway contract", () => {
           ...localModelsSnapshot.local_models,
           pools: [
             { ...localModelsSnapshot.local_models.pools[0], id: "gpu-0" },
+          ],
+        },
+      },
+      {
+        ...localModelsSnapshot,
+        local_models: {
+          ...localModelsSnapshot.local_models,
+          models: [
+            {
+              ...localModelsSnapshot.local_models.models[0],
+              family: "unknown_vendor",
+            },
+          ],
+        },
+      },
+      {
+        ...localModelsSnapshot,
+        local_models: {
+          ...localModelsSnapshot.local_models,
+          models: [
+            {
+              ...localModelsSnapshot.local_models.models[0],
+              capabilities: ["vision", "vision"],
+            },
+          ],
+        },
+      },
+      {
+        ...localModelsSnapshot,
+        local_models: {
+          ...localModelsSnapshot.local_models,
+          models: [
+            {
+              ...localModelsSnapshot.local_models.models[0],
+              source_url: "http://huggingface.co/Qwen/Qwen3-4B",
+            },
           ],
         },
       },

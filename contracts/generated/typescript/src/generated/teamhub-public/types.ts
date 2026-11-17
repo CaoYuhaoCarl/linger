@@ -4584,6 +4584,38 @@ export interface components {
       /** @enum {string} */
       code: "NO_ROOM_TO_LOAD";
     };
+    /**
+     * @description Model family for brand presentation; never inferred from name.
+     * @enum {string}
+     */
+    LocalModelFamily:
+      | "qwen"
+      | "gemma"
+      | "llama"
+      | "openai"
+      | "deepseek"
+      | "mistral"
+      | "phi"
+      | "glm"
+      | "kimi"
+      | "claude"
+      | "grok"
+      | "other";
+    /**
+     * @description Weight activation topology: dense activates all parameters per token; moe activates a subset.
+     * @enum {string}
+     */
+    LocalModelArchitecture: "dense" | "moe";
+    /**
+     * @description Model capability verified by localmodels on this platform.
+     * @enum {string}
+     */
+    LocalModelCapability:
+      | "vision"
+      | "tool_use"
+      | "reasoning"
+      | "coding"
+      | "multilingual";
     /** @description One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them. */
     LocalModel: {
       id: components["schemas"]["LocalModelId"];
@@ -4619,6 +4651,22 @@ export interface components {
       error?: components["schemas"]["LocalModelError"];
       /** @description Present only when idle and the automatic load after download was skipped. */
       note?: components["schemas"]["LocalModelNote"];
+      family?: components["schemas"]["LocalModelFamily"];
+      /** @description Organization or author that published the weights. */
+      publisher?: string;
+      architecture?: components["schemas"]["LocalModelArchitecture"];
+      /** @description Total parameter scale for display, such as 30B or 4B. */
+      parameters?: string;
+      /** @description Parameters active per token on an moe model, such as 3B. */
+      active_parameters?: string;
+      /** @description Capabilities verified by localmodels on this platform. */
+      capabilities?: components["schemas"]["LocalModelCapability"][];
+      /** @description SPDX identifier or license name, such as Apache-2.0 or Gemma Terms of Use. */
+      license?: string;
+      /** @description HTTPS model card or repository URL. */
+      source_url?: string;
+      /** @description Warm prompt-processing speed in tokens/s measured at the last load; absent when unknown. */
+      prompt_tokens_per_second?: number;
     };
     /** @description An Agent whose runtime model is this model on this Computer. */
     LocalModelUser: {

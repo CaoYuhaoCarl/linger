@@ -2,14 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   downloadPercent,
+  downloadStatusDetail,
   formatGigabytes,
   loadCheck,
   makeRoomSelection,
   makesRoom,
   memorySummary,
+  modelCapabilities,
   modelEntries,
+  modelSourceLabel,
+  parametersLabel,
   placeName,
   poolLabel,
+  rowBadges,
+  safeModelSourceUrl,
+  speedLabel,
 } from "./local-models-rules";
 import {
   gb,
@@ -145,5 +152,99 @@ describe("local models rules", () => {
       ),
     ).toBe(33);
     expect(downloadPercent(localModel({ id: "m", name: "m" }))).toBe(0);
+  });
+
+  it("unites legacy vision with structured capabilities in display order", () => {
+    expect(
+      modelCapabilities(
+        localModel({
+          capabilities: ["coding", "vision", "tool_use"],
+          id: "m",
+          name: "m",
+          vision: true,
+        }),
+      ),
+    ).toEqual(["vision", "tool_use", "coding"]);
+    expect(
+      modelCapabilities(localModel({ id: "m", name: "m", vision: true })),
+    ).toEqual(["vision"]);
+  });
+
+  it("formats parameter scale, architecture, and collapsed row badges", () => {
+    const moe = localModel({
+      active_parameters: "3B",
+      architecture: "moe",
+      capabilities: ["coding", "reasoning", "tool_use", "vision"],
+      id: "qwen3-coder-30b:Q4_K_M",
+      name: "Qwen3 Coder 30B",
+      parameters: "30B",
+      vision: true,
+    });
+    expect(parametersLabel(moe)).toBe("30B · 3B active (MoE)");
+    expect(rowBadges(moe)).toEqual(["3B active", "Vision", "Tool use", "+2"]);
+
+    const dense = localModel({
+      architecture: "dense",
+      capabilities: ["tool_use"],
+      id: "qwen3-4b:Q4_K_M",
+      name: "Qwen3 4B",
+      parameters: "4B",
+    });
+    expect(parametersLabel(dense)).toBe("4B (Dense)");
+    // Avoid repeating "4B" next to a model whose title already includes it.
+    expect(rowBadges(dense)).toEqual(["Tool use"]);
+
+    expect(
+      rowBadges(
+        localModel({
+          id: "llama3.3:Q4_K_M",
+          name: "Llama 3.3",
+          parameters: "70B",
+        }),
+      ),
+    ).toEqual(["70B"]);
+  });
+
+  it("formats live download speed, ETA, prompt speed, and safe source URLs", () => {
+    const mb = 1024 * 1024;
+    expect(
+      downloadStatusDetail(
+        localModel({
+          download: {
+            bytes_per_second: 50 * mb,
+            done_bytes: 5_000 * mb,
+            step: "download",
+            total_bytes: 20_000 * mb,
+          },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("25% · 50 MB/s · 5m left");
+    expect(
+      downloadStatusDetail(
+        localModel({
+          download: { done_bytes: 100, step: "verify", total_bytes: 100 },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("checking file");
+    expect(
+      speedLabel(
+        localModel({
+          id: "m",
+          name: "m",
+          prompt_tokens_per_second: 612.4,
+          tokens_per_second: 46.2,
+        }),
+      ),
+    ).toBe("46 tokens/s · 612 prompt tokens/s");
+    expect(safeModelSourceUrl("http://example.com/model")).toBeUndefined();
+    const safe = safeModelSourceUrl("https://huggingface.co/Qwen/Qwen3-4B/");
+    expect(safe).toBe("https://huggingface.co/Qwen/Qwen3-4B/");
+    expect(modelSourceLabel(safe!)).toBe("huggingface.co/Qwen/Qwen3-4B");
   });
 });

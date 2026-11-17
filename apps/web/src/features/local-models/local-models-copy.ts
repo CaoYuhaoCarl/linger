@@ -154,3 +154,28 @@ export function libraryUnavailableCopy(
   const copy = libraryUnavailable[code ?? "NOT_REPORTED"];
   return { body: copy.body, title: copy.title(computer) };
 }
+
+const capabilityLabels: Record<Schemas["LocalModelCapability"], string> = {
+  coding: "Coding",
+  multilingual: "Multilingual",
+  reasoning: "Reasoning",
+  tool_use: "Tool use",
+  vision: "Vision",
+};
+
+/** Human-readable badge label for a verified model capability. */
+export function capabilityCopy(capability: Schemas["LocalModelCapability"]) {
+  return capabilityLabels[capability];
+}
+
+const architectureLabels: Record<Schemas["LocalModelArchitecture"], string> = {
+  dense: "Dense",
+  moe: "MoE",
+};
+
+/** Human-readable architecture label for display in model details. */
+export function architectureCopy(
+  architecture: Schemas["LocalModelArchitecture"],
+) {
+  return architectureLabels[architecture];
+}

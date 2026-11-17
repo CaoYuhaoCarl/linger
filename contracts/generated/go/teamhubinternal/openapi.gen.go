@@ -752,6 +752,24 @@ func (e FinishAgentLocalRunRequestTerminalType) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelArchitecture.
+const (
+	LocalModelArchitectureDense LocalModelArchitecture = "dense"
+	LocalModelArchitectureMoe   LocalModelArchitecture = "moe"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelArchitecture enum.
+func (e LocalModelArchitecture) Valid() bool {
+	switch e {
+	case LocalModelArchitectureDense:
+		return true
+	case LocalModelArchitectureMoe:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelAvailabilityReasonCode.
 const (
 	LocalModelAvailabilityDiskInsufficient    LocalModelAvailabilityReasonCode = "DISK_INSUFFICIENT"
@@ -767,6 +785,33 @@ func (e LocalModelAvailabilityReasonCode) Valid() bool {
 	case LocalModelAvailabilityMemoryInsufficient:
 		return true
 	case LocalModelAvailabilityPlatformUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCapability.
+const (
+	LocalModelCapabilityCoding       LocalModelCapability = "coding"
+	LocalModelCapabilityMultilingual LocalModelCapability = "multilingual"
+	LocalModelCapabilityReasoning    LocalModelCapability = "reasoning"
+	LocalModelCapabilityToolUse      LocalModelCapability = "tool_use"
+	LocalModelCapabilityVision       LocalModelCapability = "vision"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCapability enum.
+func (e LocalModelCapability) Valid() bool {
+	switch e {
+	case LocalModelCapabilityCoding:
+		return true
+	case LocalModelCapabilityMultilingual:
+		return true
+	case LocalModelCapabilityReasoning:
+		return true
+	case LocalModelCapabilityToolUse:
+		return true
+	case LocalModelCapabilityVision:
 		return true
 	default:
 		return false
@@ -845,6 +890,54 @@ func (e LocalModelErrorCode) Valid() bool {
 	case OUTOFMEMORY:
 		return true
 	case PLATFORMUNSUPPORTED:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelFamily.
+const (
+	LocalModelFamilyClaude   LocalModelFamily = "claude"
+	LocalModelFamilyDeepseek LocalModelFamily = "deepseek"
+	LocalModelFamilyGemma    LocalModelFamily = "gemma"
+	LocalModelFamilyGlm      LocalModelFamily = "glm"
+	LocalModelFamilyGrok     LocalModelFamily = "grok"
+	LocalModelFamilyKimi     LocalModelFamily = "kimi"
+	LocalModelFamilyLlama    LocalModelFamily = "llama"
+	LocalModelFamilyMistral  LocalModelFamily = "mistral"
+	LocalModelFamilyOpenai   LocalModelFamily = "openai"
+	LocalModelFamilyOther    LocalModelFamily = "other"
+	LocalModelFamilyPhi      LocalModelFamily = "phi"
+	LocalModelFamilyQwen     LocalModelFamily = "qwen"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelFamily enum.
+func (e LocalModelFamily) Valid() bool {
+	switch e {
+	case LocalModelFamilyClaude:
+		return true
+	case LocalModelFamilyDeepseek:
+		return true
+	case LocalModelFamilyGemma:
+		return true
+	case LocalModelFamilyGlm:
+		return true
+	case LocalModelFamilyGrok:
+		return true
+	case LocalModelFamilyKimi:
+		return true
+	case LocalModelFamilyLlama:
+		return true
+	case LocalModelFamilyMistral:
+		return true
+	case LocalModelFamilyOpenai:
+		return true
+	case LocalModelFamilyOther:
+		return true
+	case LocalModelFamilyPhi:
+		return true
+	case LocalModelFamilyQwen:
 		return true
 	default:
 		return false
@@ -3017,7 +3110,15 @@ type ListRecentlyUsedAgentRuntimeContextsResult struct {
 
 // LocalModel One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them.
 type LocalModel struct {
-	Availability  LocalModelAvailability      `json:"availability"`
+	// ActiveParameters Parameters active per token on an moe model, such as 3B.
+	ActiveParameters *string `json:"active_parameters,omitempty"`
+
+	// Architecture Weight activation topology: dense activates all parameters per token; moe activates a subset.
+	Architecture *LocalModelArchitecture `json:"architecture,omitempty"`
+	Availability LocalModelAvailability  `json:"availability"`
+
+	// Capabilities Capabilities verified by localmodels on this platform.
+	Capabilities  *[]LocalModelCapability     `json:"capabilities,omitempty"`
 	ContextTokens int64                       `json:"context_tokens"`
 	Description   string                      `json:"description"`
 	Download      *LocalModelDownloadProgress `json:"download,omitempty"`
@@ -3025,26 +3126,44 @@ type LocalModel struct {
 	Endpoint      *LocalModelEndpoint         `json:"endpoint,omitempty"`
 	Error         *LocalModelError            `json:"error,omitempty"`
 
+	// Family Model family for brand presentation; never inferred from name.
+	Family *LocalModelFamily `json:"family,omitempty"`
+
 	// Fit Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
 	Fit LocalModelFit `json:"fit"`
 
 	// Id Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
 	Id LocalModelId `json:"id"`
 
+	// License SPDX identifier or license name, such as Apache-2.0 or Gemma Terms of Use.
+	License *string `json:"license,omitempty"`
+
 	// MemoryBytes Footprint when loaded at its context policy, from the localmodels estimator.
 	MemoryBytes int64           `json:"memory_bytes"`
 	Name        string          `json:"name"`
 	Note        *LocalModelNote `json:"note,omitempty"`
 
+	// Parameters Total parameter scale for display, such as 30B or 4B.
+	Parameters *string `json:"parameters,omitempty"`
+
 	// PiModel The runtime_model an Agent on runtime pi stores for this model, <pi provider>/<pi model id>; present while the model is on the Computer.
 	PiModel *string `json:"pi_model,omitempty"`
 
 	// Pool A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
-	Pool  *LocalModelPoolId `json:"pool,omitempty"`
-	Quant string            `json:"quant"`
+	Pool *LocalModelPoolId `json:"pool,omitempty"`
+
+	// PromptTokensPerSecond Warm prompt-processing speed in tokens/s measured at the last load; absent when unknown.
+	PromptTokensPerSecond *float32 `json:"prompt_tokens_per_second,omitempty"`
+
+	// Publisher Organization or author that published the weights.
+	Publisher *string `json:"publisher,omitempty"`
+	Quant     string  `json:"quant"`
 
 	// Recommended True on at most one model, an absent downloadable one.
 	Recommended bool `json:"recommended"`
+
+	// SourceUrl HTTPS model card or repository URL.
+	SourceUrl *string `json:"source_url,omitempty"`
 
 	// State absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
 	State LocalModelState `json:"state"`
@@ -3053,6 +3172,9 @@ type LocalModel struct {
 	TokensPerSecond *float32 `json:"tokens_per_second,omitempty"`
 	Vision          bool     `json:"vision"`
 }
+
+// LocalModelArchitecture Weight activation topology: dense activates all parameters per token; moe activates a subset.
+type LocalModelArchitecture string
 
 // LocalModelAvailability defines model for LocalModelAvailability.
 type LocalModelAvailability struct {
@@ -3069,6 +3191,9 @@ type LocalModelAvailabilityReason struct {
 
 // LocalModelAvailabilityReasonCode defines model for LocalModelAvailabilityReason.Code.
 type LocalModelAvailabilityReasonCode string
+
+// LocalModelCapability Model capability verified by localmodels on this platform.
+type LocalModelCapability string
 
 // LocalModelDownloadProgress defines model for LocalModelDownloadProgress.
 type LocalModelDownloadProgress struct {
@@ -3097,6 +3222,9 @@ type LocalModelError struct {
 
 // LocalModelErrorCode Closed localmodels library error set. It is extended only together with the localmodels library contract.
 type LocalModelErrorCode string
+
+// LocalModelFamily Model family for brand presentation; never inferred from name.
+type LocalModelFamily string
 
 // LocalModelFit Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
 type LocalModelFit string

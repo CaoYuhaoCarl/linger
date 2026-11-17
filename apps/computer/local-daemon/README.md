@@ -141,7 +141,11 @@ model.
   succeeds, so a transient failure never ends the watch.
 - Snapshots. `runner.local_models` carries `library-status/v1` mapped to
   `LocalModelsSnapshot` (pools gain `kind` and `gpu_index`; a value outside
-  the contract's closed sets makes the read `TOOL_FAILED`). It is sent after
+  the contract's closed sets makes the read `TOOL_FAILED`). Optional model-card
+  fields (`family`, `publisher`, `architecture`, `parameters`,
+  `active_parameters`, `capabilities`, `license`, HTTPS `source_url`,
+  `prompt_tokens_per_second`) follow the same closed-set validation and
+  display-string clipping. It is sent after
   every welcome, after every action or job end, and at most every 2 seconds
   for progress. When a job enters a phase (download, verify, load, warm) the
   Daemon rereads the status, which carries what the phase reserved or freed

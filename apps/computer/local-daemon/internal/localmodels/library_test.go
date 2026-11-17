@@ -129,7 +129,19 @@ func TestRefreshRejectsStatusOutsideTheContract(t *testing.T) {
 	// An Agent stores pi_model whole, so one longer than the contract is not cut.
 	long := model("other:Q4_K_M", "idle")
 	long["pi_model"] = "localmodels-library/" + strings.Repeat("x", 200)
-	for _, entry := range []map[string]any{broken, long} {
+	badFamily := model("bad-family:Q4_K_M", "absent")
+	badFamily["family"] = "unknown_vendor"
+	badArch := model("bad-arch:Q4_K_M", "absent")
+	badArch["architecture"] = "ssm"
+	dupCap := model("dup-cap:Q4_K_M", "absent")
+	dupCap["capabilities"] = []string{"vision", "vision"}
+	badCap := model("bad-cap:Q4_K_M", "absent")
+	badCap["capabilities"] = []string{"audio"}
+	badURL := model("bad-url:Q4_K_M", "absent")
+	badURL["source_url"] = "http://huggingface.co/Qwen/Qwen3-4B"
+	badPromptSpeed := model("bad-speed:Q4_K_M", "loaded")
+	badPromptSpeed["prompt_tokens_per_second"] = -5.0
+	for _, entry := range []map[string]any{broken, long, badFamily, badArch, dupCap, badCap, badURL, badPromptSpeed} {
 		fake.write("status.json", status(entry))
 		snapshot := newLibrary(t, fake, &recorder{}, time.Second).Refresh(context.Background())
 		if snapshot.Available || snapshot.Reason.Code != CodeToolFailed || strings.Contains(snapshot.Reason.Detail, "warming") {
@@ -575,5 +587,38 @@ func TestChangeOfTheLoadedModelsAsksForRuntimeDiagnostics(t *testing.T) {
 	library.Refresh(context.Background())
 	if record.changes() != 2 {
 		t.Fatalf("an unload asked for %d diagnostics in all, want 2", record.changes())
+	}
+}
+
+func TestRefreshMapsRichModelCardMetadataAndKeepsItAcrossProgress(t *testing.T) {
+	fake := newFakeTool(t)
+	rich := model(testModel, "absent")
+	rich["family"] = "qwen"
+	rich["publisher"] = "  Alibaba Cloud  "
+	rich["architecture"] = "moe"
+	rich["parameters"] = "30B"
+	rich["active_parameters"] = "3B"
+	rich["capabilities"] = []string{"tool_use", "reasoning", "coding"}
+	rich["license"] = "Apache-2.0"
+	rich["source_url"] = "https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct"
+	rich["prompt_tokens_per_second"] = 612.5
+	fake.write("status.json", status(rich))
+	library := newLibrary(t, fake, &recorder{}, time.Second)
+	snapshot := library.Refresh(context.Background())
+	got := modelState(snapshot, testModel)
+	if got == nil || got.Family != "qwen" || got.Publisher != "Alibaba Cloud" || got.Architecture != "moe" ||
+		got.Parameters != "30B" || got.ActiveParameters != "3B" ||
+		!slices.Equal(got.Capabilities, []string{"tool_use", "reasoning", "coding"}) ||
+		got.License != "Apache-2.0" ||
+		got.SourceURL != "https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct" ||
+		got.PromptTokensPerSecond == nil || *got.PromptTokensPerSecond != 612.5 {
+		t.Fatalf("rich model = %+v", got)
+	}
+	if !applyProgress(&snapshot, libraryEvent{Event: "progress", Model: json.RawMessage(`"` + testModel + `"`), Phase: "download", Done: 512, Total: 1024, BytesPerSecond: 1024}) {
+		t.Fatal("applyProgress did not update downloading model")
+	}
+	after := modelState(snapshot, testModel)
+	if after.Family != "qwen" || after.Publisher != "Alibaba Cloud" || !slices.Equal(after.Capabilities, []string{"tool_use", "reasoning", "coding"}) {
+		t.Fatalf("progress dropped model card fields: %+v", after)
 	}
 }

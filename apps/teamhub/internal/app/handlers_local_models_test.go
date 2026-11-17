@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,7 +16,10 @@ const storedLocalModelsSnapshotJSON = `{"available":true,"observed_at":"2026-11-
 "models":[
  {"id":"qwen3-4b:Q4_K_M","name":"Qwen3 4B","description":"","quant":"Q4_K_M","context_tokens":32768,"vision":false,
   "download_bytes":10,"memory_bytes":40,"fit":"gpu","recommended":false,"availability":{"downloadable":true},
-  "pool":"gpu:0","state":"loaded","endpoint":{"base_url":"http://127.0.0.1:18100/v1"},"pi_model":"localmodels-library/localmodels-lib-qwen3-8-27b-iq3s-ud-iq3-s/Qwen3.8-27B-UD-IQ3_S"},
+  "pool":"gpu:0","state":"loaded","endpoint":{"base_url":"http://127.0.0.1:18100/v1"},"pi_model":"localmodels-library/localmodels-lib-qwen3-8-27b-iq3s-ud-iq3-s/Qwen3.8-27B-UD-IQ3_S",
+  "family":"qwen","publisher":"Alibaba Cloud","architecture":"moe","parameters":"30B","active_parameters":"3B",
+  "capabilities":["tool_use","reasoning","coding"],"license":"Apache-2.0",
+  "source_url":"https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct","prompt_tokens_per_second":612.5},
  {"id":"quick-install:Q4","name":"Quick Install","description":"","quant":"Q4","context_tokens":8192,"vision":false,
   "download_bytes":10,"memory_bytes":30,"fit":"gpu","recommended":false,"availability":{"downloadable":true},
   "pool":"gpu:0","state":"loaded","endpoint":{"base_url":"http://127.0.0.1:18101/v1"},"pi_model":"localmodels/localmodels-agent"},
@@ -59,6 +63,18 @@ func TestLocalModelsViewMatchesAgentsToModelsOnTheComputer(t *testing.T) {
 	}
 	if users := view.Models[0].UsedBy; len(users) != 1 || users[0].AgentId != "agent_1" || users[0].Name != "Ada" {
 		t.Fatalf("loaded model users=%+v", users)
+	}
+	first := view.Models[0].Model
+	if first.Family == nil || *first.Family != httpapi.LocalModelFamilyQwen ||
+		first.Publisher == nil || *first.Publisher != "Alibaba Cloud" ||
+		first.Architecture == nil || *first.Architecture != httpapi.LocalModelArchitectureMoe ||
+		first.Parameters == nil || *first.Parameters != "30B" ||
+		first.ActiveParameters == nil || *first.ActiveParameters != "3B" ||
+		first.Capabilities == nil || !slices.Equal(*first.Capabilities, []httpapi.LocalModelCapability{httpapi.LocalModelCapabilityToolUse, httpapi.LocalModelCapabilityReasoning, httpapi.LocalModelCapabilityCoding}) ||
+		first.License == nil || *first.License != "Apache-2.0" ||
+		first.SourceUrl == nil || *first.SourceUrl != "https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct" ||
+		first.PromptTokensPerSecond == nil || *first.PromptTokensPerSecond != 612.5 {
+		t.Fatalf("rich model fields=%+v", first)
 	}
 	if users := view.Models[1].UsedBy; len(users) != 1 || users[0].AgentId != "agent_2" {
 		t.Fatalf("Quick Install model users=%+v", users)
@@ -142,6 +158,30 @@ func TestValidLocalModelsSnapshot(t *testing.T) {
 		"unknown pool kind":       func(s *teamhubinternal.LocalModelsSnapshot) { s.Pools[0].Kind = "tpu" },
 		"unknown unavailable code": func(s *teamhubinternal.LocalModelsSnapshot) {
 			s.Available, s.Reason = false, &teamhubinternal.LocalModelsUnavailableReason{Code: "X"}
+		},
+		"unknown family": func(s *teamhubinternal.LocalModelsSnapshot) {
+			f := teamhubinternal.LocalModelFamily("unknown")
+			s.Models[0].Family = &f
+		},
+		"unknown architecture": func(s *teamhubinternal.LocalModelsSnapshot) {
+			a := teamhubinternal.LocalModelArchitecture("ssm")
+			s.Models[0].Architecture = &a
+		},
+		"unknown capability": func(s *teamhubinternal.LocalModelsSnapshot) {
+			c := []teamhubinternal.LocalModelCapability{"audio"}
+			s.Models[0].Capabilities = &c
+		},
+		"duplicate capability": func(s *teamhubinternal.LocalModelsSnapshot) {
+			c := []teamhubinternal.LocalModelCapability{teamhubinternal.LocalModelCapabilityVision, teamhubinternal.LocalModelCapabilityVision}
+			s.Models[0].Capabilities = &c
+		},
+		"non-https source_url": func(s *teamhubinternal.LocalModelsSnapshot) {
+			u := "http://huggingface.co/Qwen/Qwen3-4B"
+			s.Models[0].SourceUrl = &u
+		},
+		"negative prompt_tokens_per_second": func(s *teamhubinternal.LocalModelsSnapshot) {
+			p := float32(-1)
+			s.Models[0].PromptTokensPerSecond = &p
 		},
 	} {
 		var copied teamhubinternal.LocalModelsSnapshot

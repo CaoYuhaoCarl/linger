@@ -320,6 +320,58 @@ components:
           LocalModelFitSystem,
           LocalModelFitNone,
         ]
+    LocalModelFamily:
+      description: Model family for brand presentation; never inferred from name.
+      type: string
+      enum:
+        [
+          qwen,
+          gemma,
+          llama,
+          openai,
+          deepseek,
+          mistral,
+          phi,
+          glm,
+          kimi,
+          claude,
+          grok,
+          other,
+        ]
+      x-enum-varnames:
+        [
+          LocalModelFamilyQwen,
+          LocalModelFamilyGemma,
+          LocalModelFamilyLlama,
+          LocalModelFamilyOpenai,
+          LocalModelFamilyDeepseek,
+          LocalModelFamilyMistral,
+          LocalModelFamilyPhi,
+          LocalModelFamilyGlm,
+          LocalModelFamilyKimi,
+          LocalModelFamilyClaude,
+          LocalModelFamilyGrok,
+          LocalModelFamilyOther,
+        ]
+    LocalModelArchitecture:
+      description: >-
+        Weight activation topology: dense activates all parameters per token;
+        moe activates a subset.
+      type: string
+      enum: [dense, moe]
+      x-enum-varnames: [LocalModelArchitectureDense, LocalModelArchitectureMoe]
+    LocalModelCapability:
+      description: Model capability verified by localmodels on this platform.
+      type: string
+      enum: [vision, tool_use, reasoning, coding, multilingual]
+      x-enum-varnames:
+        [
+          LocalModelCapabilityVision,
+          LocalModelCapabilityToolUse,
+          LocalModelCapabilityReasoning,
+          LocalModelCapabilityCoding,
+          LocalModelCapabilityMultilingual,
+        ]
     LocalModel:
       description: >-
         One validated chat model of the catalog on this platform and its state
@@ -406,6 +458,46 @@ components:
         note:
           $ref: "#/components/schemas/LocalModelNote"
           description: Present only when idle and the automatic load after download was skipped.
+        family:
+          $ref: "#/components/schemas/LocalModelFamily"
+        publisher:
+          description: Organization or author that published the weights.
+          type: string
+          minLength: 1
+          maxLength: 120
+        architecture:
+          $ref: "#/components/schemas/LocalModelArchitecture"
+        parameters:
+          description: Total parameter scale for display, such as 30B or 4B.
+          type: string
+          minLength: 1
+          maxLength: 32
+        active_parameters:
+          description: Parameters active per token on an moe model, such as 3B.
+          type: string
+          minLength: 1
+          maxLength: 32
+        capabilities:
+          description: Capabilities verified by localmodels on this platform.
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/LocalModelCapability"
+        license:
+          description: SPDX identifier or license name, such as Apache-2.0 or Gemma Terms of Use.
+          type: string
+          minLength: 1
+          maxLength: 120
+        source_url:
+          description: HTTPS model card or repository URL.
+          type: string
+          minLength: 1
+          maxLength: 2048
+          pattern: "^https://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]+$"
+        prompt_tokens_per_second:
+          description: Warm prompt-processing speed in tokens/s measured at the last load; absent when unknown.
+          type: number
+          minimum: 0
     LocalModelsUnavailableReason:
       type: object
       additionalProperties: false

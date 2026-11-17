@@ -1,20 +1,54 @@
-import { AiChipIcon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import {
+  AiChipIcon,
+  ArrowDown01Icon,
+  ChatGptIcon,
+  ClaudeIcon,
+  DeepseekIcon,
+  GoogleGeminiIcon,
+  GrokIcon,
+  KimiAiIcon,
+  MetaIcon,
+  MicrosoftIcon,
+  MistralIcon,
+  QwenIcon,
+} from "@hugeicons/core-free-icons";
 import { useId, type MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
+import { Icon, type IconSvgElement } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
 
 import { ModelFacts } from "./local-model-details";
 import { unavailableShortCopy } from "./local-models-copy";
-import type { LocalModelsView } from "./local-models-queries";
+import type { LocalModel, LocalModelsView } from "./local-models-queries";
 import {
   downloadPercent,
+  downloadStatusDetail,
   formatGigabytes,
   placeName,
+  rowBadges,
   type ModelEntry,
   type ModelStatus,
 } from "./local-models-rules";
+
+const familyIcons: Record<NonNullable<LocalModel["family"]>, IconSvgElement> = {
+  claude: ClaudeIcon,
+  deepseek: DeepseekIcon,
+  gemma: GoogleGeminiIcon,
+  glm: AiChipIcon,
+  grok: GrokIcon,
+  kimi: KimiAiIcon,
+  llama: MetaIcon,
+  mistral: MistralIcon,
+  openai: ChatGptIcon,
+  other: AiChipIcon,
+  phi: MicrosoftIcon,
+  qwen: QwenIcon,
+};
+
+function familyIcon(family: LocalModel["family"]) {
+  return family ? familyIcons[family] : AiChipIcon;
+}
 
 /**
  * The status word every row shows under its name, with the dot that colors
@@ -73,14 +107,14 @@ export function ModelRow({
   const tag = statusTags[status];
   const progress = downloadPercent(model);
   const download = formatGigabytes(model.download_bytes);
+  const badges = rowBadges(model);
   const detail = {
     available: model.recommended
       ? `${download} · Recommended`
       : model.fit === "system"
         ? `${download} · runs slower`
         : download,
-    downloading:
-      model.download?.step === "verify" ? "checking file" : `${progress}%`,
+    downloading: downloadStatusDetail(model),
     failed: null,
     idle: model.note ? "no room to load yet" : null,
     loaded: [
@@ -126,8 +160,11 @@ export function ModelRow({
           onClick={handlers.onToggle}
           type="button"
         >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card text-foreground shadow-outline">
-            <Icon icon={AiChipIcon} size={20} />
+          <span
+            className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card text-foreground shadow-outline"
+            data-family={model.family ?? "other"}
+          >
+            <Icon icon={familyIcon(model.family)} size={20} />
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium text-foreground">
@@ -151,6 +188,18 @@ export function ModelRow({
             </span>
           </span>
         </button>
+        {badges.length ? (
+          <span className="flex shrink-0 items-center gap-1.5">
+            {badges.map((badge) => (
+              <span
+                className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                key={badge}
+              >
+                {badge}
+              </span>
+            ))}
+          </span>
+        ) : null}
         {action ? (
           <Button
             aria-label={`${action[0]} ${model.name}`}

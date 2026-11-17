@@ -1,5 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Copy01Icon,
+  LinkSquare02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -7,6 +11,7 @@ import { ModalDialog } from "@/components/ui/modal-dialog";
 import { cn } from "@/lib/cn";
 
 import {
+  capabilityCopy,
   modelErrorCopy,
   modelNoteCopy,
   unavailableCopy,
@@ -16,10 +21,15 @@ import {
   agentNames,
   contextLabel,
   formatGigabytes,
+  modelCapabilities,
+  modelSourceLabel,
+  parametersLabel,
   placeName,
   poolFreeBytes,
   poolLabel,
   poolOf,
+  safeModelSourceUrl,
+  speedLabel,
   type ModelEntry,
 } from "./local-models-rules";
 
@@ -71,8 +81,30 @@ export function ModelFacts({
   const pool = poolOf(view, model.pool);
   const plannedPlace =
     status === "available" ? placeName(view, model.pool) : undefined;
+  const capabilities = modelCapabilities(model);
+  const parameters = parametersLabel(model);
+  const speed = speedLabel(model);
+  const sourceUrl = safeModelSourceUrl(model.source_url);
   return (
     <div className="divide-y divide-border">
+      {model.publisher ? (
+        <Fact label="Publisher">{model.publisher}</Fact>
+      ) : null}
+      {parameters ? <Fact label="Parameters">{parameters}</Fact> : null}
+      {capabilities.length ? (
+        <Fact label="Capabilities">
+          <span className="flex flex-wrap gap-1.5">
+            {capabilities.map((capability) => (
+              <span
+                className="rounded-full bg-muted px-2 py-0.5 text-xs text-secondary-foreground"
+                key={capability}
+              >
+                {capabilityCopy(capability)}
+              </span>
+            ))}
+          </span>
+        </Fact>
+      ) : null}
       <Fact label="Version">{model.quant}</Fact>
       <Fact label="Memory">
         {formatGigabytes(model.memory_bytes)}
@@ -86,9 +118,19 @@ export function ModelFacts({
         {formatGigabytes(model.download_bytes)}
       </Fact>
       <Fact label="Context">{contextLabel(model.context_tokens)}</Fact>
-      {model.tokens_per_second ? (
-        <Fact label="Speed">
-          {Math.round(model.tokens_per_second)} tokens/s
+      {speed ? <Fact label="Speed">{speed}</Fact> : null}
+      {model.license ? <Fact label="License">{model.license}</Fact> : null}
+      {sourceUrl ? (
+        <Fact label="Source">
+          <a
+            className="inline-flex max-w-full items-center gap-1 text-foreground underline underline-offset-2"
+            href={sourceUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <span className="truncate">{modelSourceLabel(sourceUrl)}</span>
+            <Icon className="shrink-0" icon={LinkSquare02Icon} size={14} />
+          </a>
         </Fact>
       ) : null}
       {onComputer ? (

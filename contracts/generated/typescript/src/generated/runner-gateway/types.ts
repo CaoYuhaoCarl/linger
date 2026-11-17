@@ -316,6 +316,35 @@ export type LocalModelErrorCode =
   | "MODEL_FILES_MISSING"
   | "GATEWAY_REGISTRATION_FAILED"
   | "CANCELLED";
+/**
+ * Model family for brand presentation; never inferred from name.
+ */
+export type LocalModelFamily =
+  | "qwen"
+  | "gemma"
+  | "llama"
+  | "openai"
+  | "deepseek"
+  | "mistral"
+  | "phi"
+  | "glm"
+  | "kimi"
+  | "claude"
+  | "grok"
+  | "other";
+/**
+ * Weight activation topology: dense activates all parameters per token; moe activates a subset.
+ */
+export type LocalModelArchitecture = "dense" | "moe";
+/**
+ * Model capability verified by localmodels on this platform.
+ */
+export type LocalModelCapability =
+  | "vision"
+  | "tool_use"
+  | "reasoning"
+  | "coding"
+  | "multilingual";
 export type AgentRunnerReady = AgentRunnerWireIdentity & {
   type: "agent_runner.state";
   runner_pid: PositiveInteger;
@@ -1306,6 +1335,36 @@ export interface LocalModel {
   tokens_per_second?: number;
   error?: LocalModelError;
   note?: LocalModelNote;
+  family?: LocalModelFamily;
+  /**
+   * Organization or author that published the weights.
+   */
+  publisher?: string;
+  architecture?: LocalModelArchitecture;
+  /**
+   * Total parameter scale for display, such as 30B or 4B.
+   */
+  parameters?: string;
+  /**
+   * Parameters active per token on an moe model, such as 3B.
+   */
+  active_parameters?: string;
+  /**
+   * Capabilities verified by localmodels on this platform.
+   */
+  capabilities?: LocalModelCapability[];
+  /**
+   * SPDX identifier or license name, such as Apache-2.0 or Gemma Terms of Use.
+   */
+  license?: string;
+  /**
+   * HTTPS model card or repository URL.
+   */
+  source_url?: string;
+  /**
+   * Warm prompt-processing speed in tokens/s measured at the last load; absent when unknown.
+   */
+  prompt_tokens_per_second?: number;
 }
 export interface LocalModelAvailability {
   downloadable: boolean;

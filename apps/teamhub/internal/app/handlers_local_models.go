@@ -21,7 +21,10 @@ import (
 // an action; it stays inside the Agent management client's timeout.
 const localModelActionLifetime = 10 * time.Second
 
-var localModelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$`)
+var (
+	localModelIDPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$`)
+	localModelSourceURLPattern = regexp.MustCompile(`^https://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$`)
+)
 
 // localModelRefusalCodes maps the Computer's refusals a Human can act on to
 // their own public code; every other refusal is LOCAL_MODEL_ACTION_FAILED.
@@ -300,6 +303,25 @@ func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool
 	seen := make(map[string]bool, len(snapshot.Models))
 	for _, model := range snapshot.Models {
 		if !localModelIDPattern.MatchString(model.Id) || seen[model.Id] || !model.State.Valid() || !model.Fit.Valid() {
+			return false
+		}
+		if model.Family != nil && !model.Family.Valid() {
+			return false
+		}
+		if model.Architecture != nil && !model.Architecture.Valid() {
+			return false
+		}
+		if model.Capabilities != nil {
+			for index, capability := range *model.Capabilities {
+				if !capability.Valid() || slices.Contains((*model.Capabilities)[:index], capability) {
+					return false
+				}
+			}
+		}
+		if model.SourceUrl != nil && (len(*model.SourceUrl) > 2048 || !localModelSourceURLPattern.MatchString(*model.SourceUrl)) {
+			return false
+		}
+		if model.PromptTokensPerSecond != nil && *model.PromptTokensPerSecond < 0 {
 			return false
 		}
 		seen[model.Id] = true
