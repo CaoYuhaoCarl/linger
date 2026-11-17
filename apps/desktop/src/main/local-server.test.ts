@@ -121,7 +121,13 @@ if (args.includes("--inspect")) {
   process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, reasonMessages, estimate }, recommendation }) + "\n");
   process.exit(0);
 }
+if (args.includes("--stop")) {
+  fs.appendFileSync(path.join(home, "installer", "lifecycle.log"), "stop\n");
+  process.stdout.write(JSON.stringify({ failed: [] }) + "\n");
+  process.exit(0);
+}
 if (args.includes("--resume")) {
+  fs.appendFileSync(path.join(home, "installer", "lifecycle.log"), "resume\n");
   const code = fs.existsSync(path.join(home, "resume-fails")) ? 1 : 0;
   const runtimeFile = path.join(home, "resume-runtime.json");
   const runtime = fs.existsSync(runtimeFile) ? JSON.parse(fs.readFileSync(runtimeFile, "utf8")) : undefined;
@@ -2350,6 +2356,9 @@ describe("LocalServerModule after a restart", () => {
     expect(f.loadServer).toHaveBeenCalledOnce();
     expect(f.module.sourceUpdateAvailable()).toBe(false);
     expect(f.module.status().phase).toBe("ready");
+    expect(
+      readFileSync(path.join(f.home, "installer", "lifecycle.log"), "utf8"),
+    ).toBe("resume\nstop\nresume\n");
     const args = installerArgs(f.home);
     expect(args[args.indexOf("--source-repo") + 1]).toBe(current);
     expect(
