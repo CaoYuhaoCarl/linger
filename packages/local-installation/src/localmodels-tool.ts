@@ -545,6 +545,21 @@ export async function stopLocalmodels(
     const result = await (dependencies.run ?? runLocalmodels)(home, args, {
       signal: options.signal,
       timeoutMs: 30_000,
+      // A saved stack plan names its actual tools directory. Without a plan,
+      // keep stack down's ownership lookup inside this install, not the
+      // standalone LocalModels tools directory shared by the OS user.
+      ...(args[0] === "stack"
+        ? {
+            env: {
+              LOCALMODELS_TOOLS_DIR: path.join(
+                path.resolve(home),
+                "runtime",
+                "localmodels",
+                "tools",
+              ),
+            },
+          }
+        : {}),
     }).catch((error: unknown) => {
       options.signal.throwIfAborted();
       return { code: 1, stdout: "", stderr: String(error) };

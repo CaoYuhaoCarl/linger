@@ -392,6 +392,31 @@ test("a home without the pinned kit has nothing to stop and downloads nothing", 
     f.source.sha256,
   ]);
 });
+test("stops an empty installation without reading another installation's gateway record", async () => {
+  const f = await fixture();
+  vi.stubEnv("LOCALMODELS_TOOLS_DIR", path.join(f.home, "unrelated-tools"));
+  const ownedTools = path.join(f.home, "runtime", "localmodels", "tools");
+  const run = vi.fn<typeof runLocalmodels>(async (_home, args, options) =>
+    args[0] === "stack" && options?.env?.LOCALMODELS_TOOLS_DIR !== ownedTools
+      ? {
+          code: 1,
+          stdout: JSON.stringify({
+            ok: false,
+            gateway:
+              "failed: saved stack plan unavailable; gateway left untouched",
+          }),
+          stderr: "",
+        }
+      : { code: 0, stdout: "{}", stderr: "" },
+  );
+  await expect(
+    stopLocalmodels(
+      f.home,
+      { signal: AbortSignal.timeout(5000) },
+      { run, installed: async () => true },
+    ),
+  ).resolves.toBeUndefined();
+});
 test("stops the stack even when the controller did not stop, and names the failure", async () => {
   const run = vi.fn<typeof runLocalmodels>(async (_home, args) =>
     args[0] === "foundations"
