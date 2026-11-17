@@ -2,11 +2,11 @@
   "platform": "win32",
   "arch": "x64",
   "localmodelsTool": {
-    "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev35/win32-x64.tgz",
-    "sha256": "c4ce105f6cb05f94cac573392ad8ade1cd9a25706219c3f1778bc99777d9b179",
-    "bytes": 23034149,
-    "sourceCommit": "a7eab155b4d6c691ab1e144c41549f1e94ae1578",
-    "manifestSha256": "f5c676b2f17d2dff14b885f5e009a866599ca6b16460d9fc5f40d3174fd25b63"
+    "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev36/win32-x64.tgz",
+    "sha256": "8a119f057e00a6f0798cb6dbfe26e1e4da96f600e1b2c0846ba612719b25f84a",
+    "bytes": 23041291,
+    "sourceCommit": "17a7496241ce88b1071981f22b9bb67f1de41128",
+    "manifestSha256": "2a44da9bc1dee7cd7429c9d960260894ce9161345dfb32b0769b0f0b29886911"
   },
   "nativeSources": [
     {
