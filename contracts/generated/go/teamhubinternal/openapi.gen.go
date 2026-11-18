@@ -2947,7 +2947,7 @@ type ConnectAgentRuntimeLocalComputerRequest struct {
 	// RecommendedVersion Computer release this deployment ships; omission keeps the last one.
 	RecommendedVersion *string `json:"recommended_version,omitempty"`
 
-	// ReleaseCurrent The Computer runs this deployment's target release (its app sha256 matches). Omitted when the deployment ships no target release.
+	// ReleaseCurrent The Computer's daemon_version is at or above this deployment's Computer release version (a source build's dev counts as current). A same-version build that is behind still reads as current. Omitted when the deployment ships no Computer release.
 	ReleaseCurrent     *bool                                             `json:"release_current,omitempty"`
 	RuntimeDiagnostics []map[string]interface{}                          `json:"runtime_diagnostics"`
 	Runtimes           []ConnectAgentRuntimeLocalComputerRequestRuntimes `json:"runtimes"`
@@ -4041,7 +4041,7 @@ type TouchAgentRuntimeLocalComputerRequest struct {
 	DaemonVersion      *string `json:"daemon_version,omitempty"`
 	RecommendedVersion *string `json:"recommended_version,omitempty"`
 
-	// ReleaseCurrent The Computer runs this deployment's target release (its app sha256 matches). Omitted when the deployment ships no target release or the touch carries no release facts.
+	// ReleaseCurrent As on the connection: the Computer's daemon_version is at or above this deployment's Computer release version. Omitted when the deployment ships no Computer release or the touch carries no release facts.
 	ReleaseCurrent     *bool                                            `json:"release_current,omitempty"`
 	RuntimeDiagnostics *[]map[string]interface{}                        `json:"runtime_diagnostics,omitempty"`
 	Runtimes           *[]TouchAgentRuntimeLocalComputerRequestRuntimes `json:"runtimes,omitempty"`
