@@ -133,6 +133,18 @@ export function poolFreeBytes(pool: LocalModelPool) {
   return Math.max(0, pool.total_bytes - pool.used_bytes);
 }
 
+/**
+ * Memory no holder accounts for: used_bytes is the device's real use, so on
+ * a shared card it includes other apps.
+ */
+export function otherAppsBytes(pool: LocalModelPool) {
+  return Math.max(
+    0,
+    pool.used_bytes -
+      pool.holders.reduce((sum, holder) => sum + holder.bytes, 0),
+  );
+}
+
 /** What the header adds up: GPU memory when the Computer has GPUs, else its memory. */
 export function memorySummary(view: LocalModelsView) {
   const gpus = view.pools.filter((pool) => pool.kind === "gpu");
@@ -150,6 +162,13 @@ export interface LoadCheck {
   freeBytes: number;
   /** Loaded models in the same pool, the ones the user could unload. */
   loaded: ModelEntry[];
+  /**
+   * What else holds the pool that Make room cannot unload: components and
+   * models in another state, by holder.
+   */
+  kept: LocalModelPool["holders"];
+  /** Pool memory held outside localmodels, by other apps. */
+  otherAppsBytes: number;
 }
 
 /** Why a model cannot load now, or `null` when its pool reports room for it. */
@@ -159,15 +178,20 @@ export function loadCheck(
 ): LoadCheck | null {
   const pool = poolOf(view, model.pool);
   if (!pool || poolFreeBytes(pool) >= model.memory_bytes) return null;
+  const loaded = modelEntries(view).filter(
+    (entry) =>
+      entry.status === "loaded" &&
+      entry.model.pool === pool.id &&
+      entry.model.id !== model.id,
+  );
   return {
     freeBytes: poolFreeBytes(pool),
-    loaded: modelEntries(view).filter(
-      (entry) =>
-        entry.status === "loaded" &&
-        entry.model.pool === pool.id &&
-        entry.model.id !== model.id,
+    kept: pool.holders.filter(
+      (holder) => !loaded.some((entry) => entry.model.id === holder.id),
     ),
+    loaded,
     needBytes: model.memory_bytes,
+    otherAppsBytes: otherAppsBytes(pool),
     pool,
   };
 }

@@ -112,6 +112,9 @@ describe("local models rules", () => {
     expect(check.loaded.map((entry) => entry.model.name)).toEqual([
       "GPT-OSS 20B",
     ]);
+    // The loaded model is offered, so nothing else holds the pool.
+    expect(check.kept).toEqual([]);
+    expect(check.otherAppsBytes).toBe(0);
   });
 
   it("preselects the fewest models, preferring ones no Agent uses", () => {
@@ -125,7 +128,9 @@ describe("local models rules", () => {
         ...item,
         status: "loaded" as const,
       })),
+      kept: [],
       needBytes: gb(12),
+      otherAppsBytes: 0,
       pool,
     };
 

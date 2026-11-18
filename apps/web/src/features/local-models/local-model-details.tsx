@@ -25,6 +25,7 @@ import {
   isModelOnComputer,
   modelCapabilities,
   modelSourceLabel,
+  otherAppsBytes,
   parametersLabel,
   placeName,
   poolFreeBytes,
@@ -222,13 +223,7 @@ function PoolBar({
   view: LocalModelsView;
 }) {
   const label = poolLabel(view, pool);
-  // used_bytes is the device's real use; on a shared card other processes
-  // hold memory that no holder accounts for.
-  const otherBytes = Math.max(
-    0,
-    pool.used_bytes -
-      pool.holders.reduce((sum, holder) => sum + holder.bytes, 0),
-  );
+  const otherBytes = otherAppsBytes(pool);
   const width = (bytes: number) =>
     `${pool.total_bytes ? Math.min(100, (bytes / pool.total_bytes) * 100) : 0}%`;
   return (

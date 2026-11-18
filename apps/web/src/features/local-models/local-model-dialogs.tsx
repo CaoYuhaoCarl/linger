@@ -12,6 +12,7 @@ import {
   formatGigabytes,
   makeRoomSelection,
   makesRoom,
+  placeName,
   poolLabel,
   poolOf,
   type LoadCheck,
@@ -57,13 +58,27 @@ export function MakeRoomDialog({
   const [selected, setSelected] = useState(() => makeRoomSelection(check));
   const chosen = new Set(selected);
   const enough = makesRoom(check, chosen);
+  const pool = poolLabel(view, check.pool);
+  // Whether unloading every model offered here frees enough; when not, what
+  // else holds the memory is the thing to show.
+  const reachable = makesRoom(
+    check,
+    new Set(check.loaded.map((item) => item.model.id)),
+  );
+  const tooBig = check.needBytes > check.pool.total_bytes;
+  const inUse = [
+    ...(check.otherAppsBytes
+      ? [{ bytes: check.otherAppsBytes, id: "", name: "Other apps" }]
+      : []),
+    ...check.kept,
+  ];
   const affected = check.loaded.flatMap((item) =>
     chosen.has(item.model.id) ? item.used_by.map((user) => user.name) : [],
   );
 
   return (
     <ModalDialog
-      description={`${entry.model.name} needs ${formatGigabytes(check.needBytes)} on ${poolLabel(view, check.pool)}; ${formatGigabytes(check.freeBytes)} is free.`}
+      description={`${entry.model.name} needs ${formatGigabytes(check.needBytes)} on ${pool}; ${formatGigabytes(check.freeBytes)} is free.`}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
@@ -122,11 +137,38 @@ export function MakeRoomDialog({
               </label>
             ))}
           </fieldset>
-        ) : (
+        ) : null}
+        {tooBig ? (
           <FormFeedback tone="danger">
-            Nothing else is loaded there. This model doesn&apos;t fit even when
-            the memory is empty.
+            {entry.model.name} needs more than all{" "}
+            {formatGigabytes(check.pool.total_bytes)} of {pool}, so it
+            can&apos;t load there.
           </FormFeedback>
+        ) : reachable ? null : (
+          <>
+            {inUse.length ? (
+              <ul aria-label="Also using this memory" className="grid gap-0.5">
+                {inUse.map((holder) => (
+                  <li
+                    className="flex min-h-8 items-center gap-2 px-2 text-sm text-app-body"
+                    key={holder.id}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {holder.name}
+                    </span>
+                    <span className="w-16 text-right text-xs tabular-nums text-muted-foreground">
+                      {formatGigabytes(holder.bytes)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <FormFeedback tone="danger">
+              {check.otherAppsBytes
+                ? `Close other apps that use ${placeName(view, check.pool.id)}, then try again.`
+                : "Unloading models here doesn't free enough. Choose a smaller model."}
+            </FormFeedback>
+          </>
         )}
         {affected.length ? (
           <FormFeedback tone="warning">

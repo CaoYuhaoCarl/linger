@@ -434,6 +434,12 @@ function Library({
   for (const input of sending) {
     if (input) requests.set(input.modelId, input.action);
   }
+  // A download the Computer accepted is a job it can cancel before the
+  // first progress reaches a snapshot; every other request holds the row.
+  const busy = (modelId: string) =>
+    requests.has(modelId) &&
+    (requests.get(modelId) !== "download" ||
+      sending.some((input) => input?.modelId === modelId));
   const offline = view.computer.status === "offline";
   const readOnly = !view.viewer_is_owner;
   // A dialog stays open across snapshots, so its confirm checks the model
@@ -527,7 +533,7 @@ function Library({
               const modelId = entry.model.id;
               return (
                 <ModelRow
-                  disabled={offline || readOnly || requests.has(modelId)}
+                  disabled={offline || readOnly || busy(modelId)}
                   entry={entry}
                   expanded={expandedId === modelId}
                   key={modelId}
