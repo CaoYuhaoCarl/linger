@@ -1,6 +1,7 @@
 import type {
   LocalModel,
   LocalModelPool,
+  LocalModelsComputerSummary,
   LocalModelsView,
   LocalModelView,
 } from "./local-models-queries";
@@ -130,6 +131,7 @@ export function labView(
         ram_total_bytes: gb(128),
       },
       owner: { actor_id: "actor-owner", display_name: "Ada Owner" },
+      platform: "linux",
       readiness: {
         enable_command: false,
         setup_path: "nvidia",
@@ -248,6 +250,7 @@ export function macView(
         ram_total_bytes: gb(64),
       },
       owner: { actor_id: "actor-owner", display_name: "Ada Owner" },
+      platform: "darwin",
       readiness: {
         enable_command: false,
         setup_path: "apple_silicon",
@@ -279,4 +282,43 @@ export function macView(
     viewer_is_owner: true,
     ...fields,
   };
+}
+
+/** One of the viewer's own Computers in the picker's list. */
+export function computerSummary(
+  fields: Partial<LocalModelsComputerSummary> &
+    Pick<LocalModelsComputerSummary, "computer_id">,
+): LocalModelsComputerSummary {
+  return {
+    counts: { loaded: 0, on_disk: 0, working: 0 },
+    display_name: fields.computer_id,
+    last_seen_at: "2026-11-13T10:00:00.000Z",
+    owner: { actor_id: "actor-owner", display_name: "Ada Owner" },
+    platform: "linux",
+    readiness: { enable_command: false, state: "ready" },
+    status: "online",
+    viewer_is_owner: true,
+    ...fields,
+  };
+}
+
+/** The list row of the Computer a library view describes. */
+export function summaryOf(view: LocalModelsView): LocalModelsComputerSummary {
+  const { computer } = view;
+  return computerSummary({
+    computer_id: computer.computer_id,
+    counts: {
+      loaded: view.models.filter((item) => item.model.state === "loaded")
+        .length,
+      on_disk: 0,
+      working: 0,
+    },
+    display_name: computer.display_name,
+    last_seen_at: computer.last_seen_at,
+    observed_at: view.observed_at,
+    owner: computer.owner,
+    platform: computer.platform,
+    readiness: computer.readiness,
+    status: computer.status,
+  });
 }

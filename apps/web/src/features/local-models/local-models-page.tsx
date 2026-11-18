@@ -5,19 +5,23 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { FormFeedback } from "@/components/ui/form-feedback";
-import { Select, SelectItem } from "@/components/ui/select";
 import { relativeTime } from "@/features/local-computer/computer-relative-time";
 import { useDesktopComputer } from "@/features/local-computer/desktop-computer";
-import { localComputersQueryOptions } from "@/features/local-computer/local-computer-queries";
 import { requireRoomRouteParam } from "@/features/rooms/room-route-params";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 
+import { ComputerPicker } from "./computer-picker";
+import { defaultComputerId } from "./computer-picker-rules";
+import {
+  readLastPickedComputer,
+  rememberPickedComputer,
+} from "./last-picked-computer";
 import { AdvancedDialog } from "./local-model-details";
 import { ModelRow } from "./local-model-row";
 import {
@@ -37,6 +41,7 @@ import {
   localModelActionMutationKey,
   localModelsQueryKey,
   localModelsQueryOptions,
+  localModelsSummaryQueryOptions,
   type LocalModelAction,
   type LocalModelActionInput,
   type LocalModelsView,
@@ -65,26 +70,50 @@ const actionStatuses: Record<"load" | "remove" | "unload", ModelStatus[]> = {
 
 /**
  * The model library of one Computer, chosen by `?computer=`. Without it the
- * desktop app opens its own Computer and a browser the first one.
+ * visit opens the Computer `defaultComputerId` picks and writes it to the
+ * address, so later snapshots don't move the selection.
  */
 export function LocalModelsPage() {
   const { client } = useTeamHubRuntime();
   const tenantId = requireRoomRouteParam(useParams().tenantId, "Tenant");
-  const { data: inventory } = useSuspenseQuery(
-    localComputersQueryOptions(client, tenantId),
+  const { data: summary } = useSuspenseQuery(
+    localModelsSummaryQueryOptions(client, tenantId),
   );
   const desktop = useDesktopComputer();
   const [searchParams, setSearchParams] = useSearchParams();
-  const computers = inventory.items;
+  const computers = summary.items.filter((item) => item.viewer_is_owner);
   const linkedId = searchParams.get("computer");
-  const requestedId = linkedId ?? desktop?.status?.computerId;
-  const owned = computers.find((item) => item.computer_id === requestedId);
+  const desktopId = desktop?.status?.computerId;
+  const lastPickId = useMemo(
+    () => readLastPickedComputer(tenantId),
+    [tenantId],
+  );
+  const defaultId = linkedId
+    ? undefined
+    : defaultComputerId(computers, { desktopId, lastPickId });
+  const selectedId = linkedId ?? defaultId;
+  const owned = computers.find((item) => item.computer_id === selectedId);
   // A linked Computer the viewer does not own may be another member's: the
-  // library API, not the owned inventory, decides whether they may read it.
+  // library API, not the viewer's list, decides whether they may read it.
   const sharedId = linkedId && !owned ? linkedId : undefined;
-  const computer = sharedId ? undefined : (owned ?? computers[0]);
+  // The desktop app answers which Computer it runs on asynchronously; the
+  // default waits for it before it is written.
+  const defaultSettled = !desktop || desktop.status !== undefined;
+
+  useEffect(() => {
+    if (!defaultSettled || !defaultId) return;
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("computer", defaultId);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [defaultId, defaultSettled, setSearchParams]);
 
   function select(computerId: string) {
+    rememberPickedComputer(tenantId, computerId);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -95,38 +124,31 @@ export function LocalModelsPage() {
     );
   }
 
+  const picker =
+    computers.length > (sharedId ? 0 : 1) ? (
+      <ComputerPicker
+        computers={computers}
+        onChoose={select}
+        selectedId={selectedId}
+        thisComputerId={desktopId}
+      />
+    ) : null;
+
   return (
     <main className="mx-auto flex min-h-0 w-full max-w-(--app-settings-width) flex-col pb-4">
       {sharedId ? (
         <ComputerModels
           computerId={sharedId}
-          computerPicker={null}
+          computerPicker={picker}
           key={sharedId}
           tenantId={tenantId}
         />
-      ) : computer ? (
+      ) : owned ? (
         <ComputerModels
-          computerId={computer.computer_id}
-          displayName={computer.display_name}
-          computerPicker={
-            computers.length > 1 ? (
-              <Select
-                aria-label="Computer"
-                onValueChange={select}
-                value={computer.computer_id}
-                variant="pill"
-              >
-                {computers.map((item) => (
-                  <SelectItem key={item.computer_id} value={item.computer_id}>
-                    {item.status === "online"
-                      ? item.display_name
-                      : `${item.display_name} · Offline`}
-                  </SelectItem>
-                ))}
-              </Select>
-            ) : null
-          }
-          key={computer.computer_id}
+          computerId={owned.computer_id}
+          displayName={owned.display_name}
+          computerPicker={picker}
+          key={owned.computer_id}
           tenantId={tenantId}
         />
       ) : (
@@ -385,8 +407,8 @@ function Library({
       ) : null}
       {readOnly && listed ? (
         <Notice>
-          Only the person who connected {name} can download, load or remove its
-          models.
+          Only {view.computer.owner.display_name}, who connected {name}, can
+          download, load or remove its models.
         </Notice>
       ) : null}
 
