@@ -6,7 +6,8 @@ type Schemas = components["schemas"];
 
 /**
  * Every code the Local models page shows, as English copy. The page branches
- * on codes only; diagnostic `detail` text from the Computer is never shown.
+ * on codes only; diagnostic `detail` text from the Computer appears only under
+ * Technical details, for its owner.
  * Typing each map by its generated code set makes a new code a type error
  * here until it has copy.
  */
@@ -126,33 +127,6 @@ export function unavailableCopy(reason: AvailabilityReason | undefined) {
     default:
       return "This model doesn't run on this computer.";
   }
-}
-
-const libraryUnavailable: Record<
-  Schemas["LocalModelsViewUnavailableReason"]["code"],
-  { body: string; title: (computer: string) => string }
-> = {
-  NOT_REPORTED: {
-    body: "It reports them once it connects with an up-to-date Linger app.",
-    title: (computer) => `${computer} hasn't reported local models yet`,
-  },
-  TOOL_FAILED: {
-    body: "The local model tools on this computer didn't answer. Check that they're installed and working, then open this page again.",
-    title: (computer) => `Couldn't read the local models on ${computer}`,
-  },
-  TOOL_NOT_INSTALLED: {
-    body: "Run Quick Install in the Linger desktop app on that computer to add them.",
-    title: (computer) => `Local models aren't set up on ${computer}`,
-  },
-};
-
-/** Why a Computer reports no model library. */
-export function libraryUnavailableCopy(
-  code: Schemas["LocalModelsViewUnavailableReason"]["code"] | undefined,
-  computer: string,
-) {
-  const copy = libraryUnavailable[code ?? "NOT_REPORTED"];
-  return { body: copy.body, title: copy.title(computer) };
 }
 
 const capabilityLabels: Record<Schemas["LocalModelCapability"], string> = {

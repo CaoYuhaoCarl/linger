@@ -33,6 +33,15 @@ build:assets` to check the initial JS budget.
   row shows a requested load or download as started and spins the button of
   any other action, with the row's actions off. A Computer's
   detail on the Computers page links here and reads no model state itself.
+  The page lists models only while TeamHub's `computer.readiness` is
+  `loaded`, `working` or `ready`; every other state renders the empty state
+  in `local-models-empty-state-copy.ts`, typed by the generated readiness
+  enums: title, body, one primary action (a command block with Copy, Check
+  again, the desktop's `window.lingerDesktop.localModels.setup()` when that
+  API exists on the Computer's own desktop window, or a docs button) and
+  docs.heylinger.com links. Other members see only whom to ask; the
+  Computer's diagnostic `detail` appears only to its owner, under the
+  collapsed Technical details.
 - `src/test`: unit-test support, including the in-process TeamHub test server.
 - `e2e`: Playwright product workflows; every spec runs on the real TeamHub and
   Document Runtime stack (`make check-e2e-room-document`).

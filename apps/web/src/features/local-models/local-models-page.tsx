@@ -1,4 +1,3 @@
-import { AiChipIcon } from "@hugeicons/core-free-icons";
 import {
   useMutation,
   useMutationState,
@@ -11,7 +10,6 @@ import { Link, useParams, useSearchParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { FormFeedback } from "@/components/ui/form-feedback";
-import { Icon } from "@/components/ui/icon";
 import { Select, SelectItem } from "@/components/ui/select";
 import { relativeTime } from "@/features/local-computer/computer-relative-time";
 import { useDesktopComputer } from "@/features/local-computer/desktop-computer";
@@ -27,7 +25,13 @@ import {
   RemoveModelDialog,
   UnloadModelDialog,
 } from "./local-model-dialogs";
-import { actionErrorCopy, libraryUnavailableCopy } from "./local-models-copy";
+import { actionErrorCopy } from "./local-models-copy";
+import {
+  computersPath,
+  EmptyState,
+  ReadinessEmptyState,
+} from "./local-models-empty-state";
+import { listsModels } from "./local-models-empty-state-copy";
 import {
   actOnLocalComputerModel,
   localModelActionMutationKey,
@@ -58,10 +62,6 @@ const actionStatuses: Record<"load" | "remove" | "unload", ModelStatus[]> = {
   remove: ["loaded", "idle", "failed"],
   unload: ["loaded"],
 };
-
-function computersPath(tenantId: string) {
-  return `/t/${tenantId}/settings/computers`;
-}
 
 /**
  * The model library of one Computer, chosen by `?computer=`. Without it the
@@ -148,32 +148,6 @@ export function LocalModelsPage() {
   );
 }
 
-function EmptyState({
-  action,
-  children,
-  title,
-}: {
-  action?: ReactNode;
-  children: ReactNode;
-  title: string;
-}) {
-  return (
-    <section
-      aria-label={title}
-      className="mt-6 flex flex-col items-center px-4 pt-12 text-center"
-    >
-      <span className="flex size-16 items-center justify-center rounded-[20%] bg-muted text-foreground">
-        <Icon icon={AiChipIcon} size={28} />
-      </span>
-      <h2 className="mt-6 text-xl">{title}</h2>
-      <p className="mt-1.5 max-w-md text-sm text-muted-foreground">
-        {children}
-      </p>
-      {action}
-    </section>
-  );
-}
-
 function Notice({ children }: { children: ReactNode }) {
   return (
     <p
@@ -201,7 +175,8 @@ function ComputerModels({
   const query = useQuery(localModelsQueryOptions(client, tenantId, computerId));
   const view = query.data;
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const summary = view?.available ? memorySummary(view) : undefined;
+  const library = view && listsModels(view) ? view : undefined;
+  const summary = library ? memorySummary(library) : undefined;
 
   return (
     <>
@@ -218,7 +193,7 @@ function ComputerModels({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {computerPicker}
-          {view?.available ? (
+          {library ? (
             <Button
               onClick={() => setDialog({ kind: "advanced" })}
               size="compact"
@@ -290,7 +265,8 @@ function Library({
       { action: LocalModelAction; from?: ModelStatus; observedAt?: string }
     >
   >({});
-  const entries = view.available ? modelEntries(view) : [];
+  const listed = listsModels(view);
+  const entries = listed ? modelEntries(view) : [];
   const find = (modelId: string) =>
     entries.find((entry) => entry.model.id === modelId);
   const mutationKey = localModelActionMutationKey(tenantId, computerId);
@@ -380,13 +356,9 @@ function Library({
     else act({ action: "unload", modelId: entry.model.id });
   }
 
-  const unavailable = view.available
-    ? undefined
-    : libraryUnavailableCopy(view.reason?.code, name);
-
   return (
     <>
-      {offline ? (
+      {offline && (listed || view.observed_at) ? (
         <Notice>
           <span className="text-foreground">
             {name} is offline
@@ -411,15 +383,15 @@ function Library({
           )}
         </Notice>
       ) : null}
-      {readOnly ? (
+      {readOnly && listed ? (
         <Notice>
           Only the person who connected {name} can download, load or remove its
           models.
         </Notice>
       ) : null}
 
-      {unavailable ? (
-        <EmptyState title={unavailable.title}>{unavailable.body}</EmptyState>
+      {!listed ? (
+        <ReadinessEmptyState tenantId={tenantId} view={view} />
       ) : (
         <>
           {failure ? (
