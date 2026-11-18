@@ -489,6 +489,7 @@ export class RunnerOperations {
       status: "online",
       seenAt: new Date().toISOString(),
       activeOperations: this.activeOperations(connection.runnerId).length,
+      ...this.owners.connections().releaseFacts(connection.hello),
     });
     connection.phase = "ready";
     this.owners.connections().notifyLocalComputerReady(connection.runnerId);
