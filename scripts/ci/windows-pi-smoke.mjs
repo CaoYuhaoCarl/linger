@@ -184,8 +184,24 @@ async function main() {
         elapsed_ms: Math.round(performance.now() - started),
       }),
     );
-    if (job.state !== "succeeded")
+    if (job.state !== "succeeded") {
+      const diagnosticFile = join(home, "installer", "jobs", `${job.id}.json`);
+      const diagnostic = await readFile(diagnosticFile, "utf8")
+        .then(JSON.parse)
+        .catch(() => null);
+      for (const event of (diagnostic?.events ?? []).slice(-10)) {
+        console.error(
+          JSON.stringify({
+            phase: "pi_preparation_event",
+            kind: event.kind,
+            stage: event.stage,
+            state: event.state,
+            message: event.message,
+          }),
+        );
+      }
       throw new Error("Packaged Pi preparation did not succeed");
+    }
 
     const root = join(home, "runtime", "harness", "tools", "pi");
     const candidates = [];

@@ -63,10 +63,12 @@ try {
   $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$scratch\windows-desktop-smoke.ps1`" -WorkerAccount `"$($credentials.UserName)`" -Setup `"$candidate`" -ExpectedSha256 $ExpectedSha256"
   $workerProcess = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Credential $credentials -LoadUserProfile `
     -WorkingDirectory $scratch -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+  $null = $workerProcess.Handle
   $finished = $workerProcess.WaitForExit(600000)
   Get-Content -LiteralPath $stdout -Tail 15
   Get-Content -LiteralPath $stderr -Tail 15
   if (!$finished) { throw 'Windows package smoke timed out' }
+  if ($null -eq $workerProcess.ExitCode) { throw 'Windows package smoke worker did not report an exit code' }
   if ($workerProcess.ExitCode -ne 0) { throw "Windows package smoke failed: $($workerProcess.ExitCode)" }
 } finally {
   if ($workerProcess -and !$workerProcess.HasExited) {

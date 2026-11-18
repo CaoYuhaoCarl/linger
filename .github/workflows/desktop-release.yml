@@ -20,6 +20,9 @@ on:
         description: Also create the desktop-v<version> release at this commit
         type: boolean
         default: false
+      windows_candidate_run:
+        description: Existing run ID for a Windows-only, non-publishing smoke rerun
+        type: string
 
 permissions:
   contents: read
@@ -51,9 +54,14 @@ jobs:
         env:
           INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
           PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+          WINDOWS_CANDIDATE_RUN: ${{ inputs.windows_candidate_run }}
           HAS_RELEASE_TOKEN: ${{ secrets.LINGER_RELEASE_TOKEN != '' }}
         run: |
           set -euo pipefail
+          if [ -n "$WINDOWS_CANDIDATE_RUN" ] && { [ "$PUBLISH" = true ] || [[ ! "$WINDOWS_CANDIDATE_RUN" =~ ^[1-9][0-9]*$ ]]; }; then
+            echo "::error::An existing Windows candidate requires a numeric run ID and publish=false."
+            exit 1
+          fi
           scripts/ci/desktop-release.sh version "$INPUT" | tee -a "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >>"$GITHUB_OUTPUT"
           # Stop before an hour of building when the release could not be published.
@@ -65,6 +73,7 @@ jobs:
 
   build:
     needs: prepare
+    if: inputs.windows_candidate_run == ''
     # The packaging scripts build the DMG and the Windows installer on Linux
     # with Docker, which the macOS and Windows runners do not offer.
     runs-on: ubuntu-24.04
@@ -209,16 +218,31 @@ jobs:
 
   windows-smoke:
     needs: [prepare, build]
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      (needs.build.result == 'success' ||
+       (inputs.windows_candidate_run != '' && needs.build.result == 'skipped'))
     runs-on: windows-2022
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/download-artifact@v4
+        if: inputs.windows_candidate_run == ''
         with:
           name: desktop-win32-x64
           path: candidate
+      - uses: actions/download-artifact@v4
+        if: inputs.windows_candidate_run != ''
+        with:
+          name: desktop-win32-x64
+          path: candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.windows_candidate_run }}
       - name: Smoke the packaged Pi runtime with its managed MCP extension
         shell: powershell
         env:
@@ -230,7 +254,7 @@ jobs:
 
   release:
     needs: [prepare, build, windows-smoke]
-    if: needs.prepare.outputs.publish == 'true'
+    if: inputs.windows_candidate_run == '' && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
