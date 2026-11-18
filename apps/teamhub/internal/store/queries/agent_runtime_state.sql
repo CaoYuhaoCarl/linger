@@ -966,6 +966,10 @@ SET display_name=sqlc.arg(display_name)::text,
     workspace_grants=sqlc.arg(workspace_grants)::jsonb,
     daemon_version=COALESCE(sqlc.narg(daemon_version)::text,daemon_version),
     recommended_version=COALESCE(sqlc.narg(recommended_version)::text,recommended_version),
+    update_pending_since=CASE sqlc.narg(release_current)::boolean
+        WHEN true THEN NULL
+        WHEN false THEN COALESCE(update_pending_since,sqlc.arg(last_seen_at)::timestamptz)
+        ELSE update_pending_since END,
     last_seen_at=sqlc.arg(last_seen_at)::timestamptz,
     connected_at=sqlc.arg(last_seen_at)::timestamptz,
     updated_at=clock_timestamp()
@@ -979,6 +983,10 @@ SET status=sqlc.arg(status)::text,
     runtime_diagnostics=COALESCE(sqlc.narg(runtime_diagnostics)::jsonb,runtime_diagnostics),
     daemon_version=COALESCE(sqlc.narg(daemon_version)::text,daemon_version),
     recommended_version=COALESCE(sqlc.narg(recommended_version)::text,recommended_version),
+    update_pending_since=CASE sqlc.narg(release_current)::boolean
+        WHEN true THEN NULL
+        WHEN false THEN COALESCE(update_pending_since,sqlc.arg(last_seen_at)::timestamptz)
+        ELSE update_pending_since END,
     active_operations=CASE WHEN sqlc.arg(status)::text='online'
         THEN COALESCE(sqlc.narg(active_operations)::integer,active_operations) ELSE 0 END,
     last_seen_at=sqlc.arg(last_seen_at)::timestamptz,
@@ -1418,8 +1426,8 @@ WHERE computer_id=sqlc.arg(computer_id)::text;
 -- One row per Computer of the owner in the Tenant with its stored summary;
 -- it never reads a snapshot.
 SELECT computer.computer_id,computer.display_name,computer.status,computer.last_seen_at,
-       computer.connected_at,computer.platform,computer.daemon_version,computer.owner_actor_id,
-       owner.display_name AS owner_display_name,
+       computer.connected_at,computer.update_pending_since,computer.platform,computer.daemon_version,
+       computer.owner_actor_id,owner.display_name AS owner_display_name,
        snapshot.summary,snapshot.observed_at
 FROM local_computers computer
 JOIN actors owner ON owner.id=computer.owner_actor_id AND owner.tenant_id=computer.owner_tenant_id

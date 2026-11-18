@@ -183,7 +183,7 @@ WHERE computer_id=$4::text
           AND daemon_identity_version=$3::bigint
       )
   )
-RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 `
 
 type BindAgentRuntimeLocalComputerDaemonIdentityParams struct {
@@ -224,6 +224,7 @@ func (q *Queries) BindAgentRuntimeLocalComputerDaemonIdentity(ctx context.Contex
 		&i.OwnerTenantID,
 		&i.OwnerActorID,
 		&i.ConnectedAt,
+		&i.UpdatePendingSince,
 	)
 	return i, err
 }
@@ -905,7 +906,7 @@ func (q *Queries) GetAgentRuntimeInput(ctx context.Context, arg GetAgentRuntimeI
 }
 
 const getAgentRuntimeLocalComputer = `-- name: GetAgentRuntimeLocalComputer :one
-SELECT computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+SELECT computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 FROM local_computers
 WHERE computer_id=$1::text
 `
@@ -936,6 +937,7 @@ func (q *Queries) GetAgentRuntimeLocalComputer(ctx context.Context, computerID s
 		&i.OwnerTenantID,
 		&i.OwnerActorID,
 		&i.ConnectedAt,
+		&i.UpdatePendingSince,
 	)
 	return i, err
 }
@@ -1664,7 +1666,7 @@ INSERT INTO local_computers(
     $1::text,$2::text,'offline',1,
     $3::text,$4::text
 )
-RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 `
 
 type InsertAgentRuntimeLocalComputerParams struct {
@@ -1705,6 +1707,7 @@ func (q *Queries) InsertAgentRuntimeLocalComputer(ctx context.Context, arg Inser
 		&i.OwnerTenantID,
 		&i.OwnerActorID,
 		&i.ConnectedAt,
+		&i.UpdatePendingSince,
 	)
 	return i, err
 }
@@ -2247,7 +2250,7 @@ func (q *Queries) ListAgentRunnerPlacementsOnComputer(ctx context.Context, compu
 }
 
 const listAgentRuntimeLocalComputers = `-- name: ListAgentRuntimeLocalComputers :many
-SELECT computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+SELECT computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 FROM local_computers
 WHERE status<>'removed'
 ORDER BY display_name,computer_id
@@ -2285,6 +2288,7 @@ func (q *Queries) ListAgentRuntimeLocalComputers(ctx context.Context) ([]LocalCo
 			&i.OwnerTenantID,
 			&i.OwnerActorID,
 			&i.ConnectedAt,
+			&i.UpdatePendingSince,
 		); err != nil {
 			return nil, err
 		}
@@ -2458,8 +2462,8 @@ func (q *Queries) ListLocalModelUsersOnComputer(ctx context.Context, arg ListLoc
 
 const listLocalModelsComputers = `-- name: ListLocalModelsComputers :many
 SELECT computer.computer_id,computer.display_name,computer.status,computer.last_seen_at,
-       computer.connected_at,computer.platform,computer.daemon_version,computer.owner_actor_id,
-       owner.display_name AS owner_display_name,
+       computer.connected_at,computer.update_pending_since,computer.platform,computer.daemon_version,
+       computer.owner_actor_id,owner.display_name AS owner_display_name,
        snapshot.summary,snapshot.observed_at
 FROM local_computers computer
 JOIN actors owner ON owner.id=computer.owner_actor_id AND owner.tenant_id=computer.owner_tenant_id
@@ -2477,17 +2481,18 @@ type ListLocalModelsComputersParams struct {
 }
 
 type ListLocalModelsComputersRow struct {
-	ComputerID       string             `json:"computer_id"`
-	DisplayName      string             `json:"display_name"`
-	Status           string             `json:"status"`
-	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
-	ConnectedAt      pgtype.Timestamptz `json:"connected_at"`
-	Platform         pgtype.Text        `json:"platform"`
-	DaemonVersion    pgtype.Text        `json:"daemon_version"`
-	OwnerActorID     string             `json:"owner_actor_id"`
-	OwnerDisplayName string             `json:"owner_display_name"`
-	Summary          []byte             `json:"summary"`
-	ObservedAt       pgtype.Timestamptz `json:"observed_at"`
+	ComputerID         string             `json:"computer_id"`
+	DisplayName        string             `json:"display_name"`
+	Status             string             `json:"status"`
+	LastSeenAt         pgtype.Timestamptz `json:"last_seen_at"`
+	ConnectedAt        pgtype.Timestamptz `json:"connected_at"`
+	UpdatePendingSince pgtype.Timestamptz `json:"update_pending_since"`
+	Platform           pgtype.Text        `json:"platform"`
+	DaemonVersion      pgtype.Text        `json:"daemon_version"`
+	OwnerActorID       string             `json:"owner_actor_id"`
+	OwnerDisplayName   string             `json:"owner_display_name"`
+	Summary            []byte             `json:"summary"`
+	ObservedAt         pgtype.Timestamptz `json:"observed_at"`
 }
 
 // One row per Computer of the owner in the Tenant with its stored summary;
@@ -2507,6 +2512,7 @@ func (q *Queries) ListLocalModelsComputers(ctx context.Context, arg ListLocalMod
 			&i.Status,
 			&i.LastSeenAt,
 			&i.ConnectedAt,
+			&i.UpdatePendingSince,
 			&i.Platform,
 			&i.DaemonVersion,
 			&i.OwnerActorID,
@@ -2560,7 +2566,7 @@ func (q *Queries) ListMaterializableAgentRuntimeRegistrationsAfter(ctx context.C
 }
 
 const listOwnedLocalComputers = `-- name: ListOwnedLocalComputers :many
-SELECT computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+SELECT computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 FROM local_computers
 WHERE owner_tenant_id=$1::text
   AND owner_actor_id=$2::text
@@ -2605,6 +2611,7 @@ func (q *Queries) ListOwnedLocalComputers(ctx context.Context, arg ListOwnedLoca
 			&i.OwnerTenantID,
 			&i.OwnerActorID,
 			&i.ConnectedAt,
+			&i.UpdatePendingSince,
 		); err != nil {
 			return nil, err
 		}
@@ -3400,7 +3407,7 @@ func (q *Queries) LockAgentRunStatusRoom(ctx context.Context, roomID string) (bo
 }
 
 const lockAgentRuntimeLocalComputer = `-- name: LockAgentRuntimeLocalComputer :one
-SELECT computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+SELECT computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 FROM local_computers
 WHERE computer_id=$1::text
 FOR UPDATE
@@ -3432,6 +3439,7 @@ func (q *Queries) LockAgentRuntimeLocalComputer(ctx context.Context, computerID 
 		&i.OwnerTenantID,
 		&i.OwnerActorID,
 		&i.ConnectedAt,
+		&i.UpdatePendingSince,
 	)
 	return i, err
 }
@@ -3631,7 +3639,7 @@ const markAgentRuntimeLocalComputersOffline = `-- name: MarkAgentRuntimeLocalCom
 UPDATE local_computers
 SET status='offline',active_operations=0,updated_at=clock_timestamp()
 WHERE status IN ('online','upgrade_required')
-RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 `
 
 func (q *Queries) MarkAgentRuntimeLocalComputersOffline(ctx context.Context) ([]LocalComputer, error) {
@@ -3666,6 +3674,7 @@ func (q *Queries) MarkAgentRuntimeLocalComputersOffline(ctx context.Context) ([]
 			&i.OwnerTenantID,
 			&i.OwnerActorID,
 			&i.ConnectedAt,
+			&i.UpdatePendingSince,
 		); err != nil {
 			return nil, err
 		}
@@ -3701,11 +3710,15 @@ SET display_name=$1::text,
     workspace_grants=$7::jsonb,
     daemon_version=COALESCE($8::text,daemon_version),
     recommended_version=COALESCE($9::text,recommended_version),
-    last_seen_at=$10::timestamptz,
-    connected_at=$10::timestamptz,
+    update_pending_since=CASE $10::boolean
+        WHEN true THEN NULL
+        WHEN false THEN COALESCE(update_pending_since,$11::timestamptz)
+        ELSE update_pending_since END,
+    last_seen_at=$11::timestamptz,
+    connected_at=$11::timestamptz,
     updated_at=clock_timestamp()
-WHERE computer_id=$11::text AND status<>'removed'
-RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+WHERE computer_id=$12::text AND status<>'removed'
+RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 `
 
 type ObserveAgentRuntimeLocalComputerParams struct {
@@ -3718,6 +3731,7 @@ type ObserveAgentRuntimeLocalComputerParams struct {
 	WorkspaceGrants    []byte             `json:"workspace_grants"`
 	DaemonVersion      pgtype.Text        `json:"daemon_version"`
 	RecommendedVersion pgtype.Text        `json:"recommended_version"`
+	ReleaseCurrent     pgtype.Bool        `json:"release_current"`
 	LastSeenAt         pgtype.Timestamptz `json:"last_seen_at"`
 	ComputerID         string             `json:"computer_id"`
 }
@@ -3733,6 +3747,7 @@ func (q *Queries) ObserveAgentRuntimeLocalComputer(ctx context.Context, arg Obse
 		arg.WorkspaceGrants,
 		arg.DaemonVersion,
 		arg.RecommendedVersion,
+		arg.ReleaseCurrent,
 		arg.LastSeenAt,
 		arg.ComputerID,
 	)
@@ -3760,6 +3775,7 @@ func (q *Queries) ObserveAgentRuntimeLocalComputer(ctx context.Context, arg Obse
 		&i.OwnerTenantID,
 		&i.OwnerActorID,
 		&i.ConnectedAt,
+		&i.UpdatePendingSince,
 	)
 	return i, err
 }
@@ -3853,7 +3869,7 @@ UPDATE local_computers
 SET status='removed',removed_at=clock_timestamp(),updated_at=clock_timestamp(),
     daemon_id=NULL,daemon_public_key=NULL
 WHERE computer_id=$1::text AND status<>'removed'
-RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 `
 
 // A Daemon keeps its identity key across pairings, so the removed Computer
@@ -3884,6 +3900,7 @@ func (q *Queries) RemoveAgentRuntimeLocalComputer(ctx context.Context, computerI
 		&i.OwnerTenantID,
 		&i.OwnerActorID,
 		&i.ConnectedAt,
+		&i.UpdatePendingSince,
 	)
 	return i, err
 }
@@ -3993,7 +4010,7 @@ SET display_name=$1::text,
 WHERE computer_id=$2::text
   AND status<>'removed'
   AND credential_generation<9007199254740991
-RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 `
 
 type RotateAgentRuntimeLocalComputerCredentialParams struct {
@@ -4027,6 +4044,7 @@ func (q *Queries) RotateAgentRuntimeLocalComputerCredential(ctx context.Context,
 		&i.OwnerTenantID,
 		&i.OwnerActorID,
 		&i.ConnectedAt,
+		&i.UpdatePendingSince,
 	)
 	return i, err
 }
@@ -4450,12 +4468,16 @@ SET status=$1::text,
     runtime_diagnostics=COALESCE($3::jsonb,runtime_diagnostics),
     daemon_version=COALESCE($4::text,daemon_version),
     recommended_version=COALESCE($5::text,recommended_version),
+    update_pending_since=CASE $6::boolean
+        WHEN true THEN NULL
+        WHEN false THEN COALESCE(update_pending_since,$7::timestamptz)
+        ELSE update_pending_since END,
     active_operations=CASE WHEN $1::text='online'
-        THEN COALESCE($6::integer,active_operations) ELSE 0 END,
+        THEN COALESCE($8::integer,active_operations) ELSE 0 END,
     last_seen_at=$7::timestamptz,
     updated_at=clock_timestamp()
-WHERE computer_id=$8::text AND status<>'removed'
-RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at
+WHERE computer_id=$9::text AND status<>'removed'
+RETURNING computer_id, display_name, status, credential_generation, capacity, active_operations, runtime_inventory, workspace_grants, runtime_diagnostics, last_seen_at, removed_at, created_at, updated_at, daemon_id, daemon_public_key, daemon_identity_version, platform, daemon_version, recommended_version, owner_tenant_id, owner_actor_id, connected_at, update_pending_since
 `
 
 type TouchAgentRuntimeLocalComputerParams struct {
@@ -4464,8 +4486,9 @@ type TouchAgentRuntimeLocalComputerParams struct {
 	RuntimeDiagnostics []byte             `json:"runtime_diagnostics"`
 	DaemonVersion      pgtype.Text        `json:"daemon_version"`
 	RecommendedVersion pgtype.Text        `json:"recommended_version"`
-	ActiveOperations   pgtype.Int4        `json:"active_operations"`
+	ReleaseCurrent     pgtype.Bool        `json:"release_current"`
 	LastSeenAt         pgtype.Timestamptz `json:"last_seen_at"`
+	ActiveOperations   pgtype.Int4        `json:"active_operations"`
 	ComputerID         string             `json:"computer_id"`
 }
 
@@ -4476,8 +4499,9 @@ func (q *Queries) TouchAgentRuntimeLocalComputer(ctx context.Context, arg TouchA
 		arg.RuntimeDiagnostics,
 		arg.DaemonVersion,
 		arg.RecommendedVersion,
-		arg.ActiveOperations,
+		arg.ReleaseCurrent,
 		arg.LastSeenAt,
+		arg.ActiveOperations,
 		arg.ComputerID,
 	)
 	var i LocalComputer
@@ -4504,6 +4528,7 @@ func (q *Queries) TouchAgentRuntimeLocalComputer(ctx context.Context, arg TouchA
 		&i.OwnerTenantID,
 		&i.OwnerActorID,
 		&i.ConnectedAt,
+		&i.UpdatePendingSince,
 	)
 	return i, err
 }
