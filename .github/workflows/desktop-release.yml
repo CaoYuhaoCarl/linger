@@ -31,10 +31,6 @@ concurrency:
 env:
   # owner/name of the repository that receives the release.
   RELEASE_REPO: ${{ vars.RELEASE_REPO || 'simplexai-labs/linger' }}
-  # https folder serving the PostgreSQL and voice tools archives that
-  # apps/desktop/distribution/*.json pin: the assets of the native-deps
-  # prerelease, unless a secret or variable names another folder.
-  LINGER_NATIVE_DEPS_URL: ${{ secrets.LINGER_NATIVE_DEPS_URL || vars.LINGER_NATIVE_DEPS_URL || 'https://github.com/simplexai-labs/linger/releases/download/native-deps' }}
   # rcodesign reads RCODESIGN_* variables as its configuration, so these
   # carry another prefix.
   APPLE_CODESIGN_VERSION: 0.29.0
@@ -89,6 +85,8 @@ jobs:
       DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
       RELEASE_OUT: ${{ github.workspace }}/.linger-runtime/desktop-release
       LINGER_NATIVE_POSTGRES_DIR: ${{ github.workspace }}/.linger-runtime/native-deps
+      # Archive source for the pins in apps/desktop/distribution.
+      LINGER_NATIVE_DEPS_URL: ${{ secrets.LINGER_NATIVE_DEPS_URL || vars.LINGER_NATIVE_DEPS_URL || 'https://github.com/simplexai-labs/linger/releases/download/native-deps' }}
     steps:
       # A target's build holds the bundled runtime, its archive and the
       # package at once; the runner image's SDKs leave too little room.
@@ -165,13 +163,38 @@ jobs:
           # The hosted diagnostics receiver this build carries; a secret so
           # the address stays masked. Without it Send Diagnostics is hidden.
           LINGER_DIAGNOSTICS_UPLOAD_URL: ${{ secrets.LINGER_DIAGNOSTICS_UPLOAD_URL }}
+      - name: Record Windows Setup digest
+        if: matrix.target == 'win32-x64'
+        shell: bash
+        run: |
+          cd "$RELEASE_OUT/assets"
+          sha256sum "Linger-$DESKTOP_VERSION-windows-x64-setup.exe" > windows-setup.sha256
       - name: Remove signing files
         if: always()
         run: rm -rf "$RUNNER_TEMP/signing"
       - uses: actions/upload-artifact@v4
+        if: matrix.target != 'win32-x64'
         with:
           name: desktop-${{ matrix.target }}
           path: ${{ env.RELEASE_OUT }}/assets/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: matrix.target == 'win32-x64'
+        with:
+          name: desktop-win32-x64
+          path: |
+            ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-windows-x64-setup.exe
+            ${{ env.RELEASE_OUT }}/assets/windows-setup.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: matrix.target == 'win32-x64'
+        with:
+          name: desktop-win32-x64-portable
+          path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-windows-x64-portable.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -184,8 +207,29 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  release:
+  windows-smoke:
     needs: [prepare, build]
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-win32-x64
+          path: candidate
+      - name: Smoke the packaged Pi runtime with its managed MCP extension
+        shell: powershell
+        env:
+          DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $setup = "candidate\Linger-$env:DESKTOP_VERSION-windows-x64-setup.exe"
+          $digest = (Get-Content -LiteralPath 'candidate\windows-setup.sha256' -Raw).Split(' ')[0]
+          scripts/ci/windows-desktop-smoke.ps1 -Setup $setup -ExpectedSha256 $digest
+
+  release:
+    needs: [prepare, build, windows-smoke]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -197,6 +241,9 @@ jobs:
           pattern: desktop-*
           path: release
           merge-multiple: true
+      - name: Verify the Windows Setup that passed smoke
+        working-directory: release
+        run: sha256sum -c windows-setup.sha256 && rm windows-setup.sha256
       # The signed update manifest over every platform's package. Without
       # the key the release still goes out, with a warning and no manifest.
       - name: Sign the update manifest

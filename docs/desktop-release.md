@@ -41,12 +41,64 @@ git push origin desktop-v0.16.36
 The workflow runs for `desktop-v*` tags and from Actions → Desktop release →
 Run workflow. Its `build` jobs
 run on `ubuntu-24.04` (the macOS and Windows runners have no Docker) and keep
-the files as workflow artifacts for 14 days: `desktop-<target>`, a zip of
-every file for the platform, and the installer on its own, not zipped (the
-`.dmg`, the `-setup.exe`, the Linux `.tar.gz`), for testers to download
-directly. `release` writes `SHA256SUMS.txt`
-and creates the GitHub Release, or uploads the files again to an existing one.
-A manual run publishes only with `publish` set.
+the files as workflow artifacts for 14 days. The installer is also uploaded
+on its own for testers to download directly. The Windows Setup and its digest
+are in `desktop-win32-x64`; the portable ZIP is a separate artifact so the
+smoke job does not download it. `windows-smoke` verifies the
+build's Setup SHA-256, then installs those bytes silently under a fresh
+standard user on an x64 Windows runner. It requests only packaged Pi
+preparation and checks the real Pi RPC handshake and the registered command
+from the bundled managed MCP extension, with no `NODE_PATH` override.
+It starts no Linger services, uses no provider credentials, and downloads no
+model weights. `release` requires this smoke to pass, checks the same Setup
+digest, writes `SHA256SUMS.txt`, and publishes. Use a manual `publish=false`
+run for a candidate; it still runs the smoke.
+
+### Physical Windows acceptance
+
+Use the same digest-verified candidate after package smoke passes. While CI
+builds, confirm a clean, authorized ordinary-user desktop with working
+mouse and keyboard, free disk, default Defender, and access from Windows to
+the authorized 118 model endpoint. Pre-stage the Setup; do not build on the
+laptop. Codex CLI and CC Switch are not prerequisites.
+
+1. Install through the actual Setup UI and complete Quick Install in Pi mode
+   with the authorized external model. Record signing/SmartScreen and setup
+   independently. Confirm the Computer is online and its Pi catalog and
+   workspace grant are ready.
+2. Run one unique Room journey using
+   [`room-journey.mjs`](../scripts/acceptance/room-journey.mjs).
+   An aborted Run is a failure as soon as TeamHub persists it for the test
+   message. Success requires a completed Run, its saved reply, exact new
+   file bytes, and the successful write and terminal events for that Run.
+   Quit and reopen the installed Desktop, then verify that the configuration,
+   Room reply, and file persist.
+3. Test the real graphical uninstaller independently of the Room outcome.
+   Record the app payload, per-user uninstall and startup registrations,
+   shortcuts, process identities, listeners, and retained data checksums
+   before and after. Exit code zero alone does not prove cleanup; report
+   remaining payload, running processes or listeners, and any retry
+   separately from the first attempt.
+
+Keep fault injection and recovery matrices on disposable environments;
+label Windows ARM and native Windows x64 evidence separately. Record build,
+transfer, setup, operator wait, Room terminal detection, reopen, and uninstall
+times separately to show where the next optimization belongs. Silent CI
+smoke does not prove graphical setup, inference, persistence, or uninstall.
+
+For the Room helper, set `LINGER_ACCEPTANCE_BASE_URL` (loopback),
+`LINGER_ACCEPTANCE_OWNER_FILE` (private local owner JSON), and
+`LINGER_ACCEPTANCE_COMPUTER_ID`; use `LINGER_ACCEPTANCE_MODEL` to select a
+specific catalog entry and `LINGER_ACCEPTANCE_TIMEOUT_SECONDS` to override the
+180-second budget. For one-command verification on the isolated host, set
+`LINGER_ACCEPTANCE_CONTEXT_VIEWS` to the daemon's `context-views` directory and
+`LINGER_ACCEPTANCE_AGENT_LOG_ROOT` to the Agent Service's log directory
+containing `agents/`. Alternatively set an exact
+`LINGER_ACCEPTANCE_WORKSPACE` and `LINGER_ACCEPTANCE_AGENT_LOG`. Paths for
+evidence are absolute. Invoke `node scripts/acceptance/room-journey.mjs`.
+Across hosts, `room_observed` means only the Run and persisted reply were
+linked; verify the file and logs separately with
+[`check-run-evidence.mjs`](../scripts/acceptance/check-run-evidence.mjs).
 
 The release goes to `RELEASE_REPO`, `simplexai-labs/linger` by default:
 
