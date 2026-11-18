@@ -260,14 +260,15 @@ Gateway and runs Agents. The daemon exits with the app.
   (logged as `desktop.legacy_user_data_kept`); one without a credential is set
   aside as `Linger.before-move-<time>`, so the Computer keeps its identity.
   LocalServer runs `installer.js --migrate` when an instance record still
-  carries a `simplex-` project name, before it reads
-  `desktop/local-server.json`
+  carries a `simplex-` project name, in the default home and in the home
+  `desktop/local-server.json` names when the person chose another install
+  location, before it resumes
   (`packages/local-installation/src/legacy-migration.ts`). Instances the
   installer left unconverted are logged as
-  `local_server.legacy_instance_skipped` with their reason and do not hold
-  the app back; only when `desktop` itself stayed unconverted, or the
-  installer could not run, LocalServer enters the failed state with that
-  reason, and Retry runs the migration again. There is
+  `local_server.legacy_instance_skipped` with their home and reason and do
+  not hold the app back; only when `desktop` in the home in use stayed
+  unconverted, or the installer could not run there, LocalServer enters the
+  failed state with that reason, and Retry runs the migration again. There is
   no downgrade path: an older build reads neither the converted instances nor
   the moved data folder. The bundle ID and
   Windows AppUserModelID are `com.simplexai.linger.desktop.preview`. The

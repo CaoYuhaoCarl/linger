@@ -449,13 +449,21 @@ export class LocalServerModule implements Module {
 
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
-    const migrationFailure = await this.#migrateLegacyHome(ctx);
     // After a reboot the local services are gone; start them again while the
     // window still points at them. A record of a Quick Install that stopped
     // before this computer connected (the app quit or the computer went off
     // during its last steps) is not resumed: setup shows instead, and its
     // Install finishes that installation.
     let record = await this.#readRecord();
+    // The record stays in the default home, but the installation it names
+    // may be in a location the person chose; that home converts too, and
+    // only its own instance holds the app back.
+    const inUse = record?.home ?? this.#options.home;
+    let migrationFailure: string | undefined;
+    for (const home of new Set([this.#options.home, inUse])) {
+      const failure = await this.#migrateLegacyHome(ctx, home);
+      if (home === inUse) migrationFailure = failure;
+    }
     if (record) this.#home = record.home;
     const config = ctx.config.get();
     const resumes =
@@ -1241,26 +1249,30 @@ export class LocalServerModule implements Module {
   }
 
   // An install from before the rename keeps legacy names in its instance
-  // records; the bundled installer converts them once, before a record is
-  // read. Returns why this computer's instance stayed unconverted, for the
-  // person to see; other instances it left behind are only logged.
-  async #migrateLegacyHome(ctx: ModuleContext): Promise<string | undefined> {
+  // records; the bundled installer converts them once, before the services
+  // start. Returns why this computer's instance in `home` stayed
+  // unconverted, for the person to see; other instances it left behind are
+  // only logged.
+  async #migrateLegacyHome(
+    ctx: ModuleContext,
+    home: string,
+  ): Promise<string | undefined> {
     if (
-      !(await legacyMigrationPending(this.#options.home)) ||
+      !(await legacyMigrationPending(home)) ||
       !existsSync(this.#installerScript())
     )
       return undefined;
     const outcome = await new Promise<LegacyMigrationRun>((resolve) => {
       const child = spawn(
         process.execPath,
-        [this.#installerScript(), "--home", this.#options.home, "--migrate"],
+        [this.#installerScript(), "--home", home, "--migrate"],
         {
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
           env: {
             ...process.env,
             ELECTRON_RUN_AS_NODE: "1",
-            LINGER_HOME: this.#options.home,
+            LINGER_HOME: home,
           },
         },
       );
@@ -1280,14 +1292,18 @@ export class LocalServerModule implements Module {
     const { failure, skipped } = legacyMigrationResult(outcome, LOCAL_INSTANCE);
     for (const entry of skipped)
       ctx.log.warn("local_server.legacy_instance_skipped", {
+        home,
         instance: entry.instance,
         reason: entry.reason,
       });
     if (failure) {
-      ctx.log.warn("local_server.home_migration_failed", { error: failure });
+      ctx.log.warn("local_server.home_migration_failed", {
+        home,
+        error: failure,
+      });
       return failure;
     }
-    ctx.log.info("local_server.home_migrated", {});
+    ctx.log.info("local_server.home_migrated", { home });
     return undefined;
   }
 

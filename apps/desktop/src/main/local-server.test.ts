@@ -72,6 +72,21 @@ if (args.includes("--user-keys")) {
   process.stdout.write(JSON.stringify({ saved: names }) + "\n");
   process.exit(0);
 }
+if (args.includes("--migrate")) {
+  // Converts every legacy instance record, except a "desktop" that
+  // migrate-skips holds back.
+  const holds = fs.existsSync(path.join(home, "migrate-skips"));
+  const instances = path.join(home, "instances");
+  for (const name of fs.existsSync(instances) ? fs.readdirSync(instances) : []) {
+    if (holds && name === "desktop") continue;
+    const file = path.join(instances, name, "instance.json");
+    const record = JSON.parse(fs.readFileSync(file, "utf8"));
+    fs.writeFileSync(file, JSON.stringify({ ...record, project: record.project.replace(/^simplex-/, "linger-") }));
+  }
+  const skipped = holds ? [{ instance: "desktop", reason: "Its Computer is running 1 task(s)." }] : [];
+  process.stdout.write(JSON.stringify({ skipped }) + "\n");
+  process.exit(0);
+}
 fs.mkdirSync(path.join(home, "installer"), { recursive: true });
 fs.writeFileSync(path.join(home, "installer", "args.json"), JSON.stringify(args));
 if (args.includes("--inspect")) {
@@ -150,6 +165,21 @@ const unpackedSource = (directory: string, name = "linger") => {
   writeFileSync(path.join(directory, "scripts/source-native.mjs"), "");
   writeFileSync(path.join(directory, "package.json"), JSON.stringify({ name }));
 };
+
+// An instance record an earlier Simplex app wrote under `home`.
+const legacyInstance = (home: string, name = "desktop") => {
+  mkdirSync(path.join(home, "instances", name), { recursive: true });
+  writeFileSync(
+    path.join(home, "instances", name, "instance.json"),
+    JSON.stringify({ mode: "source-native", project: `simplex-${name}-1` }),
+  );
+};
+const instanceProject = (home: string, name = "desktop") =>
+  (
+    JSON.parse(
+      readFileSync(path.join(home, "instances", name, "instance.json"), "utf8"),
+    ) as { project: string }
+  ).project;
 
 const DONE = {
   state: "waiting_user",
@@ -2482,6 +2512,100 @@ describe("LocalServerModule after a restart", () => {
     expect(readdirSync(sources)).toEqual([path.basename(current)]);
     expect(f.module.sourceUpdateAvailable()).toBe(false);
     await f.host.stop("quit");
+  });
+
+  it("converts and resumes an earlier Simplex installation in a location the person chose", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const chosen = path.join(root, "chosen");
+    const legacy = path.join(chosen, "desktop", "source", "simplex");
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async () => new Response(archive.bytes)) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        // The default home holds only the record and a setup that never
+        // finished.
+        legacyInstance(home);
+        legacyInstance(chosen);
+        unpackedSource(legacy, "simplexai-coworkspace");
+        mkdirSync(path.join(home, "desktop"), { recursive: true });
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home: chosen,
+            repo: legacy,
+            origin: "http://localhost:3000",
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    expect(instanceProject(f.home)).toBe("linger-desktop-1");
+    expect(instanceProject(chosen)).toBe("linger-desktop-1");
+    const current = path.join(
+      chosen,
+      "desktop",
+      "source",
+      archive.sha256.slice(0, 16),
+    );
+    const args = installerArgs(chosen);
+    expect(args).toContain("--resume");
+    expect(args[args.indexOf("--home") + 1]).toBe(chosen);
+    expect(args[args.indexOf("--source-repo") + 1]).toBe(current);
+    expect(existsSync(path.join(f.home, "desktop", "source"))).toBe(false);
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toEqual({ home: chosen, repo: current, origin: "http://localhost:3000" });
+    expect(readdirSync(path.dirname(current))).toEqual([
+      path.basename(current),
+    ]);
+    await f.host.stop("quit");
+  });
+
+  it("holds the app back only for the instance in use when a conversion is skipped", async () => {
+    const chosen = path.join(tempDirectory(), "chosen");
+    const setup = (skips: string) => (home: string) => {
+      legacyInstance(home);
+      legacyInstance(chosen);
+      writeFileSync(
+        path.join(skips === "default" ? home : chosen, "migrate-skips"),
+        "",
+      );
+      mkdirSync(path.join(home, "desktop"), { recursive: true });
+      writeFileSync(
+        path.join(home, "desktop", "local-server.json"),
+        JSON.stringify({
+          home: chosen,
+          repo: "/source",
+          origin: "http://localhost:3000",
+        }),
+      );
+    };
+    const unused = fixture({}, enrolled, setup("default"));
+    await unused.host.start();
+    await vi.waitFor(() => expect(unused.module.status().phase).toBe("ready"));
+    expect(instanceProject(unused.home)).toBe("simplex-desktop-1");
+    await unused.host.stop("quit");
+
+    rmSync(chosen, { recursive: true });
+    const used = fixture({}, enrolled, setup("chosen"));
+    await used.host.start();
+    await vi.waitFor(() => expect(used.module.status().phase).toBe("failed"));
+    expect(used.module.status().message).toMatch(
+      /could not convert this computer's installation.*running 1 task/,
+    );
+    expect(used.showStartFailed).toHaveBeenCalledOnce();
+    expect(existsSync(path.join(chosen, "installer", "args.json"))).toBe(false);
+    await used.host.stop("quit");
   });
 
   it("forgets the installation and its enrollment when the person sets up again", async () => {
