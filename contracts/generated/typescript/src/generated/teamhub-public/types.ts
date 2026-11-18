@@ -4827,6 +4827,8 @@ export interface components {
     };
     LocalComputerEnrollmentCreateRequest: {
       computer_id?: components["schemas"]["Id"];
+      /** @description Daemon Identity of the enrolling machine, when it has one. When one of the caller's Computers holds it, the enrollment renews that Computer instead of computer_id or a new one, and removes the requested Computer if it never connected and has no Agents. Another account's Computer holding it refuses the enrollment with 409 DAEMON_IDENTITY_IN_USE. */
+      daemon_id?: string;
       display_name: string;
       /** Format: uri */
       redirect_uri: string;
@@ -9039,6 +9041,7 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
       410: components["responses"]["Gone"];
       503: components["responses"]["ServiceUnavailable"];
     };

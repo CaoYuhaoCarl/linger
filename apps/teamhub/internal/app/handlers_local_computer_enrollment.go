@@ -23,6 +23,7 @@ import (
 var (
 	localComputerIDPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	localComputerPKCEPattern   = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+	localComputerDaemonPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 	localComputerSecretPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43,128}$`)
 )
 
@@ -49,14 +50,18 @@ func (a *App) createLocalComputerEnrollment(c *gin.Context) {
 	enrollmentID, authorizationCode := ids.New("enrollment"), newLocalComputerAuthorizationCode()
 	codeHash := sha256.Sum256([]byte(authorizationCode))
 	expiresAt := time.Now().UTC().Add(localComputerEnrollmentLifetime)
-	err := a.agentRuntimeState.CreateLocalComputerEnrollment(c.Request.Context(), agentruntimestate.CreateLocalComputerEnrollmentInput{
+	computerID, err := a.agentRuntimeState.CreateLocalComputerEnrollment(c.Request.Context(), agentruntimestate.CreateLocalComputerEnrollmentInput{
 		EnrollmentID: enrollmentID, ComputerID: computerID, DisplayName: request.DisplayName,
 		Owner:       agentruntimestate.LocalComputerOwner{TenantID: tenantID, OwnerActorID: ownerID},
 		RedirectURI: request.RedirectUri, CodeChallenge: request.CodeChallenge,
 		AuthorizationCodeHash: codeHash[:], ExpiresAt: expiresAt, RenewsExistingComputer: renews,
+		DaemonID: optionalStringValue(request.DaemonId),
 	})
 	switch {
 	case err == nil:
+	case errors.Is(err, agentruntimestate.ErrDaemonIdentityInUse):
+		a.writeError(c, http.StatusConflict, "DAEMON_IDENTITY_IN_USE", "This computer is paired with another account's Local Computer")
+		return
 	case errors.Is(err, agentruntimestate.ErrRemoved):
 		a.writeError(c, http.StatusGone, "LOCAL_COMPUTER_REMOVED", "Local Computer was removed")
 		return
@@ -175,6 +180,7 @@ func (a *App) exchangeLocalComputerEnrollment(c *gin.Context) {
 func validLocalComputerEnrollmentCreate(request httpapi.LocalComputerEnrollmentCreateRequest) bool {
 	return strings.TrimSpace(request.DisplayName) != "" && len(request.DisplayName) <= 120 &&
 		(request.ComputerId == nil || localComputerIDPattern.MatchString(*request.ComputerId)) &&
+		(request.DaemonId == nil || localComputerDaemonPattern.MatchString(*request.DaemonId)) &&
 		localComputerPKCEPattern.MatchString(request.CodeChallenge) && validLocalComputerRedirect(request.RedirectUri)
 }
 

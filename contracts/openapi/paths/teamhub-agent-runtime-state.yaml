@@ -789,7 +789,8 @@ connectLocalComputer:
       Daemon Identity on first use, records the observation, and returns every
       active Agent placed on this Computer. The Agent Service computes the
       Computer's Agent Runners from these placements; a Runner the Computer
-      reports for an Agent not listed here is removed.
+      reports for an Agent not listed here is removed. A Daemon Identity that
+      another Computer holds is rejected with 409 DAEMON_IDENTITY_IN_USE.
     requestBody:
       required: true
       content:

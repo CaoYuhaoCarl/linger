@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import type { components } from "@linger/wire-contracts/teamhub-public/types";
 
@@ -23,6 +24,7 @@ export class EnrollmentError extends Error {
       | "NO_TENANT"
       | "REJECTED"
       | "ENROLLMENT_REMOVED"
+      | "DAEMON_IDENTITY_IN_USE"
       | "INVALID_RESPONSE",
     message: string,
   ) {
@@ -38,6 +40,9 @@ export interface EnrollInput {
   readonly displayName: string;
   // Keeps the same Computer identity when enrolling again.
   readonly computerId?: string;
+  // This machine's Daemon ID. TeamHub renews the owner's Computer that holds
+  // it instead of computerId or a new Computer.
+  readonly daemonId?: string;
   readonly fetch?: typeof fetch;
 }
 
@@ -87,6 +92,7 @@ export const enrollComputer = async (input: EnrollInput): Promise<Enrolled> => {
     redirect_uri: REDIRECT_URI,
     code_challenge: createHash("sha256").update(verifier).digest("base64url"),
     ...(input.computerId ? { computer_id: input.computerId } : {}),
+    ...(input.daemonId ? { daemon_id: input.daemonId } : {}),
   };
   const created = await call(
     `/v0/tenants/${encodeURIComponent(tenantId)}/local-computer-enrollments`,
@@ -94,6 +100,14 @@ export const enrollComputer = async (input: EnrollInput): Promise<Enrolled> => {
   );
   if (created.status === 401)
     throw new EnrollmentError("NOT_SIGNED_IN", "Sign in before enrolling");
+  if (
+    created.status === 409 &&
+    (await errorCode(created)) === "DAEMON_IDENTITY_IN_USE"
+  )
+    throw new EnrollmentError(
+      "DAEMON_IDENTITY_IN_USE",
+      "This computer is connected to another Linger account. Remove it from that account's Computers, then connect it again.",
+    );
   if (!created.ok) throw rejected("Creating the enrollment", created.status);
   const authorization = (await created.json()) as Authorization;
   if (!authorization.enrollment_id || !authorization.authorization_code)
@@ -190,6 +204,33 @@ export const humanTenant = (value: unknown): string | undefined => {
   return human?.tenant_id;
 };
 
+const errorCode = async (response: Response): Promise<unknown> => {
+  try {
+    const body = (await response.json()) as { error?: { code?: unknown } };
+    return body.error?.code;
+  } catch {
+    return undefined;
+  }
+};
+
+// The Daemon ID of the daemon's identity file, derived as the daemon derives
+// it: the SHA-256 of the raw public key. Only the public key is read. None
+// before the daemon first ran, or when the file is unreadable.
+export const readDaemonId = (file: string): string | undefined => {
+  try {
+    const identity = JSON.parse(readFileSync(file, "utf8")) as {
+      public_key?: unknown;
+    };
+    if (typeof identity.public_key !== "string") return undefined;
+    const publicKey = Buffer.from(identity.public_key, "base64");
+    return publicKey.length === 32
+      ? createHash("sha256").update(publicKey).digest("base64url")
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const rejected = (step: string, status: number): EnrollmentError =>
   new EnrollmentError("REJECTED", `${step} failed (${String(status)})`);
 const invalid = (): EnrollmentError =>
@@ -204,6 +245,9 @@ export interface EnrollmentOptions {
   readonly defaultDisplayName: string;
   // Where the Gateway credential is kept for the daemon.
   readonly credentials: CredentialStore;
+  // The daemon's identity file, which keeps the machine's Daemon Identity
+  // across enrollments.
+  readonly daemonIdentityFile: string;
   readonly fetch?: typeof fetch;
 }
 
@@ -231,12 +275,17 @@ export class EnrollmentModule implements Module {
       );
     });
     // Enrollments made before the owner was kept, or whose credential did
-    // not carry over from the bridge, are renewed for the same Computer.
+    // not carry over from the bridge, are renewed for the same Computer. So
+    // are enrollments made without the daemon's identity: Set Up Again in an
+    // earlier release paired a new Computer whose daemon identity another
+    // Computer holds, and TeamHub renews the holder instead.
     const config = ctx.config.get();
+    const daemonId = readDaemonId(this.#options.daemonIdentityFile);
     if (
       config.computerId &&
       (!config.ownerActorId ||
-        this.#options.credentials.read()?.computerId !== config.computerId)
+        this.#options.credentials.read()?.computerId !== config.computerId ||
+        (daemonId !== undefined && config.daemonId !== daemonId))
     ) {
       void this.enroll().catch((error: unknown) =>
         ctx.log.warn("enrollment.renew_failed", { error: String(error) }),
@@ -284,6 +333,7 @@ export class EnrollmentModule implements Module {
       computerId: undefined,
       tenantId: undefined,
       ownerActorId: undefined,
+      daemonId: undefined,
     });
     ctx.bus.emit("computer.changed", undefined);
     ctx.log.info("enrollment.cleared");
@@ -296,11 +346,13 @@ export class EnrollmentModule implements Module {
     const cookie = await this.#options.sessionCookie(config.serverUrl);
     if (!cookie)
       throw new EnrollmentError("NOT_SIGNED_IN", "Sign in before enrolling");
+    const daemonId = readDaemonId(this.#options.daemonIdentityFile);
     const enrolled = await enrollComputer({
       serverUrl: config.serverUrl,
       cookie,
       displayName: config.displayName ?? this.#options.defaultDisplayName,
       ...(config.computerId ? { computerId: config.computerId } : {}),
+      ...(daemonId ? { daemonId } : {}),
       ...(this.#options.fetch ? { fetch: this.#options.fetch } : {}),
     });
     this.#options.credentials.write({
@@ -312,6 +364,7 @@ export class EnrollmentModule implements Module {
       computerId: enrolled.computerId,
       tenantId: enrolled.tenantId,
       ownerActorId: enrolled.ownerActorId,
+      daemonId,
     });
     ctx.bus.emit("computer.changed", enrolled.computerId);
     ctx.log.info("enrollment.completed", { computer_id: enrolled.computerId });

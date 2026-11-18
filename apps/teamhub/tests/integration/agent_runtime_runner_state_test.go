@@ -27,7 +27,7 @@ func TestAgentRuntimeLocalComputerEnrollmentExchangeIsReplaySafe(t *testing.T) {
 		DisplayName: "Runtime enrollment", Owner: owner, RedirectURI: "http://127.0.0.1:53100/callback",
 		CodeChallenge: strings.Repeat("a", 43), AuthorizationCodeHash: firstHash[:], ExpiresAt: expiresAt,
 	}
-	if err := env.service.CreateLocalComputerEnrollment(t.Context(), first); err != nil {
+	if _, err := env.service.CreateLocalComputerEnrollment(t.Context(), first); err != nil {
 		t.Fatalf("create Local Computer enrollment: %v", err)
 	}
 	consumeFirst := agentruntimestate.ConsumeLocalComputerEnrollmentInput{
@@ -46,7 +46,7 @@ func TestAgentRuntimeLocalComputerEnrollmentExchangeIsReplaySafe(t *testing.T) {
 		CodeChallenge: strings.Repeat("b", 43), AuthorizationCodeHash: secondHash[:], ExpiresAt: expiresAt,
 		RenewsExistingComputer: true,
 	}
-	if err := env.service.CreateLocalComputerEnrollment(t.Context(), renewal); err != nil {
+	if _, err := env.service.CreateLocalComputerEnrollment(t.Context(), renewal); err != nil {
 		t.Fatalf("create Local Computer renewal: %v", err)
 	}
 	consumeRenewal := agentruntimestate.ConsumeLocalComputerEnrollmentInput{
@@ -77,7 +77,7 @@ func TestAgentRuntimeLocalComputerEnrollmentExchangeIsReplaySafe(t *testing.T) {
 			pending := first
 			pending.EnrollmentID = "enrollment_rejected_" + rejection
 			pending.ComputerID = "computer_rejected_" + rejection
-			if err := env.service.CreateLocalComputerEnrollment(t.Context(), pending); err != nil {
+			if _, err := env.service.CreateLocalComputerEnrollment(t.Context(), pending); err != nil {
 				t.Fatal(err)
 			}
 			exchange := consumeFirst
@@ -188,6 +188,137 @@ func TestAgentRuntimeLocalComputerRepairsWithSameDaemonAfterRemoval(t *testing.T
 	if err := env.pool.QueryRow(t.Context(), `SELECT daemon_id FROM local_computers WHERE computer_id='computer_runtime_second'`).Scan(&daemonID); err != nil ||
 		daemonID != first.DaemonID {
 		t.Fatalf("second Computer Daemon Identity: %q err=%v", daemonID, err)
+	}
+}
+
+// Set Up Again forgets the Computer on the desktop but the machine keeps its
+// Daemon Identity, so the next enrollment names it and renews the Computer
+// that Daemon holds, with its Agents, instead of pairing a new one.
+func TestAgentRuntimeLocalComputerEnrollmentRenewsTheComputerItsDaemonHolds(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env := newRuntimeStateTestEnv(t)
+	enrollRuntimeComputer(t, env, "computer_runtime_held")
+	held := runtimeConnectInput("computer_runtime_held", 0, time.Now())
+	if _, err := env.service.ConnectLocalComputer(t.Context(), held); err != nil {
+		t.Fatalf("connect held Computer: %v", err)
+	}
+	setRuntimeAgentPlacementFields(t, env, "computer_runtime_held", "codex")
+
+	again := runtimeEnrollmentInput("computer_runtime_set_up_again", runtimeComputerOwner())
+	again.DaemonID = held.DaemonID
+	computerID, err := env.service.CreateLocalComputerEnrollment(t.Context(), again)
+	if err != nil || computerID != "computer_runtime_held" {
+		t.Fatalf("enroll a Daemon that holds a Computer: computer=%q err=%v, want computer_runtime_held", computerID, err)
+	}
+	consumed, err := env.service.ConsumeLocalComputerEnrollment(t.Context(), runtimeEnrollmentExchange(again))
+	assertConsumedEnrollment(t, consumed, err, "computer_runtime_held", 1)
+	assertNoLocalComputer(t, env, "computer_runtime_set_up_again")
+
+	connected, err := env.service.ConnectLocalComputer(t.Context(), runtimeConnectInput("computer_runtime_held", 1, time.Now()))
+	if err != nil || len(connected.Placements) != 1 || connected.Placements[0].AgentID != testRuntimeAgentID {
+		t.Fatalf("reconnect the renewed Computer: %+v err=%v, want its Agent", connected.Placements, err)
+	}
+}
+
+// A desktop that Set Up Again paired as a new Computer before this fix keeps
+// that Computer, whose Daemon Identity another Computer holds. Renewing it
+// with the Daemon ID renews the holder and removes the orphan.
+func TestAgentRuntimeLocalComputerRenewalHealsAComputerStuckBehindItsDaemonIdentity(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env := newRuntimeStateTestEnv(t)
+	owner := runtimeComputerOwner()
+	enrollRuntimeComputer(t, env, "computer_runtime_held")
+	held := runtimeConnectInput("computer_runtime_held", 0, time.Now())
+	if _, err := env.service.ConnectLocalComputer(t.Context(), held); err != nil {
+		t.Fatalf("connect held Computer: %v", err)
+	}
+	enrollRuntimeComputer(t, env, "computer_runtime_orphan")
+	orphan := runtimeConnectInput("computer_runtime_orphan", 0, time.Now())
+	orphan.DaemonID, orphan.DaemonPublicKey = held.DaemonID, held.DaemonPublicKey
+	if _, err := env.service.ConnectLocalComputer(t.Context(), orphan); !errors.Is(err, agentruntimestate.ErrDaemonIdentityInUse) {
+		t.Fatalf("connect the orphan: err=%v, want Daemon Identity in use", err)
+	}
+
+	renewal := runtimeEnrollmentInput("computer_runtime_orphan", owner)
+	renewal.EnrollmentID, renewal.RenewsExistingComputer, renewal.DaemonID = "enrollment-runtime-heal", true, held.DaemonID
+	computerID, err := env.service.CreateLocalComputerEnrollment(t.Context(), renewal)
+	if err != nil || computerID != "computer_runtime_held" {
+		t.Fatalf("renew the orphan with its Daemon ID: computer=%q err=%v, want computer_runtime_held", computerID, err)
+	}
+	if _, err := env.service.GetLocalComputer(t.Context(), "computer_runtime_orphan"); !errors.Is(err, agentruntimestate.ErrNotFound) {
+		t.Fatalf("read the orphan after healing: err=%v, want removed", err)
+	}
+	consumed, err := env.service.ConsumeLocalComputerEnrollment(t.Context(), runtimeEnrollmentExchange(renewal))
+	assertConsumedEnrollment(t, consumed, err, "computer_runtime_held", 1)
+	if _, err := env.service.ConnectLocalComputer(t.Context(), runtimeConnectInput("computer_runtime_held", 1, time.Now())); err != nil {
+		t.Fatalf("reconnect the healed Computer: %v", err)
+	}
+}
+
+// A Computer that already connected with its own Daemon, or that has Agents,
+// is not an orphan, so naming it next to another Computer's Daemon ID keeps
+// it; and a Daemon ID never renews another owner's Computer.
+func TestAgentRuntimeLocalComputerEnrollmentByDaemonIDKeepsOwnersApart(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env := newRuntimeStateTestEnv(t)
+	owner := runtimeComputerOwner()
+	enrollRuntimeComputer(t, env, "computer_runtime_held")
+	held := runtimeConnectInput("computer_runtime_held", 0, time.Now())
+	if _, err := env.service.ConnectLocalComputer(t.Context(), held); err != nil {
+		t.Fatalf("connect held Computer: %v", err)
+	}
+	enrollRuntimeComputer(t, env, "computer_runtime_paired")
+	if _, err := env.service.ConnectLocalComputer(t.Context(), runtimeConnectInput("computer_runtime_paired", 0, time.Now())); err != nil {
+		t.Fatalf("connect paired Computer: %v", err)
+	}
+	enrollRuntimeComputer(t, env, "computer_runtime_placed")
+	setRuntimeAgentPlacementFields(t, env, "computer_runtime_placed", "codex")
+	for _, kept := range []string{"computer_runtime_paired", "computer_runtime_placed"} {
+		renewal := runtimeEnrollmentInput(kept, owner)
+		renewal.EnrollmentID, renewal.RenewsExistingComputer, renewal.DaemonID = "enrollment-keep-"+kept, true, held.DaemonID
+		if computerID, err := env.service.CreateLocalComputerEnrollment(t.Context(), renewal); err != nil || computerID != "computer_runtime_held" {
+			t.Fatalf("renew %s with the held Daemon ID: computer=%q err=%v", kept, computerID, err)
+		}
+		if _, err := env.service.GetLocalComputer(t.Context(), kept); err != nil {
+			t.Fatalf("read %s: %v, want kept", kept, err)
+		}
+	}
+
+	seedPeerHumanActor(t, env.pool)
+	other := agentruntimestate.LocalComputerOwner{TenantID: "tenant_acme", OwnerActorID: "actor_acme_bob"}
+	foreign := runtimeEnrollmentInput("computer_runtime_foreign", other)
+	foreign.DaemonID = held.DaemonID
+	if _, err := env.service.CreateLocalComputerEnrollment(t.Context(), foreign); !errors.Is(err, agentruntimestate.ErrDaemonIdentityInUse) {
+		t.Fatalf("enroll another owner with a held Daemon ID: err=%v, want Daemon Identity in use", err)
+	}
+	assertNoLocalComputer(t, env, "computer_runtime_foreign")
+	computer, err := env.service.GetLocalComputer(t.Context(), "computer_runtime_held")
+	if err != nil || computer.Owner != owner {
+		t.Fatalf("held Computer after another owner's enrollment: %+v err=%v", computer, err)
+	}
+}
+
+func runtimeEnrollmentInput(computerID string, owner agentruntimestate.LocalComputerOwner) agentruntimestate.CreateLocalComputerEnrollmentInput {
+	codeHash := sha256.Sum256([]byte("authorization-code-" + computerID))
+	return agentruntimestate.CreateLocalComputerEnrollmentInput{
+		EnrollmentID: "enrollment-" + computerID, ComputerID: computerID, DisplayName: computerID,
+		Owner: owner, RedirectURI: "http://127.0.0.1:53100/callback", CodeChallenge: strings.Repeat("a", 43),
+		AuthorizationCodeHash: codeHash[:], ExpiresAt: time.Now().UTC().Truncate(time.Microsecond).Add(time.Hour),
+	}
+}
+
+func runtimeEnrollmentExchange(input agentruntimestate.CreateLocalComputerEnrollmentInput) agentruntimestate.ConsumeLocalComputerEnrollmentInput {
+	return agentruntimestate.ConsumeLocalComputerEnrollmentInput{
+		EnrollmentID: input.EnrollmentID, RedirectURI: input.RedirectURI,
+		CodeChallenge: input.CodeChallenge, AuthorizationCodeHash: input.AuthorizationCodeHash,
+	}
+}
+
+func assertNoLocalComputer(t *testing.T, env runtimeStateTestEnv, computerID string) {
+	t.Helper()
+	var exists bool
+	if err := env.pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM local_computers WHERE computer_id=$1)`, computerID).Scan(&exists); err != nil || exists {
+		t.Fatalf("Local Computer %q exists=%v err=%v, want none", computerID, exists, err)
 	}
 }
 
@@ -411,19 +542,11 @@ func enrollRuntimeComputer(t *testing.T, env runtimeStateTestEnv, computerID str
 // exchange, the only path that creates Local Computers.
 func enrollRuntimeComputerFor(t *testing.T, env runtimeStateTestEnv, computerID string, owner agentruntimestate.LocalComputerOwner) error {
 	t.Helper()
-	codeHash := sha256.Sum256([]byte("authorization-code-" + computerID))
-	enrollment := agentruntimestate.CreateLocalComputerEnrollmentInput{
-		EnrollmentID: "enrollment-" + computerID, ComputerID: computerID, DisplayName: computerID,
-		Owner: owner, RedirectURI: "http://127.0.0.1:53100/callback", CodeChallenge: strings.Repeat("a", 43),
-		AuthorizationCodeHash: codeHash[:], ExpiresAt: time.Now().UTC().Truncate(time.Microsecond).Add(time.Hour),
-	}
-	if err := env.service.CreateLocalComputerEnrollment(t.Context(), enrollment); err != nil {
+	enrollment := runtimeEnrollmentInput(computerID, owner)
+	if _, err := env.service.CreateLocalComputerEnrollment(t.Context(), enrollment); err != nil {
 		return err
 	}
-	result, err := env.service.ConsumeLocalComputerEnrollment(t.Context(), agentruntimestate.ConsumeLocalComputerEnrollmentInput{
-		EnrollmentID: enrollment.EnrollmentID, RedirectURI: enrollment.RedirectURI,
-		CodeChallenge: enrollment.CodeChallenge, AuthorizationCodeHash: enrollment.AuthorizationCodeHash,
-	})
+	result, err := env.service.ConsumeLocalComputerEnrollment(t.Context(), runtimeEnrollmentExchange(enrollment))
 	if err == nil && !result.Available {
 		return errors.New("Local Computer enrollment was unavailable")
 	}

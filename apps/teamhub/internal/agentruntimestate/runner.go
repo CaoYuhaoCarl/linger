@@ -262,58 +262,129 @@ func (s *Service) RemoveLocalComputer(ctx context.Context, input LocalComputerCr
 	})
 }
 
-func (s *Service) CreateLocalComputerEnrollment(ctx context.Context, input CreateLocalComputerEnrollmentInput) error {
+// CreateLocalComputerEnrollment authorizes one enrollment and returns the
+// Computer it pairs. A machine keeps its Daemon Identity when its app forgets
+// the Computer (Set Up Again), so when one of the owner's Computers holds the
+// Daemon ID the enrollment names, the enrollment renews that Computer, with
+// its Agents, instead of the requested or a new one; see
+// renewComputerHoldingDaemon. Another owner's Computer is never renewed.
+func (s *Service) CreateLocalComputerEnrollment(ctx context.Context, input CreateLocalComputerEnrollmentInput) (string, error) {
 	if !validText(input.EnrollmentID, 8, 128) || !validComputerID(input.ComputerID) ||
 		!validDisplayName(input.DisplayName) || !validOwner(input.Owner) || !validText(input.RedirectURI, 1, 2000) ||
-		!validText(input.CodeChallenge, 43, 128) || len(input.AuthorizationCodeHash) != sha256.Size || input.ExpiresAt.IsZero() {
-		return ErrInvalid
+		!validText(input.CodeChallenge, 43, 128) || len(input.AuthorizationCodeHash) != sha256.Size || input.ExpiresAt.IsZero() ||
+		(input.DaemonID != "" && !daemonIDPattern.MatchString(input.DaemonID)) {
+		return "", ErrInvalid
 	}
-	_, err := executeLocalComputerTx(ctx, s, func(ctx context.Context, _ pgx.Tx, queries *store.Queries) (bool, *LocalComputerOwner, error) {
+	return executeLocalComputerTx(ctx, s, func(ctx context.Context, _ pgx.Tx, queries *store.Queries) (string, *LocalComputerOwner, error) {
 		now, err := queries.AgentRuntimeDatabaseNow(ctx)
 		if err != nil {
-			return false, nil, err
+			return "", nil, err
 		}
 		if !now.Valid || !input.ExpiresAt.After(now.Time) {
-			return false, nil, ErrInvalid
+			return "", nil, ErrInvalid
 		}
 		if err := requireOwnerActor(ctx, queries, input.Owner); err != nil {
-			return false, nil, err
+			return "", nil, err
+		}
+		var changed *LocalComputerOwner
+		if input.DaemonID != "" {
+			removedOrphan, err := renewComputerHoldingDaemon(ctx, queries, &input)
+			if err != nil {
+				return "", nil, err
+			}
+			if removedOrphan {
+				changed = &input.Owner
+			}
 		}
 		computer, lockComputerErr := queries.LockAgentRuntimeLocalComputer(ctx, input.ComputerID)
 		if input.RenewsExistingComputer {
 			if isNoRows(lockComputerErr) {
-				return false, nil, ErrNotFound
+				return "", nil, ErrNotFound
 			}
 			if lockComputerErr != nil {
-				return false, nil, lockComputerErr
+				return "", nil, lockComputerErr
 			}
 			if computer.OwnerTenantID != input.Owner.TenantID || computer.OwnerActorID != input.Owner.OwnerActorID {
-				return false, nil, ErrNotFound
+				return "", nil, ErrNotFound
 			}
 			if computer.Status == "removed" {
-				return false, nil, ErrRemoved
+				return "", nil, ErrRemoved
 			}
 		} else if lockComputerErr == nil || !isNoRows(lockComputerErr) {
 			if lockComputerErr != nil {
-				return false, nil, lockComputerErr
+				return "", nil, lockComputerErr
 			}
-			return false, nil, ErrConflict
+			return "", nil, ErrConflict
 		}
 		if err := queries.DeletePendingAgentRuntimeLocalComputerEnrollments(ctx, store.DeletePendingAgentRuntimeLocalComputerEnrollmentsParams{
 			TenantID: input.Owner.TenantID, OwnerActorID: input.Owner.OwnerActorID,
 		}); err != nil {
-			return false, nil, err
+			return "", nil, err
 		}
-		_, err = queries.InsertAgentRuntimeLocalComputerEnrollment(ctx, store.InsertAgentRuntimeLocalComputerEnrollmentParams{
+		if _, err := queries.InsertAgentRuntimeLocalComputerEnrollment(ctx, store.InsertAgentRuntimeLocalComputerEnrollmentParams{
 			EnrollmentID: input.EnrollmentID, TenantID: input.Owner.TenantID, OwnerActorID: input.Owner.OwnerActorID,
 			ComputerID: input.ComputerID, RenewsExistingComputer: input.RenewsExistingComputer,
 			DisplayName: strings.TrimSpace(input.DisplayName), RedirectUri: input.RedirectURI,
 			CodeChallenge: input.CodeChallenge, AuthorizationCodeHash: append([]byte(nil), input.AuthorizationCodeHash...),
 			ExpiresAt: timestamptz(input.ExpiresAt),
-		})
-		return true, nil, err
+		}); err != nil {
+			return "", nil, err
+		}
+		return input.ComputerID, changed, nil
 	})
-	return err
+}
+
+// renewComputerHoldingDaemon points the enrollment at the owner's Computer
+// that holds its Daemon ID, if there is one. The Computer the enrollment
+// named instead is the orphan an earlier Set Up Again paired: it never
+// connected, because the Daemon Identity it would bind was taken, so it is
+// removed unless an Agent was placed on it. It reports that removal.
+func renewComputerHoldingDaemon(ctx context.Context, queries *store.Queries, input *CreateLocalComputerEnrollmentInput) (bool, error) {
+	holder, err := queries.LockAgentRuntimeLocalComputerByDaemonID(ctx, input.DaemonID)
+	if isNoRows(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if holder.OwnerTenantID != input.Owner.TenantID || holder.OwnerActorID != input.Owner.OwnerActorID {
+		return false, ErrDaemonIdentityInUse
+	}
+	if holder.ComputerID == input.ComputerID {
+		return false, nil
+	}
+	requested, renewsRequested := input.ComputerID, input.RenewsExistingComputer
+	input.ComputerID, input.RenewsExistingComputer = holder.ComputerID, true
+	if !renewsRequested {
+		return false, nil
+	}
+	orphan, err := queries.LockAgentRuntimeLocalComputer(ctx, requested)
+	if isNoRows(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if orphan.Status == "removed" || orphan.DaemonID.Valid ||
+		orphan.OwnerTenantID != input.Owner.TenantID || orphan.OwnerActorID != input.Owner.OwnerActorID {
+		return false, nil
+	}
+	placedAgents, err := queries.CountLocalAgentRegistrationsByComputer(ctx, store.CountLocalAgentRegistrationsByComputerParams{
+		TenantID: input.Owner.TenantID, ComputerID: requested,
+	})
+	if err != nil || placedAgents > 0 {
+		return false, err
+	}
+	if err := queries.PurgeAgentRuntimeLocalComputerEnrollmentsByComputer(ctx, requested); err != nil {
+		return false, err
+	}
+	if err := queries.DeleteLocalComputerModelSnapshot(ctx, requested); err != nil {
+		return false, err
+	}
+	if _, err := queries.RemoveAgentRuntimeLocalComputer(ctx, requested); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Service) ConsumeLocalComputerEnrollment(ctx context.Context, input ConsumeLocalComputerEnrollmentInput) (ConsumeLocalComputerEnrollmentResult, error) {

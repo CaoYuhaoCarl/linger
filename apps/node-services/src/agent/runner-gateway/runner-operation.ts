@@ -181,6 +181,22 @@ export class RunnerUpgradeRequiredError extends RunnerGatewayError {
   }
 }
 
+/**
+ * Another Computer holds the Daemon Identity this Computer connected with:
+ * the machine was paired again as a new Computer while the one its Daemon
+ * belongs to was kept. The Computer's app renews the holder to recover.
+ */
+export class RunnerDaemonIdentityInUseError extends RunnerGatewayError {
+  readonly code = "daemon_identity_in_use";
+
+  constructor(
+    message = "Another Local Computer holds this Computer's Daemon Identity",
+  ) {
+    super(message);
+    this.name = "RunnerDaemonIdentityInUseError";
+  }
+}
+
 export class RunnerOperationError extends RunnerGatewayError {
   constructor(
     readonly code: string,

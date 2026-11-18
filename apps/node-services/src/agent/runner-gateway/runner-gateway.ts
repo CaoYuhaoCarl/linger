@@ -114,6 +114,7 @@ export type {
   RunnerModelInvokeRequest,
 } from "./runner-model-invocation.js";
 export {
+  RunnerDaemonIdentityInUseError,
   RunnerGatewayError,
   RunnerGatewayProtocolError,
   RunnerOperationError,

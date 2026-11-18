@@ -947,6 +947,14 @@ FROM local_computers
 WHERE computer_id=sqlc.arg(computer_id)::text
 FOR UPDATE;
 
+-- name: LockAgentRuntimeLocalComputerByDaemonID :one
+-- Removing a Computer frees its Daemon Identity, so only a Computer that was
+-- not removed holds one.
+SELECT *
+FROM local_computers
+WHERE daemon_id=sqlc.arg(daemon_id)::text
+FOR UPDATE;
+
 -- name: InsertAgentRuntimeLocalComputer :one
 INSERT INTO local_computers(
     computer_id,display_name,status,capacity,owner_tenant_id,owner_actor_id

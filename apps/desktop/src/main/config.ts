@@ -24,6 +24,9 @@ const desktopConfig = z.object({
   computerId: z.string().optional(),
   tenantId: z.string().optional(),
   ownerActorId: z.string().optional(),
+  // The Daemon ID this computer's enrollment named; an enrollment that named
+  // none or another one is renewed at start.
+  daemonId: z.string().optional(),
   workspaceGrants: z.array(workspaceGrant).default([]),
   // Always-on mode: keep the system awake even when idle.
   preventSleep: z.boolean().default(false),

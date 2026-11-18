@@ -290,6 +290,55 @@ WHERE computer_id=$1`, computerID, acmeTenant); err != nil {
 	}
 }
 
+// The desktop names its Daemon ID when it enrolls: its owner gets back the
+// Computer that Daemon holds, and another account gets a distinct refusal.
+func TestLocalComputerEnrollmentByDaemonIDOverHTTP(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	artifactRoot := integrationArtifactRoot(t)
+	databaseURL := newIntegrationDatabase(t)
+	pool, err := pgxpool.New(context.Background(), databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	application, err := newIntegrationApp(context.Background(), localComputerEnrollmentConfig(config.ForTest(func(c *config.Config) {
+		c.ArtifactStorageRoot = artifactRoot
+		c.DatabaseURL = databaseURL
+		c.SessionTTL = time.Hour
+		c.CookieName = "teamhub_session"
+	})), withLocalComputers(&recordingLocalComputers{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	registerIntegrationServerCleanup(t, server)
+	env := &testEnv{t: t, databaseURL: databaseURL, pool: pool, server: server}
+	alice, bob := env.login("alice", alicePassword), seedPeerHuman(t, env)
+
+	computerID := enrollLocalComputerOverHTTP(t, env, alice, "Alice's Mac", "")
+	publicKey := sha256.Sum256([]byte("daemon-public-key"))
+	daemonHash := sha256.Sum256(publicKey[:])
+	daemonID := base64.RawURLEncoding.EncodeToString(daemonHash[:])
+	if _, err := pool.Exec(t.Context(), `UPDATE local_computers SET daemon_id=$1,daemon_public_key=$2 WHERE computer_id=$3`,
+		daemonID, publicKey[:], computerID); err != nil {
+		t.Fatal(err)
+	}
+	request := func(client *http.Client) (int, []byte) {
+		status, _, body := env.request(client, http.MethodPost, "/v0/tenants/"+acmeTenant+"/local-computer-enrollments", map[string]any{
+			"display_name": "Mac", "redirect_uri": "http://127.0.0.1:45123/callback",
+			"code_challenge": strings.Repeat("a", 43), "daemon_id": daemonID,
+		}, "")
+		return status, body
+	}
+	if status, body := request(alice); status != http.StatusCreated || !containsJSONText(body, computerID) {
+		t.Fatalf("owner enrolls the Daemon again: status=%d body=%s, want %s", status, body, computerID)
+	}
+	if status, body := request(bob); status != http.StatusConflict || !containsJSONText(body, "DAEMON_IDENTITY_IN_USE") {
+		t.Fatalf("another account enrolls the Daemon: status=%d body=%s", status, body)
+	}
+}
+
 // enrollLocalComputerOverHTTP pairs a Computer as the CLI does: the owner
 // authorizes a PKCE enrollment and the CLI exchanges it, twice, as a retry
 // of an uncertain exchange would. renew names an enrolled Computer.

@@ -6194,9 +6194,12 @@ type LocalComputerEnrollmentCreateRequest struct {
 	CodeChallenge string `json:"code_challenge"`
 
 	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	ComputerId  *Id    `json:"computer_id,omitempty"`
-	DisplayName string `json:"display_name"`
-	RedirectUri string `json:"redirect_uri"`
+	ComputerId *Id `json:"computer_id,omitempty"`
+
+	// DaemonId Daemon Identity of the enrolling machine, when it has one. When one of the caller's Computers holds it, the enrollment renews that Computer instead of computer_id or a new one, and removes the requested Computer if it never connected and has no Agents. Another account's Computer holding it refuses the enrollment with 409 DAEMON_IDENTITY_IN_USE.
+	DaemonId    *string `json:"daemon_id,omitempty"`
+	DisplayName string  `json:"display_name"`
+	RedirectUri string  `json:"redirect_uri"`
 }
 
 // LocalComputerEnrollmentExchangeRequest defines model for LocalComputerEnrollmentExchangeRequest.

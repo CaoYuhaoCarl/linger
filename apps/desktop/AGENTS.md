@@ -51,6 +51,19 @@ Gateway and runs Agents. The daemon exits with the app.
   ComputerDaemon, Status, PowerGuard, WindowManager, Tray, DesktopIpc). `status.ts`, `tray-menu.ts` and `tray-icon.ts` hold the pure
   status summary, tray menu and tray icons, drawn from the logo PNGs in
   `resources/tray/` with a status badge.
+- `src/main/enrollment.ts`: Enrollment. Every enrollment names this
+  machine's Daemon ID, read from the public key in
+  `<userData>/computer/state/daemon-identity.json`, which outlives
+  unenrolling. TeamHub then renews the signed-in owner's Computer that holds
+  that Daemon Identity, with its Agents, instead of pairing a new one, and
+  removes the Computer the request named if it never connected and has no
+  Agents (the orphan an earlier Set Up Again left). Another account's
+  Computer holding it refuses with `DAEMON_IDENTITY_IN_USE`, shown as "This
+  computer is connected to another Linger account". The config keeps the
+  Daemon ID the enrollment named; at start an enrollment that named none or
+  another one is renewed once, which heals a computer stuck behind its own
+  Daemon Identity. The Runner Gateway closes a Computer whose Daemon Identity
+  another Computer holds with 1008 `daemon_identity_in_use:`.
 - `src/main/local-server.ts`: LocalServer, the setup page's Quick Install
   path. It fetches the pinned Node runtime and unpacks the linger source package
   into the install location (the default home, or a folder picked under
@@ -190,7 +203,8 @@ Gateway and runs Agents. The daemon exits with the app.
   finishes it, reusing a finished job only while its origin answers (a stopped
   server gets a new job, which starts the services again). The start failure
   page's Set Up Again forgets the record, unenrolls the computer, clears the
-  server address and shows setup; the instance and its data stay. Before installing or resuming it moves the
+  server address and shows setup; the instance and its data stay, and the
+  next enrollment gets the same Computer back (see `src/main/enrollment.ts`). Before installing or resuming it moves the
   `COMPOSIO_API_KEY`, `SONIOX_API_KEY`, `XAI_API_KEY` and `TZ` of an unpacked
   source package's `.env` into `<home>/instances/desktop/user.env` once and
   deletes that `.env` (never a `LINGER_CHECKOUT`'s), logging only the names

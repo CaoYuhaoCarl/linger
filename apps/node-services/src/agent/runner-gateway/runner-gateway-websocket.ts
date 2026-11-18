@@ -25,6 +25,7 @@ import {
 import type { OperationEnvelope } from "./runner-operation.js";
 import {
   RunnerGatewayProtocolError,
+  RunnerDaemonIdentityInUseError,
   RunnerUpgradeRequiredError,
   type InvalidOperationFrame,
   type RunnerGateway,
@@ -68,6 +69,11 @@ const MAX_QUEUED_BYTES = 16 * 1024 * 1024;
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 export const RUNNER_UPGRADE_REQUIRED_CLOSE_REASON =
   "upgrade_required: rerun the Linger Computer installer";
+// 1008 without upgrade_required keeps the Daemon redialing on backoff and
+// counts no fault against its release; the Computer's app renews the
+// Computer that holds the identity.
+export const RUNNER_DAEMON_IDENTITY_IN_USE_CLOSE_REASON =
+  "daemon_identity_in_use: another Computer holds this daemon identity";
 // Every Computer release that can update itself declares this in its hello.
 const SELF_UPDATE_CAPABILITY = "self_update_v2";
 
@@ -651,6 +657,13 @@ export class RunnerSocketSession {
     });
     if (error instanceof RunnerUpgradeRequiredError) {
       this.#closeProtocol(1008, RUNNER_UPGRADE_REQUIRED_CLOSE_REASON);
+      return;
+    }
+    if (error instanceof RunnerDaemonIdentityInUseError) {
+      logAgentEvent("warn", "runner.hello.daemon_identity_in_use", {
+        computerId: this.#credential.runnerId,
+      });
+      this.#closeProtocol(1008, RUNNER_DAEMON_IDENTITY_IN_USE_CLOSE_REASON);
       return;
     }
     this.#closeProtocol(

@@ -40,10 +40,12 @@ import type {
 import { type RunnerCredentialAuthenticator } from "../../../src/agent/runner-gateway/runner-credential-authority.js";
 import {
   attachRunnerGatewayWebSocket,
+  RUNNER_DAEMON_IDENTITY_IN_USE_CLOSE_REASON,
   RUNNER_UPGRADE_REQUIRED_CLOSE_REASON,
   type AttachRunnerGatewayWebSocketOptions,
 } from "../../../src/agent/runner-gateway/runner-gateway-websocket.js";
 import {
+  RunnerDaemonIdentityInUseError,
   RunnerGatewayProtocolError,
   RunnerUpgradeRequiredError,
   type RunnerOperation,
@@ -1166,6 +1168,26 @@ describe("Runner Gateway WebSocket", () => {
     } finally {
       socket.close();
     }
+  });
+
+  it("turns away a Computer whose Daemon Identity another Computer holds with its own close reason", async () => {
+    const fixture = await startFixture();
+    vi.spyOn(fixture.computerRegistry, "connect").mockRejectedValue(
+      new RunnerDaemonIdentityInUseError(),
+    );
+    const socket = new WebSocket(fixture.url, {
+      headers: { Authorization: "Bearer runner-secret" },
+    });
+    await opened(socket);
+    const closed = onceClosed(socket);
+    socket.send(JSON.stringify(hello()));
+    // 1008 keeps the daemon redialing on backoff without counting a fault
+    // against its release.
+    expect(await closed).toEqual({
+      code: 1008,
+      reason: RUNNER_DAEMON_IDENTITY_IN_USE_CLOSE_REASON,
+    });
+    socket.terminate();
   });
 
   it("requires a reinstall from a protocol 2 build older than the first protocol 2 release", async () => {

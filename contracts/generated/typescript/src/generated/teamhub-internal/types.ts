@@ -681,7 +681,7 @@ export interface paths {
     put?: never;
     /**
      * Record a Computer's hello and read the Agent Runners it should hold.
-     * @description Checks the Runner credential generation and owner, binds the Computer Daemon Identity on first use, records the observation, and returns every active Agent placed on this Computer. The Agent Service computes the Computer's Agent Runners from these placements; a Runner the Computer reports for an Agent not listed here is removed.
+     * @description Checks the Runner credential generation and owner, binds the Computer Daemon Identity on first use, records the observation, and returns every active Agent placed on this Computer. The Agent Service computes the Computer's Agent Runners from these placements; a Runner the Computer reports for an Agent not listed here is removed. A Daemon Identity that another Computer holds is rejected with 409 DAEMON_IDENTITY_IN_USE.
      */
     post: operations["connectAgentRuntimeLocalComputer"];
     delete?: never;

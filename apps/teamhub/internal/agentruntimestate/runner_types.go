@@ -99,6 +99,9 @@ type CreateLocalComputerEnrollmentInput struct {
 	AuthorizationCodeHash  []byte             `json:"authorization_code_hash"`
 	ExpiresAt              time.Time          `json:"expires_at"`
 	RenewsExistingComputer bool               `json:"renews_existing_computer"`
+	// DaemonID names the Daemon Identity of the machine that enrolls, when it
+	// has one already.
+	DaemonID string `json:"daemon_id,omitempty"`
 }
 
 type ConsumeLocalComputerEnrollmentInput struct {

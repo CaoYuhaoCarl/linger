@@ -334,6 +334,16 @@ components:
       properties:
         computer_id:
           $ref: "./common.yaml#/components/schemas/Id"
+        daemon_id:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: >-
+            Daemon Identity of the enrolling machine, when it has one. When one
+            of the caller's Computers holds it, the enrollment renews that
+            Computer instead of computer_id or a new one, and removes the
+            requested Computer if it never connected and has no Agents. Another
+            account's Computer holding it refuses the enrollment with 409
+            DAEMON_IDENTITY_IN_USE.
         display_name:
           type: string
           minLength: 1
