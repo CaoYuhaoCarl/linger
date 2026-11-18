@@ -1,4 +1,5 @@
 import type {
+  ComputerProfile,
   LocalModelsSnapshot,
   RuntimeDiagnostics,
 } from "@linger/wire-contracts/runner-gateway/types";
@@ -47,6 +48,11 @@ export interface TestLocalComputerRegistry extends LocalComputerRegistry {
   list(owner: LocalComputerOwner): readonly TestRecordedLocalComputer[];
   /** Every model library snapshot recorded for the Computer, oldest first. */
   localModels(computerId: string): readonly LocalModelsSnapshot[];
+  /** Every profile recorded for the Computer, oldest first. */
+  computerProfiles(computerId: string): readonly {
+    readonly observedAt: string;
+    readonly profile: ComputerProfile;
+  }[];
 }
 
 const registries = new Map<string, TestLocalComputerRegistry>();
@@ -69,6 +75,10 @@ export function createTestLocalComputerRegistry(
     { computerId: string; placement: RunnerPlacement }
   >();
   const localModels = new Map<string, LocalModelsSnapshot[]>();
+  const computerProfiles = new Map<
+    string,
+    { readonly observedAt: string; readonly profile: ComputerProfile }[]
+  >();
   const owns = (
     computer: TestRecordedLocalComputer,
     owner: LocalComputerOwner,
@@ -156,6 +166,14 @@ export function createTestLocalComputerRegistry(
     },
     localModels(computerId) {
       return localModels.get(computerId) ?? [];
+    },
+    async recordComputerProfile(computerId, observedAt, profile) {
+      const recorded = computerProfiles.get(computerId) ?? [];
+      recorded.push({ observedAt, profile: structuredClone(profile) });
+      computerProfiles.set(computerId, recorded);
+    },
+    computerProfiles(computerId) {
+      return computerProfiles.get(computerId) ?? [];
     },
     async remove({ computerId, ...owner }) {
       const computer = computers.get(computerId);

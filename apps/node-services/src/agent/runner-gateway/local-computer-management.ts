@@ -29,6 +29,9 @@ export const FIRST_PROTOCOL_2_COMPUTER_VERSION = "0.43.0";
 // older Computer rejects the unknown key and would never reach its
 // `target_release`, so it is welcomed without the field.
 export const FIRST_SERVICE_FEATURES_COMPUTER_VERSION = "0.52.0";
+// The first release whose welcome decoder knows computer_profile and that
+// sends runner.computer_profile. An older release is not told about it.
+export const FIRST_COMPUTER_PROFILE_COMPUTER_VERSION = "0.53.0";
 
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 

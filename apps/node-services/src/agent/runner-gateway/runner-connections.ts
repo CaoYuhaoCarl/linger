@@ -4,6 +4,7 @@ import type {
   RunnerHello,
   RunnerWelcome,
   RuntimeRegistration,
+  ServiceFeature,
 } from "@linger/wire-contracts/runner-gateway/types";
 import {
   parseAgentToDaemonEnvelope,
@@ -24,6 +25,7 @@ import {
   LocalComputerPlacementError,
   LocalRuntimeAdmissionUnavailableError,
   MINIMUM_CURRENT_COMPUTER_VERSION,
+  FIRST_COMPUTER_PROFILE_COMPUTER_VERSION,
   FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
   type LocalPlacementRequirement,
   type LocalReasoningEffort,
@@ -87,6 +89,7 @@ export class RunnerConnections {
       | "modelInvocation"
       | "computerTools"
       | "localModels"
+      | "computerProfiles"
       | "operations"
       | "preparation"
     >,
@@ -434,6 +437,7 @@ export class RunnerConnections {
       operationReconciled: false,
       runtimeDiagnosticsRevision: 0,
       localModelsRevision: 0,
+      computerProfileRevision: 0,
     };
     this.#connections.set(hello.runner_id, connection);
     if (previous?.connected) {
@@ -474,12 +478,7 @@ export class RunnerConnections {
             ),
           }
         : {}),
-      ...(isComputerVersionAtLeast(
-        connection.hello.daemon_version,
-        FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
-      )
-        ? { service_features: ["local_models"] }
-        : {}),
+      ...serviceFeatures(connection.hello.daemon_version),
     };
   }
 
@@ -700,6 +699,10 @@ export class RunnerConnections {
     }
     if (envelope.type === "runner.local_models") {
       this.owners.localModels().receiveSnapshot(connection, envelope);
+      return;
+    }
+    if (envelope.type === "runner.computer_profile") {
+      this.owners.computerProfiles().receive(connection, envelope);
       return;
     }
     if (isLocalModelsOutcome(envelope)) {
@@ -1001,6 +1004,34 @@ export const isServingConnection = (
 
 // TeamHub treats a connection observation as fresh for 60s.
 const LAST_SEEN_WRITE_INTERVAL_MS = 20_000;
+
+/**
+ * The welcome's service_features for a Computer release. The Computer decodes
+ * the welcome strictly, so each value goes only to a release that knows it,
+ * and a release before the field gets no field at all.
+ */
+function serviceFeatures(
+  daemonVersion: string,
+): Pick<RunnerWelcome, "service_features"> {
+  if (
+    !isComputerVersionAtLeast(
+      daemonVersion,
+      FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
+    )
+  ) {
+    return {};
+  }
+  const features: ServiceFeature[] = ["local_models"];
+  if (
+    isComputerVersionAtLeast(
+      daemonVersion,
+      FIRST_COMPUTER_PROFILE_COMPUTER_VERSION,
+    )
+  ) {
+    features.push("computer_profile");
+  }
+  return { service_features: features };
+}
 
 /**
  * The Computer's Runtimes as the Gateway names them: one Registration per

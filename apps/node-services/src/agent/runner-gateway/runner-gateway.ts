@@ -51,6 +51,7 @@ import {
   validateRunnerGatewayContext,
 } from "./runner-gateway-context.js";
 import { type RunnerGatewayPrincipal } from "./runner-gateway-principal.js";
+import { RunnerComputerProfiles } from "./runner-computer-profile.js";
 import { RunnerLocalCapabilities } from "./runner-local-capabilities.js";
 import {
   RunnerLocalModels,
@@ -148,6 +149,7 @@ export class RunnerGateway
   readonly #queue: ModelQueue;
   readonly #computerTools: RunnerComputerTools;
   readonly #localModels: RunnerLocalModels;
+  readonly #computerProfiles: RunnerComputerProfiles;
   constructor(options: RunnerGatewayOptions) {
     const context = createRunnerGatewayContext(options);
     const owners: RunnerGatewayControllers = {
@@ -163,6 +165,7 @@ export class RunnerGateway
       queue: () => this.#queue,
       computerTools: () => this.#computerTools,
       localModels: () => this.#localModels,
+      computerProfiles: () => this.#computerProfiles,
       contextViewContent: () => this.contextViewContent,
     };
     this.#connections = new RunnerConnections(context, owners);
@@ -181,6 +184,7 @@ export class RunnerGateway
     );
     this.#computerTools = new RunnerComputerTools(context, owners);
     this.#localModels = new RunnerLocalModels(context, owners);
+    this.#computerProfiles = new RunnerComputerProfiles(context);
     validateRunnerGatewayContext(context);
     if (options.contextContent) {
       this.contextViewContent = createContextViewContent({

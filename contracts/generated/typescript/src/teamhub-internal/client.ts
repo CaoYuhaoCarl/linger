@@ -396,6 +396,10 @@ export function createTeamHubAgentRuntimeStateClient(options: {
       body: Schemas["RecordLocalModelsRequest"],
       signal?: AbortSignal,
     ) => post("local-computers/local-models", body, signal),
+    recordLocalComputerProfile: (
+      body: Schemas["RecordLocalComputerProfileRequest"],
+      signal?: AbortSignal,
+    ) => post("local-computers/profile", body, signal),
     recordRunOperation: (
       body: RecordAgentLocalRunOperationRequest,
       signal?: AbortSignal,
