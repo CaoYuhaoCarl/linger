@@ -840,6 +840,7 @@ type LocalComputer struct {
 	RecommendedVersion    pgtype.Text        `json:"recommended_version"`
 	OwnerTenantID         string             `json:"owner_tenant_id"`
 	OwnerActorID          string             `json:"owner_actor_id"`
+	ConnectedAt           pgtype.Timestamptz `json:"connected_at"`
 }
 
 type LocalComputerEnrollment struct {
@@ -864,6 +865,7 @@ type LocalComputerModelSnapshot struct {
 	Host       []byte             `json:"host"`
 	ObservedAt pgtype.Timestamptz `json:"observed_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	Summary    []byte             `json:"summary"`
 }
 
 type MemoryIndexChunk struct {

@@ -967,6 +967,7 @@ SET display_name=sqlc.arg(display_name)::text,
     daemon_version=COALESCE(sqlc.narg(daemon_version)::text,daemon_version),
     recommended_version=COALESCE(sqlc.narg(recommended_version)::text,recommended_version),
     last_seen_at=sqlc.arg(last_seen_at)::timestamptz,
+    connected_at=sqlc.arg(last_seen_at)::timestamptz,
     updated_at=clock_timestamp()
 WHERE computer_id=sqlc.arg(computer_id)::text AND status<>'removed'
 RETURNING *;
@@ -1394,12 +1395,14 @@ WHERE message.id=sqlc.arg(message_id)::text
   AND message.author_actor_id=context.agent_actor_id;
 
 -- name: UpsertLocalComputerModelSnapshot :exec
-INSERT INTO local_computer_model_snapshots(computer_id,snapshot,host,observed_at,updated_at)
+INSERT INTO local_computer_model_snapshots(computer_id,snapshot,host,summary,observed_at,updated_at)
 VALUES(sqlc.arg(computer_id)::text,sqlc.arg(snapshot)::jsonb,sqlc.narg(host)::jsonb,
+       local_models_snapshot_summary(sqlc.arg(snapshot)::jsonb,sqlc.narg(host)::jsonb),
        sqlc.arg(observed_at)::timestamptz,clock_timestamp())
 ON CONFLICT (computer_id) DO UPDATE
 SET snapshot=EXCLUDED.snapshot,
     host=COALESCE(EXCLUDED.host,local_computer_model_snapshots.host),
+    summary=local_models_snapshot_summary(EXCLUDED.snapshot,COALESCE(EXCLUDED.host,local_computer_model_snapshots.host)),
     observed_at=EXCLUDED.observed_at,updated_at=EXCLUDED.updated_at;
 
 -- name: DeleteLocalComputerModelSnapshot :exec
@@ -1407,9 +1410,38 @@ DELETE FROM local_computer_model_snapshots
 WHERE computer_id=sqlc.arg(computer_id)::text;
 
 -- name: GetLocalComputerModelSnapshot :one
-SELECT snapshot,host
+SELECT snapshot,host,summary
 FROM local_computer_model_snapshots
 WHERE computer_id=sqlc.arg(computer_id)::text;
+
+-- name: ListLocalModelsComputers :many
+-- One row per Computer of the owner in the Tenant with its stored summary;
+-- it never reads a snapshot.
+SELECT computer.computer_id,computer.display_name,computer.status,computer.last_seen_at,
+       computer.connected_at,computer.platform,computer.daemon_version,computer.owner_actor_id,
+       owner.display_name AS owner_display_name,
+       snapshot.summary,snapshot.observed_at
+FROM local_computers computer
+JOIN actors owner ON owner.id=computer.owner_actor_id AND owner.tenant_id=computer.owner_tenant_id
+LEFT JOIN local_computer_model_snapshots snapshot ON snapshot.computer_id=computer.computer_id
+WHERE computer.owner_tenant_id=sqlc.arg(tenant_id)::text
+  AND computer.owner_actor_id=sqlc.arg(owner_actor_id)::text
+  AND computer.status<>'removed'
+ORDER BY computer.computer_id
+LIMIT 1000;
+
+-- name: GetLocalComputerOwnerName :one
+SELECT display_name
+FROM actors
+WHERE id=sqlc.arg(actor_id)::text AND tenant_id=sqlc.arg(tenant_id)::text;
+
+-- name: ListOwnedLocalModelsSummaries :many
+SELECT snapshot.computer_id,snapshot.summary
+FROM local_computer_model_snapshots snapshot
+JOIN local_computers computer ON computer.computer_id=snapshot.computer_id
+WHERE computer.owner_tenant_id=sqlc.arg(tenant_id)::text
+  AND computer.owner_actor_id=sqlc.arg(owner_actor_id)::text
+  AND computer.status<>'removed';
 
 -- name: ListLocalModelUsersOnComputer :many
 -- Active Agents on runtime pi placed on a Computer, limited to those the
