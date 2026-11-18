@@ -45,6 +45,8 @@ export interface LocalComputerConnection {
   readonly status: "online" | "offline";
   /** The Computer release this deployment ships. */
   readonly recommendedVersion?: string;
+  /** Omitted when the deployment ships no Computer release. */
+  readonly releaseCurrent?: boolean;
 }
 
 export interface LocalComputerTouch {
@@ -55,6 +57,8 @@ export interface LocalComputerTouch {
   readonly runtimeDiagnostics?: RuntimeDiagnostics;
   readonly daemonVersion?: string;
   readonly recommendedVersion?: string;
+  /** Omitted when the deployment ships no Computer release. */
+  readonly releaseCurrent?: boolean;
 }
 
 export type LocalComputerRemovalResult =
@@ -116,6 +120,7 @@ export const createTeamHubLocalComputerRegistry = (
     hello,
     status,
     recommendedVersion,
+    releaseCurrent,
   }) {
     const result = await client.connectLocalComputer({
       computer_id: computerId,
@@ -136,6 +141,9 @@ export const createTeamHubLocalComputerRegistry = (
       ...(recommendedVersion === undefined
         ? {}
         : { recommended_version: recommendedVersion }),
+      ...(releaseCurrent === undefined
+        ? {}
+        : { release_current: releaseCurrent }),
     });
     return result.placements.map((placement) => ({
       agentId: placement.agent_id,
@@ -170,6 +178,9 @@ export const createTeamHubLocalComputerRegistry = (
       ...(touch.recommendedVersion === undefined
         ? {}
         : { recommended_version: touch.recommendedVersion }),
+      ...(touch.releaseCurrent === undefined
+        ? {}
+        : { release_current: touch.releaseCurrent }),
     });
   },
   async recordLocalModels(computerId, snapshot) {
