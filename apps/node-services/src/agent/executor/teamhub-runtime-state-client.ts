@@ -183,6 +183,10 @@ export interface TeamHubRuntimeStateClient {
     body: RuntimeStateSchemas["RecordLocalModelsRequest"],
     signal?: AbortSignal,
   ): Promise<void>;
+  recordLocalComputerProfile(
+    body: RuntimeStateSchemas["RecordLocalComputerProfileRequest"],
+    signal?: AbortSignal,
+  ): Promise<void>;
   recordRunOperation(
     body: RuntimeStateSchemas["RecordAgentLocalRunOperationRequest"],
     signal?: AbortSignal,
@@ -437,6 +441,8 @@ export const createTeamHubRuntimeStateClient = (
       ),
     recordLocalModels: (body, signal) =>
       request<void>(raw.recordLocalModels(body, signal), signal),
+    recordLocalComputerProfile: (body, signal) =>
+      request<void>(raw.recordLocalComputerProfile(body, signal), signal),
     recordRunOperation: (body, signal) =>
       request<RuntimeStateSchemas["AgentRuntimeSuccessResult"]>(
         raw.recordRunOperation(body, signal),

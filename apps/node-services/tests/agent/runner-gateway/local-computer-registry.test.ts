@@ -1,3 +1,4 @@
+import type { ComputerProfile } from "@linger/wire-contracts/runner-gateway/types";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTeamHubLocalComputerRegistry } from "../../../src/agent/runner-gateway/local-computer-registry.js";
@@ -18,6 +19,7 @@ describe("createTeamHubLocalComputerRegistry", () => {
       touchLocalComputer,
       removeLocalComputer: vi.fn(),
       recordLocalModels: vi.fn(),
+      recordLocalComputerProfile: vi.fn(),
     });
     const owner = { tenantId: "tenant-acme", ownerActorId: "actor-alice" };
     const seenAt = "2026-11-18T00:00:00.000Z";
@@ -45,5 +47,42 @@ describe("createTeamHubLocalComputerRegistry", () => {
       expect.objectContaining({ release_current: true }),
       expect.not.objectContaining({ release_current: expect.anything() }),
     ]);
+  });
+
+  it("records a profile with the time the Computer sent it", async () => {
+    const recordLocalComputerProfile = vi.fn(
+      async (_request: Record<string, unknown>) => undefined,
+    );
+    const registry = createTeamHubLocalComputerRegistry({
+      getLocalComputer: vi.fn(),
+      connectLocalComputer: vi.fn(),
+      touchLocalComputer: vi.fn(),
+      removeLocalComputer: vi.fn(),
+      recordLocalModels: vi.fn(),
+      recordLocalComputerProfile,
+    });
+    const profile: ComputerProfile = {
+      install_kind: "cli",
+      accelerators: {
+        probe: "ok",
+        ram_total_bytes: 32 * 2 ** 30,
+        apple_silicon: false,
+        gpus: [],
+      },
+      local_models: { mode: "none" },
+      update: { state: "idle" },
+    };
+
+    await registry.recordComputerProfile(
+      "runner-local",
+      "2026-11-18T00:00:00.000Z",
+      profile,
+    );
+
+    expect(recordLocalComputerProfile).toHaveBeenCalledWith({
+      computer_id: "runner-local",
+      observed_at: "2026-11-18T00:00:00.000Z",
+      profile,
+    });
   });
 });

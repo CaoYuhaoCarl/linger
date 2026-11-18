@@ -118,12 +118,21 @@ and what should its owner do next": `LocalModelsReadiness` (`state`, `reason`,
 `setup_path`, `enable_command`). It rides on `LocalModelsComputer` and on the
 Computers page's `LocalComputer.local_models_readiness`, so no client derives
 version gates or hardware floors itself. The hardware facts behind it come
-from `LocalComputerProfile`, which a Computer reports without the tool.
+from `LocalComputerProfile`, which a Computer reports without the tool: the
+Daemon sends `runner.computer_profile` when the welcome's `service_features`
+names `computer_profile` (Computer 0.53.0 or later) and whenever the profile
+changes, and the Agent Service forwards the newest one per Computer to
+`recordAgentRuntimeLocalComputerProfile`
+(`POST /v0/agent-runtime/local-computers/profile`). TeamHub keeps the latest in
+`local_computer_profiles` and sends a `computers` hint.
 The Agent Service marks each Computer observation `release_current` by
 comparing `daemon_version` with its Computer release version; TeamHub keeps
 `local_computers.update_pending_since` from the first observation behind until
 one finds the Computer current, sends a `computers` hint when it changes, and
-readiness reports `UPDATE_FAILED` once it is more than two hours old.
+readiness reports `UPDATE_FAILED` once it is more than two hours old, or as
+soon as the profile reports a failed self-update. A desktop Computer, whose
+Daemon the desktop app ships, is `needs_update` / `DESKTOP_APP_OUTDATED`
+instead: the answer is a desktop app update, never a reinstall.
 `fixtures/local-models/readiness.json` holds one valid example per readiness
 rule, and `tests/local-models-readiness.contract.test.ts` checks that every
 state and reason has one.

@@ -44,6 +44,7 @@ import type { RunnerOperations } from "./runner-operations.js";
 import { operationMCPPrepareIdentity } from "./runner-operations.js";
 import type { RunnerComputerTools } from "./runner-computer-tools.js";
 import type { RunnerLocalModels } from "./runner-local-models.js";
+import type { RunnerComputerProfiles } from "./runner-computer-profile.js";
 import type { ModelQueue } from "./model-queue.js";
 import type { RunnerModelInvocation } from "./runner-model-invocation.js";
 import type { RunnerSessionCompaction } from "./runner-session-compaction.js";
@@ -230,6 +231,8 @@ export interface ConnectedRunner {
   pendingRegistrationSnapshots?: Set<string>;
   /** The last runner.local_models revision; 0 until the connection sends one. */
   localModelsRevision: number;
+  /** The last runner.computer_profile revision; 0 until the connection sends one. */
+  computerProfileRevision: number;
 }
 
 export interface AgentRunnerStateWaiter {
@@ -336,6 +339,7 @@ export interface RunnerGatewayControllers {
   readonly queue: () => ModelQueue;
   readonly computerTools: () => RunnerComputerTools;
   readonly localModels: () => RunnerLocalModels;
+  readonly computerProfiles: () => RunnerComputerProfiles;
   readonly contextViewContent: () => ContextViewContent | undefined;
 }
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;

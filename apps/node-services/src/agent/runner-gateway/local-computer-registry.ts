@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  ComputerProfile,
   LocalModelsSnapshot,
   RunnerHello,
   RuntimeDiagnostics,
@@ -84,6 +85,12 @@ export interface LocalComputerRegistry {
     computerId: string,
     snapshot: LocalModelsSnapshot,
   ): Promise<void>;
+  /** Replaces the Computer's stored profile with its latest one. */
+  recordComputerProfile(
+    computerId: string,
+    observedAt: string,
+    profile: ComputerProfile,
+  ): Promise<void>;
   remove(
     input: LocalComputerOwner & { readonly computerId: string },
   ): Promise<LocalComputerRemovalResult>;
@@ -97,6 +104,7 @@ export const createTeamHubLocalComputerRegistry = (
     | "touchLocalComputer"
     | "removeLocalComputer"
     | "recordLocalModels"
+    | "recordLocalComputerProfile"
   >,
 ): LocalComputerRegistry => ({
   async credentialGeneration(computerId, owner) {
@@ -187,6 +195,13 @@ export const createTeamHubLocalComputerRegistry = (
     await client.recordLocalModels({
       computer_id: computerId,
       snapshot: structuredClone(snapshot),
+    });
+  },
+  async recordComputerProfile(computerId, observedAt, profile) {
+    await client.recordLocalComputerProfile({
+      computer_id: computerId,
+      observed_at: observedAt,
+      profile: structuredClone(profile),
     });
   },
   async remove({ computerId, tenantId, ownerActorId }) {

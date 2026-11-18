@@ -1,6 +1,7 @@
 import type {
   AgentToDaemonEnvelope,
   CapabilityLocalModelsExecute,
+  ComputerProfile,
   LocalModelsSnapshot,
 } from "@linger/wire-contracts/runner-gateway/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -161,6 +162,22 @@ const connect = async (
   };
 };
 
+const profile = (
+  update: ComputerProfile["update"] = { state: "idle" },
+): ComputerProfile => ({
+  install_kind: "container",
+  accelerators: {
+    probe: "ok",
+    ram_total_bytes: 64 * 2 ** 30,
+    apple_silicon: false,
+    gpus: [
+      { vendor: "nvidia", name: "NVIDIA L40S", memory_bytes: 48 * 2 ** 30 },
+    ],
+  },
+  local_models: { mode: "none" },
+  update,
+});
+
 const isLocalModelsCommand = (
   frame: AgentToDaemonEnvelope,
 ): frame is CapabilityLocalModelsExecute =>
@@ -185,11 +202,14 @@ const versions = (registry: TestLocalComputerRegistry) =>
     .map((recorded) => recorded.tool_version);
 
 describe("Runner Gateway local models", () => {
-  // A Computer sends runner.local_models only when the welcome names the
-  // family; a release before 0.52.0 rejects the unknown welcome key, so it
-  // is welcomed without it and keeps receiving its target_release.
+  // A Computer sends runner.local_models and runner.computer_profile only
+  // when the welcome names the family. A release decodes the welcome
+  // strictly, so it is told only the families it knows: 0.52.0 knows
+  // local_models, 0.53.0 also computer_profile, and a release before 0.52.0
+  // gets no field and keeps receiving its target_release.
   it.each([
-    ["dev", ["local_models"]],
+    ["dev", ["local_models", "computer_profile"]],
+    ["0.53.0", ["local_models", "computer_profile"]],
     ["0.52.0", ["local_models"]],
     ["0.51.0", undefined],
   ])(
@@ -473,5 +493,70 @@ describe("Runner Gateway local models", () => {
     ).rejects.toThrow(/identity mismatch/u);
     expect(close).toHaveBeenCalledWith(1002, "Runner protocol violation");
     await expect(cancelling).rejects.toBeInstanceOf(LocalComputerOfflineError);
+  });
+});
+
+describe("Runner Gateway computer profile", () => {
+  it("records each profile in TeamHub with its send time and drops a stale revision", async () => {
+    const { computerRegistry, connection } = await connect();
+    const send = (
+      revision: number,
+      sentAt: string,
+      update?: ComputerProfile["update"],
+    ) =>
+      connection.receive({
+        type: "runner.computer_profile",
+        protocol_version: "2",
+        runner_id: target.computerId,
+        sent_at: sentAt,
+        revision,
+        profile: profile(update),
+      });
+    await send(1, "2026-11-18T00:00:00Z");
+    await vi.waitFor(() =>
+      expect(computerRegistry.computerProfiles(target.computerId)).toEqual([
+        { observedAt: "2026-11-18T00:00:00Z", profile: profile() },
+      ]),
+    );
+    const failed = {
+      state: "failed",
+      attempted_at: "2026-11-18T01:00:00Z",
+      error_code: "VERIFY_FAILED",
+    } as const;
+    await send(1, "2026-11-18T00:30:00Z", failed);
+    await send(2, "2026-11-18T01:00:00Z", failed);
+    await vi.waitFor(() =>
+      expect(computerRegistry.computerProfiles(target.computerId)).toEqual([
+        { observedAt: "2026-11-18T00:00:00Z", profile: profile() },
+        { observedAt: "2026-11-18T01:00:00Z", profile: profile(failed) },
+      ]),
+    );
+  });
+
+  it("writes a profile TeamHub failed to store again", async () => {
+    const registry = createTestLocalComputerRegistry();
+    const record = registry.recordComputerProfile;
+    let failures = 1;
+    registry.recordComputerProfile = async (...args) => {
+      if (failures > 0) {
+        failures -= 1;
+        throw new TeamHubRuntimeStateError(503, "TeamHub unavailable");
+      }
+      await record(...args);
+    };
+    const { connection } = await connect(registry);
+    await connection.receive({
+      type: "runner.computer_profile",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: "2026-11-18T00:00:00Z",
+      revision: 1,
+      profile: profile(),
+    });
+    await vi.waitFor(
+      () =>
+        expect(registry.computerProfiles(target.computerId)).toHaveLength(1),
+      { timeout: 5_000 },
+    );
   });
 });
