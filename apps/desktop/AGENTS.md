@@ -166,8 +166,10 @@ Gateway and runs Agents. The daemon exits with the app.
   file and renamed, so a power loss leaves the old record or none) and, while
   the window still uses that origin and the computer is enrolled, restarts the
   services on launch with `installer.js --resume`, which also restarts them
-  when the instance's `user.env` changed. A source folder removed since is
-  unpacked again from the app's package first. A Quick Install that stopped
+  when the instance's `user.env` changed. A source folder removed since, or
+  one the installer no longer accepts as a Linger checkout (such as one the
+  earlier Simplex app unpacked), is unpacked again from the app's package
+  first and replaces the recorded one. A Quick Install that stopped
   before the computer enrolled is not resumed: setup shows again and Install
   finishes it, reusing a finished job only while its origin answers (a stopped
   server gets a new job, which starts the services again). The start failure

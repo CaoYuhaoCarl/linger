@@ -34,6 +34,7 @@ import {
 import { downloadVerified } from "@linger/local-installation/download";
 import { latestLegacyBackup } from "@linger/local-installation/legacy-database";
 import { legacyMigrationPending } from "@linger/local-installation/home";
+import { validateSourceRepository } from "@linger/local-installation/source-checkout";
 import type { LegacyInstanceSkipped } from "@linger/local-installation/legacy-migration";
 import {
   type SetupChoice,
@@ -2034,12 +2035,16 @@ export class LocalServerModule implements Module {
       // The window would show the server as unreachable until it is back.
       if (!(await this.#reachable(record.origin))) windows?.showStarting();
       const newer = this.#newerSource(record);
-      // A source folder removed since (by hand, or a cleanup that an uninstall
-      // left half done) is unpacked again from this app's package.
+      // A source folder the installer no longer runs is unpacked again from
+      // this app's package: one removed since (by hand, or a cleanup that an
+      // uninstall left half done), or one the earlier Simplex app unpacked.
       const repo =
         this.#options.sourceArchive &&
         !this.#options.checkout &&
-        !existsSync(record.repo)
+        !(await validateSourceRepository(record.repo).then(
+          () => true,
+          () => false,
+        ))
           ? await this.#ensureSource(record.home, signal)
           : record.repo;
       await this.#runResume(record, repo, signal);

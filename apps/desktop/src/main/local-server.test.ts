@@ -125,6 +125,10 @@ const sourceArchive = (root: string) => {
   const tree = path.join(root, "tree", "linger-1.0.0", "scripts");
   mkdirSync(tree, { recursive: true });
   writeFileSync(path.join(tree, "source-native.mjs"), "");
+  writeFileSync(
+    path.join(path.dirname(tree), "package.json"),
+    JSON.stringify({ name: "linger" }),
+  );
   const file = path.join(root, "linger.tar.gz");
   execFileSync("tar", [
     "-czf",
@@ -138,6 +142,13 @@ const sourceArchive = (root: string) => {
     bytes,
     sha256: createHash("sha256").update(bytes).digest("hex"),
   };
+};
+
+// A source package an earlier app unpacked into `directory`, named `name`.
+const unpackedSource = (directory: string, name = "linger") => {
+  mkdirSync(path.join(directory, "scripts"), { recursive: true });
+  writeFileSync(path.join(directory, "scripts/source-native.mjs"), "");
+  writeFileSync(path.join(directory, "package.json"), JSON.stringify({ name }));
 };
 
 const DONE = {
@@ -2285,7 +2296,7 @@ describe("LocalServerModule after a restart", () => {
       enrolled,
       (home) => {
         const sources = path.join(home, "desktop", "source");
-        mkdirSync(path.join(sources, "previous"), { recursive: true });
+        unpackedSource(path.join(sources, "previous"));
         writeFileSync(
           path.join(home, "desktop", "local-server.json"),
           JSON.stringify({
@@ -2427,6 +2438,48 @@ describe("LocalServerModule after a restart", () => {
     expect(
       existsSync(path.join(repo(f.home), "scripts/source-native.mjs")),
     ).toBe(true);
+    expect(f.module.sourceUpdateAvailable()).toBe(false);
+    await f.host.stop("quit");
+  });
+
+  it("moves to the source package when the earlier Simplex app unpacked the one in use", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const legacy = (home: string) =>
+      path.join(home, "desktop", "source", "simplex");
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async () => new Response(archive.bytes)) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        unpackedSource(legacy(home), "simplexai-coworkspace");
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: legacy(home),
+            origin: "http://localhost:3000",
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    const sources = path.join(f.home, "desktop", "source");
+    const current = path.join(sources, archive.sha256.slice(0, 16));
+    const args = installerArgs(f.home);
+    expect(args[args.indexOf("--source-repo") + 1]).toBe(current);
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toMatchObject({ repo: current });
+    expect(readdirSync(sources)).toEqual([path.basename(current)]);
     expect(f.module.sourceUpdateAvailable()).toBe(false);
     await f.host.stop("quit");
   });
@@ -2848,7 +2901,10 @@ describe("LocalServerModule on Windows", () => {
     mkdirSync(path.join(source, hash), { recursive: true });
     writeFileSync(path.join(source, hash, "half"), "");
     await f.module.begin();
-    expect(readdirSync(path.join(source, hash)).sort()).toEqual(["scripts"]);
+    expect(readdirSync(path.join(source, hash)).sort()).toEqual([
+      "package.json",
+      "scripts",
+    ]);
     expect(f.module.status().phase).toBe("ready");
     await f.host.stop("quit");
   });
