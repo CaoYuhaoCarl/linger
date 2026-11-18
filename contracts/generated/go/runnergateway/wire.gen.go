@@ -36,6 +36,7 @@ const (
 	TypeRunnerHeartbeat             = "runner.heartbeat"
 	TypeRunnerRuntimeDiagnostics    = "runner.runtime_diagnostics"
 	TypeRunnerLocalModels           = "runner.local_models"
+	TypeRunnerComputerProfile       = "runner.computer_profile"
 	TypeRuntimeRegistrationObserved = "runtime.registration.observed"
 	TypeAgentRunnerState            = "agent_runner.state"
 	TypeExecuted                    = "executed"
@@ -110,6 +111,7 @@ var DaemonToAgentMessages = []Message{
 	{Name: "RunnerHeartbeat", Type: "runner.heartbeat", Match: nil},
 	{Name: "RunnerRuntimeDiagnostics", Type: "runner.runtime_diagnostics", Match: nil},
 	{Name: "RunnerLocalModels", Type: "runner.local_models", Match: nil},
+	{Name: "RunnerComputerProfile", Type: "runner.computer_profile", Match: nil},
 	{Name: "RuntimeRegistrationObserved", Type: "runtime.registration.observed", Match: nil},
 	{Name: "AgentRunnerReady", Type: "agent_runner.state", Match: map[string]string{"state": "ready"}},
 	{Name: "AgentRunnerRemoved", Type: "agent_runner.state", Match: map[string]string{"state": "removed"}},
@@ -1338,6 +1340,112 @@ func (RunnerLocalModels) FixedFields() map[string]string {
 // RequiredFields lists the keys a RunnerLocalModels must carry.
 func (RunnerLocalModels) RequiredFields() []string {
 	return []string{"type", "protocol_version", "runner_id", "sent_at", "revision", "local_models"}
+}
+
+// ComputerAcceleratorGpu mirrors the ComputerAcceleratorGpu schema shape.
+type ComputerAcceleratorGpu struct {
+	Vendor      string  `json:"vendor"`
+	Name        string  `json:"name"`
+	MemoryBytes *uint64 `json:"memory_bytes,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a ComputerAcceleratorGpu.
+func (ComputerAcceleratorGpu) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a ComputerAcceleratorGpu must carry.
+func (ComputerAcceleratorGpu) RequiredFields() []string { return []string{"vendor", "name"} }
+
+// ComputerAccelerators mirrors the ComputerAccelerators schema shape.
+type ComputerAccelerators struct {
+	Probe              string                   `json:"probe"`
+	RamTotalBytes      uint64                   `json:"ram_total_bytes"`
+	AppleSilicon       bool                     `json:"apple_silicon"`
+	UnifiedMemoryBytes *uint64                  `json:"unified_memory_bytes,omitempty"`
+	Gpus               []ComputerAcceleratorGpu `json:"gpus"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a ComputerAccelerators.
+func (ComputerAccelerators) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a ComputerAccelerators must carry.
+func (ComputerAccelerators) RequiredFields() []string {
+	return []string{"probe", "ram_total_bytes", "apple_silicon", "gpus"}
+}
+
+// ComputerProfileManagedBy mirrors the ComputerProfileManagedBy schema shape.
+type ComputerProfileManagedBy struct {
+	Label      string `json:"label"`
+	ComputerID string `json:"computer_id,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a ComputerProfileManagedBy.
+func (ComputerProfileManagedBy) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a ComputerProfileManagedBy must carry.
+func (ComputerProfileManagedBy) RequiredFields() []string { return []string{"label"} }
+
+// ComputerProfileLocalModels mirrors the ComputerProfileLocalModels schema shape.
+type ComputerProfileLocalModels struct {
+	Mode       string                    `json:"mode"`
+	Managed    *bool                     `json:"managed,omitempty"`
+	KitVersion string                    `json:"kit_version,omitempty"`
+	ManagedBy  *ComputerProfileManagedBy `json:"managed_by,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a ComputerProfileLocalModels.
+func (ComputerProfileLocalModels) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a ComputerProfileLocalModels must carry.
+func (ComputerProfileLocalModels) RequiredFields() []string { return []string{"mode"} }
+
+// ComputerProfileUpdate mirrors the ComputerProfileUpdate schema shape.
+type ComputerProfileUpdate struct {
+	State       string `json:"state"`
+	AttemptedAt string `json:"attempted_at,omitempty"`
+	ErrorCode   string `json:"error_code,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a ComputerProfileUpdate.
+func (ComputerProfileUpdate) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a ComputerProfileUpdate must carry.
+func (ComputerProfileUpdate) RequiredFields() []string { return []string{"state"} }
+
+// ComputerProfile mirrors the ComputerProfile schema shape.
+type ComputerProfile struct {
+	InstallKind  string                     `json:"install_kind"`
+	Accelerators ComputerAccelerators       `json:"accelerators"`
+	LocalModels  ComputerProfileLocalModels `json:"local_models"`
+	Update       ComputerProfileUpdate      `json:"update"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a ComputerProfile.
+func (ComputerProfile) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a ComputerProfile must carry.
+func (ComputerProfile) RequiredFields() []string {
+	return []string{"install_kind", "accelerators", "local_models", "update"}
+}
+
+// RunnerComputerProfile mirrors the RunnerComputerProfile schema shape.
+type RunnerComputerProfile struct {
+	Type            string          `json:"type"`
+	ProtocolVersion string          `json:"protocol_version"`
+	RunnerID        string          `json:"runner_id"`
+	SentAt          string          `json:"sent_at"`
+	Revision        uint64          `json:"revision"`
+	Profile         ComputerProfile `json:"profile"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a RunnerComputerProfile.
+func (RunnerComputerProfile) FixedFields() map[string]string {
+	return map[string]string{"type": "runner.computer_profile", "protocol_version": "2"}
+}
+
+// RequiredFields lists the keys a RunnerComputerProfile must carry.
+func (RunnerComputerProfile) RequiredFields() []string {
+	return []string{"type", "protocol_version", "runner_id", "sent_at", "revision", "profile"}
 }
 
 // RunnerHelloDaemonIdentity mirrors the RunnerHelloDaemonIdentity schema shape.

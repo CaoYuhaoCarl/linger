@@ -37,6 +37,15 @@
       }
     },
     {
+      "rule": "4d",
+      "case": "desktop Computer behind the deployment's release; only a desktop app update replaces it",
+      "readiness": {
+        "state": "needs_update",
+        "enable_command": false,
+        "reason": "DESKTOP_APP_OUTDATED"
+      }
+    },
+    {
       "rule": "5",
       "case": "models served by another machine",
       "readiness": {

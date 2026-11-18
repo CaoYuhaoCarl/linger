@@ -30,7 +30,7 @@ export type PositiveInteger = number;
 /**
  * An optional Runner behavior the Agent Service accepts. An older service rejects its frames as a protocol violation.
  */
-export type ServiceFeature = "local_models";
+export type ServiceFeature = "local_models" | "computer_profile";
 export type JsonValue =
   | null
   | boolean
@@ -191,6 +191,7 @@ export type DaemonToAgentEnvelope =
   | RunnerHeartbeat
   | RunnerRuntimeDiagnostics
   | RunnerLocalModels
+  | RunnerComputerProfile
   | RuntimeRegistrationObserved
   | AgentRunnerReady
   | AgentRunnerRemoved
@@ -785,7 +786,7 @@ export interface RunnerWelcome {
    */
   context_content_url?: string;
   /**
-   * Runner behaviors this Agent Service accepts beyond the protocol 2 base. A Computer sends runner.local_models and runs execute with kind local_models only when the list names local_models. The service sends the field only to a Computer release that decodes it.
+   * Runner behaviors this Agent Service accepts beyond the protocol 2 base. A Computer sends runner.local_models and runs execute with kind local_models only when the list names local_models, and sends runner.computer_profile only when it names computer_profile. The service names each value only to a Computer release that decodes it.
    */
   service_features?: ServiceFeature[];
 }
@@ -1416,6 +1417,98 @@ export interface LocalModelError {
  */
 export interface LocalModelNote {
   code: "NO_ROOM_TO_LOAD";
+}
+/**
+ * The Computer's profile. Sent after a runner.welcome whose service_features names computer_profile, and whenever the profile changes (a self-update attempt, a hardware probe that finds different hardware). It is not periodic. revision grows within one connection.
+ */
+export interface RunnerComputerProfile {
+  type: "runner.computer_profile";
+  protocol_version: ProtocolVersion;
+  runner_id: Id;
+  sent_at: Timestamp;
+  revision: PositiveInteger;
+  profile: ComputerProfile;
+}
+/**
+ * Facts the Computer reports about itself without the localmodels tool.
+ */
+export interface ComputerProfile {
+  /**
+   * desktop when the config has a desktop section; container when /.dockerenv or /run/.containerenv exists or PID 1's cgroup names a container runtime; cli otherwise.
+   */
+  install_kind: "desktop" | "cli" | "container";
+  accelerators: ComputerAccelerators;
+  local_models: ComputerProfileLocalModels;
+  update: ComputerProfileUpdate;
+}
+/**
+ * Hardware the Computer probed without the localmodels tool: NVIDIA GPUs from nvidia-smi, Apple silicon and its unified memory from sysctl, other GPUs by name from the OS device list. probe failed means the lists say nothing about the hardware.
+ */
+export interface ComputerAccelerators {
+  probe: "ok" | "failed";
+  ram_total_bytes: NonNegativeInteger;
+  apple_silicon: boolean;
+  /**
+   * Present only on Apple silicon; the memory the CPU and GPU share.
+   */
+  unified_memory_bytes?: number;
+  /**
+   * @maxItems 64
+   */
+  gpus: ComputerAcceleratorGpu[];
+}
+export interface ComputerAcceleratorGpu {
+  vendor: "nvidia" | "amd" | "intel" | "apple" | "other";
+  /**
+   * Display only; never matched on.
+   */
+  name: string;
+  /**
+   * Dedicated GPU memory; absent when the probe can't read it.
+   */
+  memory_bytes?: number;
+}
+export interface ComputerProfileLocalModels {
+  /**
+   * none: the config names no localmodels tool. local: the tool runs on this Computer. remote: another machine serves the models.
+   */
+  mode: "none" | "local" | "remote";
+  /**
+   * The kit was installed by local-models enable, which keeps it upgraded.
+   */
+  managed?: boolean;
+  kit_version?: string;
+  managed_by?: ComputerProfileManagedBy;
+}
+/**
+ * The machine that serves this Computer's models when mode is remote, from the config.
+ */
+export interface ComputerProfileManagedBy {
+  /**
+   * Display only.
+   */
+  label: string;
+  computer_id?: string;
+}
+/**
+ * The Computer's last self-update attempt. failed stays until an attempt succeeds or the Computer runs the target build. A desktop Computer does not update itself and reports idle.
+ */
+export interface ComputerProfileUpdate {
+  state: "idle" | "staging" | "failed";
+  attempted_at?: Timestamp;
+  /**
+   * Present only when failed.
+   */
+  error_code?:
+    | "ARCHIVE_INVALID"
+    | "DOWNLOAD_FAILED"
+    | "VERIFY_FAILED"
+    | "STAGE_FAILED"
+    | "ACTIVATE_FAILED";
+  /**
+   * Diagnostic text for display; never matched on.
+   */
+  detail?: string;
 }
 export interface RuntimeRegistrationObserved {
   type: "runtime.registration.observed";

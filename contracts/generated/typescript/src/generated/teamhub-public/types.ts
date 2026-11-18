@@ -4452,7 +4452,7 @@ export interface components {
       | "checking"
       | "not_reported";
     /**
-     * @description Why the Computer is in its readiness state. DAEMON_UNSUPPORTED: the Computer release can no longer connect. DAEMON_LEGACY: a release from before the Linger rename, which can't update itself. UPDATE_FAILED: its update failed or has been pending too long. UPDATE_PENDING: it is updating itself. NOT_REPORTED: no snapshot ever. TOOL_FAILED: the tool did not answer. SETUP_AVAILABLE: the hardware meets the floor. HARDWARE_UNKNOWN: the Computer has not reported its hardware. NO_SUPPORTED_GPU: neither Apple silicon nor an NVIDIA GPU. MEMORY_INSUFFICIENT: the GPU or unified memory is below the floor, or no model fits it. DISK_INSUFFICIENT: no model fits the free disk. PLATFORM_UNSUPPORTED: the platform has no GPU path, such as an Intel Mac.
+     * @description Why the Computer is in its readiness state. DAEMON_UNSUPPORTED: the Computer release can no longer connect. DAEMON_LEGACY: a release from before the Linger rename, which can't update itself. UPDATE_FAILED: its update failed or has been pending too long. UPDATE_PENDING: it is updating itself. NOT_REPORTED: no snapshot ever. TOOL_FAILED: the tool did not answer. DESKTOP_APP_OUTDATED: a desktop Computer runs an older Computer release than the deployment; only a desktop app update replaces it, because it does not update itself. SETUP_AVAILABLE: the hardware meets the floor. HARDWARE_UNKNOWN: the Computer has not reported its hardware. NO_SUPPORTED_GPU: neither Apple silicon nor an NVIDIA GPU. MEMORY_INSUFFICIENT: the GPU or unified memory is below the floor, or no model fits it. DISK_INSUFFICIENT: no model fits the free disk. PLATFORM_UNSUPPORTED: the platform has no GPU path, such as an Intel Mac.
      * @enum {string}
      */
     LocalModelsReadinessReason:
@@ -4460,6 +4460,7 @@ export interface components {
       | "DAEMON_LEGACY"
       | "UPDATE_FAILED"
       | "UPDATE_PENDING"
+      | "DESKTOP_APP_OUTDATED"
       | "NOT_REPORTED"
       | "TOOL_FAILED"
       | "SETUP_AVAILABLE"

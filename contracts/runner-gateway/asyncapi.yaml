@@ -61,6 +61,12 @@ info:
     which the Computer sends after a runner.welcome whose service_features
     names local_models, after every library change, and at most every 2
     seconds while a download or load runs.
+    runner.computer_profile reports what the Computer knows about itself
+    without the localmodels tool: how it was installed, its GPUs or Apple
+    silicon unified memory, its local-models mode and its last self-update
+    attempt. The Computer sends it after a runner.welcome whose
+    service_features names computer_profile and again whenever the profile
+    changes; it is not periodic.
 x-frame-limits:
   maxBytes: 4194304
   maxDepth: 32
