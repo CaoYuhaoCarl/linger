@@ -161,6 +161,17 @@ func optionalText(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
 }
 
+func optionalBool(value *bool) pgtype.Bool {
+	if value == nil {
+		return pgtype.Bool{}
+	}
+	return pgtype.Bool{Bool: *value, Valid: true}
+}
+
+func sameOptionalTime(left, right pgtype.Timestamptz) bool {
+	return left.Valid == right.Valid && (!left.Valid || left.Time.Equal(right.Time))
+}
+
 func sameOptionalText(left, right pgtype.Text) bool {
 	return left.Valid == right.Valid && (!left.Valid || left.String == right.String)
 }

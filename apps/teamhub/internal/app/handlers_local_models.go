@@ -109,7 +109,7 @@ func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string
 	online := localComputerOnline(record.Status, record.LastSeenAt, now)
 	readiness := agentruntimestate.LocalModelsReadiness(agentruntimestate.LocalModelsReadinessFacts{
 		Status: record.Status, Online: online, DaemonVersion: record.DaemonVersion, Platform: record.Platform,
-		ConnectedAt: record.ConnectedAt, Summary: record.Summary,
+		ConnectedAt: record.ConnectedAt, UpdatePendingSince: record.UpdatePendingSince, Summary: record.Summary,
 	}, now)
 	view := httpapi.LocalModelsView{
 		Computer: httpapi.LocalModelsComputer{
@@ -213,7 +213,7 @@ func localModelsComputerSummary(computer agentruntimestate.LocalModelsComputer, 
 		Status:        httpapi.LocalModelsComputerSummaryOffline, LastSeenAt: computer.LastSeenAt,
 		Readiness: agentruntimestate.LocalModelsReadiness(agentruntimestate.LocalModelsReadinessFacts{
 			Status: computer.Status, Online: online, DaemonVersion: computer.DaemonVersion, Platform: computer.Platform,
-			ConnectedAt: computer.ConnectedAt, Summary: computer.Summary,
+			ConnectedAt: computer.ConnectedAt, UpdatePendingSince: computer.UpdatePendingSince, Summary: computer.Summary,
 		}, now),
 		ObservedAt: computer.ObservedAt,
 	}

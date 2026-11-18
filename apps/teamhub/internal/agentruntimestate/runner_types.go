@@ -50,6 +50,8 @@ type ConnectLocalComputerInput struct {
 	DaemonVersion      string
 	// RecommendedVersion is empty when the deployment ships no Computer release.
 	RecommendedVersion string
+	// ReleaseCurrent is nil when the deployment ships no Computer release.
+	ReleaseCurrent *bool
 }
 
 // RunnerPlacement is an active Agent placed on a Computer. Its Agent Runner
@@ -87,6 +89,9 @@ type TouchLocalComputerInput struct {
 	// hello; the stored values are kept.
 	DaemonVersion      string `json:"daemon_version,omitempty"`
 	RecommendedVersion string `json:"recommended_version,omitempty"`
+	// ReleaseCurrent is nil when the touch carries no release facts; the
+	// stored update_pending_since is kept.
+	ReleaseCurrent *bool `json:"release_current,omitempty"`
 }
 
 type CreateLocalComputerEnrollmentInput struct {
