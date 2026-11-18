@@ -334,6 +334,16 @@ const cases: Record<string, Case> = {
     ask: "update Linger",
     title: "lab-118 is updating",
   },
+  "needs_update · desktop app behind": {
+    computer: { daemon_version: "0.52.0", install_kind: "desktop" },
+    owner: {
+      body: "lab-118 runs an older Linger desktop app (0.52.0), which can't report local models. On lab-118, update Linger from the account menu or the tray menu (Download Update, then Restart to Update).",
+      links: ["Set up in the desktop app", "Updating a computer"],
+    },
+    readiness: { reason: "DESKTOP_APP_OUTDATED", state: "needs_update" },
+    ask: "update Linger",
+    title: "Update the Linger app on lab-118",
+  },
   "needs_reinstall · Simplex era on Linux": {
     computer: { daemon_version: "0.50.0" },
     owner: {

@@ -388,6 +388,23 @@ function managedElsewhere(view: LocalModelsView): EmptyStatePlan {
   };
 }
 
+function needsUpdate(view: LocalModelsView): EmptyStatePlan {
+  const { computer } = view;
+  const c = computer.display_name;
+  // The desktop app ships its own Daemon, which only an app update replaces.
+  if (computer.readiness.reason === "DESKTOP_APP_OUTDATED")
+    return {
+      body: `${c} runs an older Linger desktop app${versionNote(computer)}, which can't report local models. On ${c}, update Linger from the account menu or the tray menu (Download Update, then Restart to Update). This page refreshes when it reconnects.`,
+      secondary: [links.desktop, links.updating],
+      title: `Update the Linger app on ${c}`,
+    };
+  return {
+    body: `Its Linger version${versionNote(computer)} can't report local models yet. It updates itself within the hour; this page refreshes when it does. Desktop app: update Linger from the tray menu.`,
+    secondary: [links.updating],
+    title: `${c} is updating`,
+  };
+}
+
 const plans: Record<
   EmptyStateKind,
   (view: LocalModelsView, context: EmptyStateContext) => EmptyStatePlan
@@ -401,11 +418,7 @@ const plans: Record<
   managed_elsewhere: managedElsewhere,
   needs_attention: needsAttention,
   needs_reinstall: needsReinstall,
-  needs_update: (view) => ({
-    body: `Its Linger version${versionNote(view.computer)} can't report local models yet. It updates itself within the hour; this page refreshes when it does. Desktop app: update Linger from the tray menu.`,
-    secondary: [links.updating],
-    title: `${view.computer.display_name} is updating`,
-  }),
+  needs_update: needsUpdate,
   not_reported: (view) => ({
     body: `It's connected but hasn't sent its model list. Restart Linger on ${view.computer.display_name}.`,
     secondary: [links.troubleshooting],
