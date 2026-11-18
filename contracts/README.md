@@ -119,6 +119,11 @@ and what should its owner do next": `LocalModelsReadiness` (`state`, `reason`,
 Computers page's `LocalComputer.local_models_readiness`, so no client derives
 version gates or hardware floors itself. The hardware facts behind it come
 from `LocalComputerProfile`, which a Computer reports without the tool.
+The Agent Service marks each Computer observation `release_current` by
+comparing `daemon_version` with its Computer release version; TeamHub keeps
+`local_computers.update_pending_since` from the first observation behind until
+one finds the Computer current, sends a `computers` hint when it changes, and
+readiness reports `UPDATE_FAILED` once it is more than two hours old.
 `fixtures/local-models/readiness.json` holds one valid example per readiness
 rule, and `tests/local-models-readiness.contract.test.ts` checks that every
 state and reason has one.
