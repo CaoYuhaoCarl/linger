@@ -92,6 +92,9 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/RunnerLocalModels",
         },
         {
+          $ref: "#/$defs/RunnerComputerProfile",
+        },
+        {
           $ref: "#/$defs/RuntimeRegistrationObserved",
         },
         {
@@ -192,7 +195,7 @@ export const runnerGatewayEnvelopeSchema = {
     ServiceFeature: {
       description:
         "An optional Runner behavior the Agent Service accepts. An older service rejects its frames as a protocol violation.",
-      enum: ["local_models"],
+      enum: ["local_models", "computer_profile"],
     },
     Timestamp: {
       type: "string",
@@ -2618,6 +2621,190 @@ export const runnerGatewayEnvelopeSchema = {
         },
       },
     },
+    ComputerAcceleratorGpu: {
+      type: "object",
+      additionalProperties: false,
+      required: ["vendor", "name"],
+      properties: {
+        vendor: {
+          enum: ["nvidia", "amd", "intel", "apple", "other"],
+        },
+        name: {
+          description: "Display only; never matched on.",
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+        },
+        memory_bytes: {
+          description:
+            "Dedicated GPU memory; absent when the probe can't read it.",
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
+    ComputerAccelerators: {
+      description:
+        "Hardware the Computer probed without the localmodels tool: NVIDIA GPUs from nvidia-smi, Apple silicon and its unified memory from sysctl, other GPUs by name from the OS device list. probe failed means the lists say nothing about the hardware.",
+      type: "object",
+      additionalProperties: false,
+      required: ["probe", "ram_total_bytes", "apple_silicon", "gpus"],
+      properties: {
+        probe: {
+          enum: ["ok", "failed"],
+        },
+        ram_total_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        apple_silicon: {
+          type: "boolean",
+        },
+        unified_memory_bytes: {
+          description:
+            "Present only on Apple silicon; the memory the CPU and GPU share.",
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        gpus: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/ComputerAcceleratorGpu",
+          },
+        },
+      },
+    },
+    ComputerProfileLocalModels: {
+      type: "object",
+      additionalProperties: false,
+      required: ["mode"],
+      properties: {
+        mode: {
+          description:
+            "none: the config names no localmodels tool. local: the tool runs on this Computer. remote: another machine serves the models.",
+          enum: ["none", "local", "remote"],
+        },
+        managed: {
+          description:
+            "The kit was installed by local-models enable, which keeps it upgraded.",
+          type: "boolean",
+        },
+        kit_version: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+        },
+        managed_by: {
+          $ref: "#/$defs/ComputerProfileManagedBy",
+        },
+      },
+    },
+    ComputerProfileManagedBy: {
+      description:
+        "The machine that serves this Computer's models when mode is remote, from the config.",
+      type: "object",
+      additionalProperties: false,
+      required: ["label"],
+      properties: {
+        label: {
+          description: "Display only.",
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+        },
+        computer_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+        },
+      },
+    },
+    ComputerProfileUpdate: {
+      description:
+        "The Computer's last self-update attempt. failed stays until an attempt succeeds or the Computer runs the target build. A desktop Computer does not update itself and reports idle.",
+      type: "object",
+      additionalProperties: false,
+      required: ["state"],
+      properties: {
+        state: {
+          enum: ["idle", "staging", "failed"],
+        },
+        attempted_at: {
+          $ref: "#/$defs/Timestamp",
+        },
+        error_code: {
+          description: "Present only when failed.",
+          enum: [
+            "ARCHIVE_INVALID",
+            "DOWNLOAD_FAILED",
+            "VERIFY_FAILED",
+            "STAGE_FAILED",
+            "ACTIVATE_FAILED",
+          ],
+        },
+        detail: {
+          description: "Diagnostic text for display; never matched on.",
+          type: "string",
+          maxLength: 4000,
+        },
+      },
+    },
+    ComputerProfile: {
+      description:
+        "Facts the Computer reports about itself without the localmodels tool.",
+      type: "object",
+      additionalProperties: false,
+      required: ["install_kind", "accelerators", "local_models", "update"],
+      properties: {
+        install_kind: {
+          description:
+            "desktop when the config has a desktop section; container when /.dockerenv or /run/.containerenv exists or PID 1's cgroup names a container runtime; cli otherwise.",
+          enum: ["desktop", "cli", "container"],
+        },
+        accelerators: {
+          $ref: "#/$defs/ComputerAccelerators",
+        },
+        local_models: {
+          $ref: "#/$defs/ComputerProfileLocalModels",
+        },
+        update: {
+          $ref: "#/$defs/ComputerProfileUpdate",
+        },
+      },
+    },
+    RunnerComputerProfile: {
+      description:
+        "The Computer's profile. Sent after a runner.welcome whose service_features names computer_profile, and whenever the profile changes (a self-update attempt, a hardware probe that finds different hardware). It is not periodic. revision grows within one connection.",
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "type",
+        "protocol_version",
+        "runner_id",
+        "sent_at",
+        "revision",
+        "profile",
+      ],
+      properties: {
+        type: {
+          const: "runner.computer_profile",
+        },
+        protocol_version: {
+          $ref: "#/$defs/ProtocolVersion",
+        },
+        runner_id: {
+          $ref: "#/$defs/Id",
+        },
+        sent_at: {
+          $ref: "#/$defs/Timestamp",
+        },
+        revision: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+        profile: {
+          $ref: "#/$defs/ComputerProfile",
+        },
+      },
+    },
     RunnerHello: {
       type: "object",
       additionalProperties: false,
@@ -2956,7 +3143,7 @@ export const runnerGatewayEnvelopeSchema = {
         },
         service_features: {
           description:
-            "Runner behaviors this Agent Service accepts beyond the protocol 2 base. A Computer sends runner.local_models and runs execute with kind local_models only when the list names local_models. The service sends the field only to a Computer release that decodes it.",
+            "Runner behaviors this Agent Service accepts beyond the protocol 2 base. A Computer sends runner.local_models and runs execute with kind local_models only when the list names local_models, and sends runner.computer_profile only when it names computer_profile. The service names each value only to a Computer release that decodes it.",
           type: "array",
           uniqueItems: true,
           items: {

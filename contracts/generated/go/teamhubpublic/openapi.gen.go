@@ -2589,6 +2589,7 @@ func (e LocalModelsErrorCode) Valid() bool {
 const (
 	LocalModelsReadinessDaemonLegacy        LocalModelsReadinessReason = "DAEMON_LEGACY"
 	LocalModelsReadinessDaemonUnsupported   LocalModelsReadinessReason = "DAEMON_UNSUPPORTED"
+	LocalModelsReadinessDesktopAppOutdated  LocalModelsReadinessReason = "DESKTOP_APP_OUTDATED"
 	LocalModelsReadinessDiskInsufficient    LocalModelsReadinessReason = "DISK_INSUFFICIENT"
 	LocalModelsReadinessHardwareUnknown     LocalModelsReadinessReason = "HARDWARE_UNKNOWN"
 	LocalModelsReadinessMemoryInsufficient  LocalModelsReadinessReason = "MEMORY_INSUFFICIENT"
@@ -2607,6 +2608,8 @@ func (e LocalModelsReadinessReason) Valid() bool {
 	case LocalModelsReadinessDaemonLegacy:
 		return true
 	case LocalModelsReadinessDaemonUnsupported:
+		return true
+	case LocalModelsReadinessDesktopAppOutdated:
 		return true
 	case LocalModelsReadinessDiskInsufficient:
 		return true
@@ -6922,7 +6925,7 @@ type LocalModelsReadiness struct {
 	// EnableCommand The Computer's release ships the local-models enable command, so clients may show it; otherwise they link the manual setup steps.
 	EnableCommand bool `json:"enable_command"`
 
-	// Reason Why the Computer is in its readiness state. DAEMON_UNSUPPORTED: the Computer release can no longer connect. DAEMON_LEGACY: a release from before the Linger rename, which can't update itself. UPDATE_FAILED: its update failed or has been pending too long. UPDATE_PENDING: it is updating itself. NOT_REPORTED: no snapshot ever. TOOL_FAILED: the tool did not answer. SETUP_AVAILABLE: the hardware meets the floor. HARDWARE_UNKNOWN: the Computer has not reported its hardware. NO_SUPPORTED_GPU: neither Apple silicon nor an NVIDIA GPU. MEMORY_INSUFFICIENT: the GPU or unified memory is below the floor, or no model fits it. DISK_INSUFFICIENT: no model fits the free disk. PLATFORM_UNSUPPORTED: the platform has no GPU path, such as an Intel Mac.
+	// Reason Why the Computer is in its readiness state. DAEMON_UNSUPPORTED: the Computer release can no longer connect. DAEMON_LEGACY: a release from before the Linger rename, which can't update itself. UPDATE_FAILED: its update failed or has been pending too long. UPDATE_PENDING: it is updating itself. NOT_REPORTED: no snapshot ever. TOOL_FAILED: the tool did not answer. DESKTOP_APP_OUTDATED: a desktop Computer runs an older Computer release than the deployment; only a desktop app update replaces it, because it does not update itself. SETUP_AVAILABLE: the hardware meets the floor. HARDWARE_UNKNOWN: the Computer has not reported its hardware. NO_SUPPORTED_GPU: neither Apple silicon nor an NVIDIA GPU. MEMORY_INSUFFICIENT: the GPU or unified memory is below the floor, or no model fits it. DISK_INSUFFICIENT: no model fits the free disk. PLATFORM_UNSUPPORTED: the platform has no GPU path, such as an Intel Mac.
 	Reason *LocalModelsReadinessReason `json:"reason,omitempty"`
 
 	// SetupPath The guided setup that applies, from the Computer's accelerators and platform. apple_silicon runs models on unified memory through Metal; it is a GPU path, never a CPU one.
@@ -6932,7 +6935,7 @@ type LocalModelsReadiness struct {
 	State LocalModelsReadinessState `json:"state"`
 }
 
-// LocalModelsReadinessReason Why the Computer is in its readiness state. DAEMON_UNSUPPORTED: the Computer release can no longer connect. DAEMON_LEGACY: a release from before the Linger rename, which can't update itself. UPDATE_FAILED: its update failed or has been pending too long. UPDATE_PENDING: it is updating itself. NOT_REPORTED: no snapshot ever. TOOL_FAILED: the tool did not answer. SETUP_AVAILABLE: the hardware meets the floor. HARDWARE_UNKNOWN: the Computer has not reported its hardware. NO_SUPPORTED_GPU: neither Apple silicon nor an NVIDIA GPU. MEMORY_INSUFFICIENT: the GPU or unified memory is below the floor, or no model fits it. DISK_INSUFFICIENT: no model fits the free disk. PLATFORM_UNSUPPORTED: the platform has no GPU path, such as an Intel Mac.
+// LocalModelsReadinessReason Why the Computer is in its readiness state. DAEMON_UNSUPPORTED: the Computer release can no longer connect. DAEMON_LEGACY: a release from before the Linger rename, which can't update itself. UPDATE_FAILED: its update failed or has been pending too long. UPDATE_PENDING: it is updating itself. NOT_REPORTED: no snapshot ever. TOOL_FAILED: the tool did not answer. DESKTOP_APP_OUTDATED: a desktop Computer runs an older Computer release than the deployment; only a desktop app update replaces it, because it does not update itself. SETUP_AVAILABLE: the hardware meets the floor. HARDWARE_UNKNOWN: the Computer has not reported its hardware. NO_SUPPORTED_GPU: neither Apple silicon nor an NVIDIA GPU. MEMORY_INSUFFICIENT: the GPU or unified memory is below the floor, or no model fits it. DISK_INSUFFICIENT: no model fits the free disk. PLATFORM_UNSUPPORTED: the platform has no GPU path, such as an Intel Mac.
 type LocalModelsReadinessReason string
 
 // LocalModelsReadinessState One Computer's local-models readiness, computed by TeamHub; the first matching rule wins. Offline is not a state: an offline Computer keeps its last readiness and the client shows it muted. needs_reinstall: the Computer can't update itself. needs_update: it is updating itself and reports no library yet. managed_elsewhere: its models are served by another machine. checking: connected moments ago and no snapshot yet. not_reported: no snapshot ever. needs_attention: the tool failed. not_set_up: the tool is not installed. unsupported_hardware: no supported GPU path (an NVIDIA GPU with enough memory, or Apple silicon with enough unified memory); there is no CPU-only mode. working: a model is downloading or loading. loaded: one or more models are loaded. ready: the library is usable and nothing is loaded.
