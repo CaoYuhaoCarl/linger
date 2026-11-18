@@ -589,6 +589,16 @@ func (q *Queries) DeleteLocalComputerModelSnapshot(ctx context.Context, computer
 	return err
 }
 
+const deleteLocalComputerProfile = `-- name: DeleteLocalComputerProfile :exec
+DELETE FROM local_computer_profiles
+WHERE computer_id=$1::text
+`
+
+func (q *Queries) DeleteLocalComputerProfile(ctx context.Context, computerID string) error {
+	_, err := q.db.Exec(ctx, deleteLocalComputerProfile, computerID)
+	return err
+}
+
 const deletePendingAgentRuntimeLocalComputerEnrollments = `-- name: DeletePendingAgentRuntimeLocalComputerEnrollments :exec
 DELETE FROM local_computer_enrollments
 WHERE tenant_id=$1::text
@@ -1273,6 +1283,19 @@ func (q *Queries) GetLocalComputerOwnerName(ctx context.Context, arg GetLocalCom
 	var display_name string
 	err := row.Scan(&display_name)
 	return display_name, err
+}
+
+const getLocalComputerProfile = `-- name: GetLocalComputerProfile :one
+SELECT profile
+FROM local_computer_profiles
+WHERE computer_id=$1::text
+`
+
+func (q *Queries) GetLocalComputerProfile(ctx context.Context, computerID string) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getLocalComputerProfile, computerID)
+	var profile []byte
+	err := row.Scan(&profile)
+	return profile, err
 }
 
 const getMaterializableAgentRuntimeRegistrationByManagementID = `-- name: GetMaterializableAgentRuntimeRegistrationByManagementID :one
@@ -2464,10 +2487,11 @@ const listLocalModelsComputers = `-- name: ListLocalModelsComputers :many
 SELECT computer.computer_id,computer.display_name,computer.status,computer.last_seen_at,
        computer.connected_at,computer.update_pending_since,computer.platform,computer.daemon_version,
        computer.owner_actor_id,owner.display_name AS owner_display_name,
-       snapshot.summary,snapshot.observed_at
+       snapshot.summary,snapshot.observed_at,profile.profile
 FROM local_computers computer
 JOIN actors owner ON owner.id=computer.owner_actor_id AND owner.tenant_id=computer.owner_tenant_id
 LEFT JOIN local_computer_model_snapshots snapshot ON snapshot.computer_id=computer.computer_id
+LEFT JOIN local_computer_profiles profile ON profile.computer_id=computer.computer_id
 WHERE computer.owner_tenant_id=$1::text
   AND computer.owner_actor_id=$2::text
   AND computer.status<>'removed'
@@ -2493,10 +2517,11 @@ type ListLocalModelsComputersRow struct {
 	OwnerDisplayName   string             `json:"owner_display_name"`
 	Summary            []byte             `json:"summary"`
 	ObservedAt         pgtype.Timestamptz `json:"observed_at"`
+	Profile            []byte             `json:"profile"`
 }
 
-// One row per Computer of the owner in the Tenant with its stored summary;
-// it never reads a snapshot.
+// One row per Computer of the owner in the Tenant with its stored summary
+// and profile; it never reads a snapshot.
 func (q *Queries) ListLocalModelsComputers(ctx context.Context, arg ListLocalModelsComputersParams) ([]ListLocalModelsComputersRow, error) {
 	rows, err := q.db.Query(ctx, listLocalModelsComputers, arg.TenantID, arg.OwnerActorID)
 	if err != nil {
@@ -2519,6 +2544,7 @@ func (q *Queries) ListLocalModelsComputers(ctx context.Context, arg ListLocalMod
 			&i.OwnerDisplayName,
 			&i.Summary,
 			&i.ObservedAt,
+			&i.Profile,
 		); err != nil {
 			return nil, err
 		}
@@ -2558,6 +2584,45 @@ func (q *Queries) ListMaterializableAgentRuntimeRegistrationsAfter(ctx context.C
 			return nil, err
 		}
 		items = append(items, agent_management_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOwnedLocalComputerProfiles = `-- name: ListOwnedLocalComputerProfiles :many
+SELECT profile.computer_id,profile.profile
+FROM local_computer_profiles profile
+JOIN local_computers computer ON computer.computer_id=profile.computer_id
+WHERE computer.owner_tenant_id=$1::text
+  AND computer.owner_actor_id=$2::text
+  AND computer.status<>'removed'
+`
+
+type ListOwnedLocalComputerProfilesParams struct {
+	TenantID     string `json:"tenant_id"`
+	OwnerActorID string `json:"owner_actor_id"`
+}
+
+type ListOwnedLocalComputerProfilesRow struct {
+	ComputerID string `json:"computer_id"`
+	Profile    []byte `json:"profile"`
+}
+
+func (q *Queries) ListOwnedLocalComputerProfiles(ctx context.Context, arg ListOwnedLocalComputerProfilesParams) ([]ListOwnedLocalComputerProfilesRow, error) {
+	rows, err := q.db.Query(ctx, listOwnedLocalComputerProfiles, arg.TenantID, arg.OwnerActorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOwnedLocalComputerProfilesRow{}
+	for rows.Next() {
+		var i ListOwnedLocalComputerProfilesRow
+		if err := rows.Scan(&i.ComputerID, &i.Profile); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -4615,5 +4680,23 @@ func (q *Queries) UpsertLocalComputerModelSnapshot(ctx context.Context, arg Upse
 		arg.Host,
 		arg.ObservedAt,
 	)
+	return err
+}
+
+const upsertLocalComputerProfile = `-- name: UpsertLocalComputerProfile :exec
+INSERT INTO local_computer_profiles(computer_id,profile,observed_at,updated_at)
+VALUES($1::text,$2::jsonb,$3::timestamptz,clock_timestamp())
+ON CONFLICT (computer_id) DO UPDATE
+SET profile=EXCLUDED.profile,observed_at=EXCLUDED.observed_at,updated_at=EXCLUDED.updated_at
+`
+
+type UpsertLocalComputerProfileParams struct {
+	ComputerID string             `json:"computer_id"`
+	Profile    []byte             `json:"profile"`
+	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+}
+
+func (q *Queries) UpsertLocalComputerProfile(ctx context.Context, arg UpsertLocalComputerProfileParams) error {
+	_, err := q.db.Exec(ctx, upsertLocalComputerProfile, arg.ComputerID, arg.Profile, arg.ObservedAt)
 	return err
 }

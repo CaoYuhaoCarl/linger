@@ -252,6 +252,32 @@ paths:
           $ref: "../components/common.yaml#/components/responses/NotFound"
         "500":
           $ref: "../components/common.yaml#/components/responses/InternalError"
+  /v0/agent-runtime/local-computers/profile:
+    post:
+      tags: [Local Computers]
+      operationId: recordAgentRuntimeLocalComputerProfile
+      summary: Store the latest profile a Computer reported.
+      description: >-
+        Agent Service forwards every runner.computer_profile. TeamHub replaces the
+        Computer's stored profile, keeps it while the Computer is offline, and publishes a
+        computers invalidation hint with the owner's Tenant ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../components/local-models.yaml#/components/schemas/RecordLocalComputerProfileRequest"
+      responses:
+        "204":
+          description: Stored.
+        "400":
+          $ref: "../components/common.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+        "404":
+          $ref: "../components/common.yaml#/components/responses/NotFound"
+        "500":
+          $ref: "../components/common.yaml#/components/responses/InternalError"
   /v0/agents/{agentId}/identity:
     parameters:
       - $ref: "#/components/parameters/AgentId"

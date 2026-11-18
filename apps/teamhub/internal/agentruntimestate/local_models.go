@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/realtime"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
+	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
 // maxLocalModelsSnapshotBytes bounds one stored snapshot. The contract caps a
@@ -52,7 +53,9 @@ type LocalModelsRecord struct {
 	Snapshot           json.RawMessage
 	Host               json.RawMessage
 	Summary            *LocalModelsSummary
-	Users              []LocalModelUser
+	// Profile is nil until the Computer reports one.
+	Profile *LocalComputerProfile
+	Users   []LocalModelUser
 }
 
 // LocalModelsComputer is one row of the local-models Computer list: the
@@ -72,6 +75,69 @@ type LocalModelsComputer struct {
 	DaemonVersion      string
 	Summary            *LocalModelsSummary
 	ObservedAt         *time.Time
+	// Profile is nil until the Computer reports one.
+	Profile *LocalComputerProfile
+}
+
+// RecordLocalComputerProfileInput is the latest profile a Computer reported:
+// the JSON object the Agent Service forwarded and when the Computer sent it.
+type RecordLocalComputerProfileInput struct {
+	ComputerID string
+	Profile    json.RawMessage
+	ObservedAt time.Time
+}
+
+// RecordLocalComputerProfile replaces a Computer's stored profile and tells
+// the owner's Tenant that its Computers changed, so every readiness the
+// profile feeds is read again. Ordering is the Agent Service's job.
+func (s *Service) RecordLocalComputerProfile(ctx context.Context, input RecordLocalComputerProfileInput) error {
+	if !validComputerID(input.ComputerID) || input.ObservedAt.IsZero() || !jsonObject(input.Profile) {
+		return ErrInvalid
+	}
+	_, err := executeLocalComputerTx(ctx, s, func(ctx context.Context, _ pgx.Tx, queries *store.Queries) (struct{}, *LocalComputerOwner, error) {
+		computer, err := queries.LockAgentRuntimeLocalComputer(ctx, input.ComputerID)
+		if isNoRows(err) || (err == nil && computer.Status == "removed") {
+			return struct{}{}, nil, ErrNotFound
+		}
+		if err != nil {
+			return struct{}{}, nil, err
+		}
+		if err := queries.UpsertLocalComputerProfile(ctx, store.UpsertLocalComputerProfileParams{
+			ComputerID: input.ComputerID, Profile: input.Profile, ObservedAt: timestamptz(input.ObservedAt),
+		}); err != nil {
+			return struct{}{}, nil, err
+		}
+		return struct{}{}, nil, realtime.Invalidate(ctx, queries, realtime.Invalidation{
+			TenantID: computer.OwnerTenantID, Resource: realtime.InvalidateComputers, ID: computer.OwnerTenantID,
+		})
+	})
+	return err
+}
+
+// LocalComputerProfile is what TeamHub reads from a stored profile, in the
+// public shapes, which match the internal ones field for field.
+type LocalComputerProfile struct {
+	InstallKind  httpapi.LocalComputerInstallKind  `json:"install_kind"`
+	Accelerators httpapi.LocalComputerAccelerators `json:"accelerators"`
+	LocalModels  struct {
+		Mode      string                        `json:"mode"`
+		ManagedBy *httpapi.LocalModelsManagedBy `json:"managed_by"`
+	} `json:"local_models"`
+	Update struct {
+		State string `json:"state"`
+	} `json:"update"`
+}
+
+// ParseLocalComputerProfile reads a stored profile; nil for none.
+func ParseLocalComputerProfile(raw []byte) (*LocalComputerProfile, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var profile LocalComputerProfile
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		return nil, err
+	}
+	return &profile, nil
 }
 
 // RecordLocalModels replaces a Computer's stored model library and tells the
@@ -140,6 +206,13 @@ func (s *Service) LocalModels(ctx context.Context, tenantID, viewerActorID, comp
 			return LocalModelsRecord{}, err
 		}
 	}
+	profile, err := queries.GetLocalComputerProfile(ctx, computerID)
+	if err != nil && !isNoRows(err) {
+		return LocalModelsRecord{}, err
+	}
+	if record.Profile, err = ParseLocalComputerProfile(profile); err != nil {
+		return LocalModelsRecord{}, err
+	}
 	users, err := queries.ListLocalModelUsersOnComputer(ctx, store.ListLocalModelUsersOnComputerParams{
 		TenantID: tenantID, ComputerID: computerID, ViewerActorID: viewerActorID,
 	})
@@ -171,13 +244,17 @@ func (s *Service) LocalModelsComputers(ctx context.Context, tenantID, ownerActor
 		if err != nil {
 			return nil, err
 		}
+		profile, err := ParseLocalComputerProfile(row.Profile)
+		if err != nil {
+			return nil, err
+		}
 		computers[index] = LocalModelsComputer{
 			ComputerID: row.ComputerID, DisplayName: row.DisplayName,
 			OwnerActorID: row.OwnerActorID, OwnerDisplayName: row.OwnerDisplayName,
 			Status: row.Status, LastSeenAt: optionalTime(row.LastSeenAt), ConnectedAt: optionalTime(row.ConnectedAt),
 			UpdatePendingSince: optionalTime(row.UpdatePendingSince),
 			Platform:           row.Platform.String, DaemonVersion: row.DaemonVersion.String,
-			Summary: summary, ObservedAt: optionalTime(row.ObservedAt),
+			Summary: summary, ObservedAt: optionalTime(row.ObservedAt), Profile: profile,
 		}
 	}
 	return computers, nil

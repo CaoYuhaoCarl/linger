@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/realtime"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
 )
 
@@ -47,8 +48,8 @@ func (r *localModelsQueryTracer) record(on bool) []string {
 // TestLocalModelsComputerSummaries covers what needs PostgreSQL: the summary
 // the migration's function stores beside each snapshot, readiness from it on
 // the list, the library view and the Computers page, one query for many
-// Computers that never reads a snapshot, and refresh's owner and online
-// rules.
+// Computers that never reads a snapshot, readiness and owner-only hardware
+// from stored profiles, and refresh's owner and online rules.
 func TestLocalModelsComputerSummaries(t *testing.T) {
 	allowParallelIntegrationTest(t)
 	databaseURL := newIntegrationDatabase(t)
@@ -81,7 +82,8 @@ func TestLocalModelsComputerSummaries(t *testing.T) {
 	bob := seedPeerHuman(t, env)
 
 	// 50 of Alice's Computers: three report libraries below, one is Simplex
-	// era, one just connected, and the rest never reported.
+	// era, one just connected, three report profiles, and the rest never
+	// reported.
 	if _, err := pool.Exec(t.Context(), `
 INSERT INTO local_computers(computer_id,display_name,status,owner_tenant_id,owner_actor_id,last_seen_at,daemon_version,platform,workspace_grants)
 SELECT format('computer_fleet_%s', lpad(n::text, 2, '0')), format('fleet-%s', n), 'offline', 'tenant_acme', 'actor_acme_alice',
@@ -139,6 +141,47 @@ WHERE computer_id='computer_fleet_01';`); err != nil {
 		"models": []any{model("a:Q4", "absent", "unified", true)},
 	})
 
+	// Profiles: fleet-2 is a container with a 24 GiB NVIDIA GPU and no tool;
+	// fleet-6 never reported a library and its last self-update failed;
+	// fleet-7's models come from another machine. Each stored profile sends
+	// one computers hint.
+	drainHints := listenTenantHints(t, pool)
+	recordProfile := func(computerID, installKind, mode string, update map[string]any) {
+		t.Helper()
+		localModels := map[string]any{"mode": mode}
+		if mode == "remote" {
+			localModels["managed_by"] = map[string]any{"label": "GPU server lab-118", "computer_id": "computer_fleet_01"}
+		}
+		status, body := agentRuntimeStateRequest(t, server.Config.Handler, http.MethodPost,
+			"/v0/agent-runtime/local-computers/profile", teamHubInternalToken,
+			map[string]any{"computer_id": computerID, "observed_at": time.Now().UTC(), "profile": map[string]any{
+				"install_kind": installKind,
+				"accelerators": map[string]any{"probe": "ok", "ram_total_bytes": 64 << 30, "apple_silicon": false,
+					"gpus": []any{map[string]any{"vendor": "nvidia", "name": "NVIDIA L40S", "memory_bytes": 24 << 30}}},
+				"local_models": localModels,
+				"update":       update,
+			}})
+		if status != http.StatusNoContent {
+			t.Fatalf("record profile %s status=%d body=%s", computerID, status, body)
+		}
+	}
+	idle := map[string]any{"state": "idle"}
+	recordProfile("computer_fleet_02", "container", "none", idle)
+	recordProfile("computer_fleet_06", "cli", "none", map[string]any{
+		"state": "failed", "attempted_at": time.Now().UTC(), "error_code": "VERIFY_FAILED", "detail": "sha256 does not match target_release"})
+	recordProfile("computer_fleet_07", "cli", "remote", idle)
+	if hints := drainHints()[realtime.InvalidationKindPrefix+realtime.InvalidateComputers]; hints != 3 {
+		t.Fatalf("stored profiles sent %d computers hints, want 3", hints)
+	}
+	status, body := agentRuntimeStateRequest(t, server.Config.Handler, http.MethodPost,
+		"/v0/agent-runtime/local-computers/profile", teamHubInternalToken,
+		map[string]any{"computer_id": "computer_fleet_02", "observed_at": time.Now().UTC(), "profile": map[string]any{
+			"install_kind": "vm", "accelerators": map[string]any{"probe": "ok", "ram_total_bytes": 1, "apple_silicon": false, "gpus": []any{}},
+			"local_models": map[string]any{"mode": "none"}, "update": idle}})
+	if status != http.StatusBadRequest {
+		t.Fatalf("an unknown install kind was stored: status=%d body=%s", status, body)
+	}
+
 	var summary string
 	if err := pool.QueryRow(t.Context(), `SELECT summary::text FROM local_computer_model_snapshots WHERE computer_id='computer_fleet_01'`).Scan(&summary); err != nil {
 		t.Fatal(err)
@@ -170,11 +213,20 @@ WHERE computer_id='computer_fleet_01';`); err != nil {
 			Memory *struct {
 				Kind string `json:"kind"`
 			} `json:"memory"`
+			InstallKind  string `json:"install_kind"`
+			Accelerators *struct {
+				Gpus []struct {
+					Vendor string `json:"vendor"`
+				} `json:"gpus"`
+			} `json:"accelerators"`
+			ManagedBy *struct {
+				Label string `json:"label"`
+			} `json:"managed_by"`
 		} `json:"items"`
 	}
 	list := "/v0/tenants/" + acmeTenant + "/local-models/computers"
 	tracer.record(true)
-	status, _, body := env.request(alice, http.MethodGet, list+"?scope=mine", nil, "")
+	status, _, body = env.request(alice, http.MethodGet, list+"?scope=mine", nil, "")
 	queries := tracer.record(false)
 	if status != http.StatusOK {
 		t.Fatalf("list status=%d body=%s", status, body)
@@ -187,9 +239,11 @@ WHERE computer_id='computer_fleet_01';`); err != nil {
 		t.Fatalf("listed %d Computers", len(page.Items))
 	}
 	want := map[string]string{
-		"computer_fleet_01": "loaded//nvidia", "computer_fleet_02": "not_set_up/HARDWARE_UNKNOWN/unknown",
+		"computer_fleet_01": "loaded//nvidia", "computer_fleet_02": "not_set_up/SETUP_AVAILABLE/nvidia",
+		"computer_fleet_07": "managed_elsewhere//nvidia",
 		"computer_fleet_03": "unsupported_hardware/NO_SUPPORTED_GPU/unknown", "computer_fleet_04": "needs_reinstall/DAEMON_LEGACY/unknown",
-		"computer_fleet_05": "checking//unknown", "computer_fleet_06": "not_reported/NOT_REPORTED/unknown",
+		"computer_fleet_05": "checking//unknown", "computer_fleet_06": "needs_reinstall/UPDATE_FAILED/nvidia",
+		"computer_fleet_08": "not_reported/NOT_REPORTED/unknown",
 	}
 	for _, item := range page.Items {
 		got := fmt.Sprintf("%s/%s/%s", item.Readiness.State, item.Readiness.Reason, item.Readiness.SetupPath)
@@ -203,8 +257,12 @@ WHERE computer_id='computer_fleet_01';`); err != nil {
 			item.Counts.OnDisk != 2 || item.Memory == nil || item.Memory.Kind != "gpu") {
 			t.Errorf("fleet-1 row: %+v", item)
 		}
-		if item.ComputerID == "computer_fleet_02" && (item.Counts != nil || item.Memory != nil) {
-			t.Errorf("a library that is not set up has counts: %+v", item)
+		if item.ComputerID == "computer_fleet_02" && (item.Counts != nil || item.Memory != nil || item.InstallKind != "container" ||
+			item.Accelerators == nil || len(item.Accelerators.Gpus) != 1 || item.Accelerators.Gpus[0].Vendor != "nvidia") {
+			t.Errorf("fleet-2 row: %+v", item)
+		}
+		if item.ComputerID == "computer_fleet_07" && (item.ManagedBy == nil || item.ManagedBy.Label != "GPU server lab-118") {
+			t.Errorf("fleet-7 row: %+v", item)
 		}
 	}
 	if status, _, body := env.request(alice, http.MethodGet, list+"?scope=space", nil, ""); status != http.StatusBadRequest {
@@ -218,6 +276,16 @@ WHERE computer_id='computer_fleet_01';`); err != nil {
 	status, _, body = env.request(bob, http.MethodGet, base, nil, "")
 	if status != http.StatusOK || !containsJSONText(body, `"state":"unsupported_hardware"`) || !containsJSONText(body, `"display_name":`) {
 		t.Fatalf("library view readiness status=%d body=%s", status, body)
+	}
+	// The hardware is the owner's to see; the install kind is not private.
+	fleet2 := "/v0/tenants/" + acmeTenant + "/local-computers/computer_fleet_02/local-models"
+	status, _, body = env.request(alice, http.MethodGet, fleet2, nil, "")
+	if status != http.StatusOK || !containsJSONText(body, `"install_kind":"container"`) || !containsJSONText(body, `"name":"NVIDIA L40S"`) {
+		t.Fatalf("owner library view status=%d body=%s", status, body)
+	}
+	status, _, body = env.request(bob, http.MethodGet, fleet2, nil, "")
+	if status != http.StatusOK || !containsJSONText(body, `"install_kind":"container"`) || containsJSONText(body, `"accelerators"`) {
+		t.Fatalf("member library view status=%d body=%s", status, body)
 	}
 	status, _, body = env.request(alice, http.MethodGet, "/v0/tenants/"+acmeTenant+"/local-computers", nil, "")
 	if status != http.StatusOK || !containsJSONText(body, `"local_models_readiness":{"enable_command":false,"setup_path":"nvidia","state":"loaded"}`) {
@@ -238,7 +306,7 @@ WHERE computer_id='computer_fleet_01';`); err != nil {
 	if status, body := refresh(bob, "computer_fleet_01"); status != http.StatusForbidden || !containsJSONText(body, "LOCAL_MODEL_ACTION_FORBIDDEN") {
 		t.Fatalf("member refresh status=%d body=%s", status, body)
 	}
-	if status, body := refresh(alice, "computer_fleet_06"); status != http.StatusServiceUnavailable || !containsJSONText(body, "LOCAL_COMPUTER_OFFLINE") {
+	if status, body := refresh(alice, "computer_fleet_08"); status != http.StatusServiceUnavailable || !containsJSONText(body, "LOCAL_COMPUTER_OFFLINE") {
 		t.Fatalf("offline refresh status=%d body=%s", status, body)
 	}
 	if len(computers.commands) != 1 {

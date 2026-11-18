@@ -257,6 +257,9 @@ func (s *Service) RemoveLocalComputer(ctx context.Context, input LocalComputerCr
 		if err := queries.DeleteLocalComputerModelSnapshot(ctx, input.ComputerID); err != nil {
 			return "", nil, err
 		}
+		if err := queries.DeleteLocalComputerProfile(ctx, input.ComputerID); err != nil {
+			return "", nil, err
+		}
 		if _, err := queries.RemoveAgentRuntimeLocalComputer(ctx, input.ComputerID); err != nil {
 			return "", nil, err
 		}

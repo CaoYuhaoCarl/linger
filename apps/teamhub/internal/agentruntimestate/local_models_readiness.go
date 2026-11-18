@@ -99,6 +99,25 @@ type LocalModelsReadinessFacts struct {
 	Summary *LocalModelsSummary
 	// Accelerators is nil until the Computer reports a profile.
 	Accelerators *httpapi.LocalComputerAccelerators
+	// InstallKind is empty until the Computer reports a profile.
+	InstallKind httpapi.LocalComputerInstallKind
+	// RemoteModels: the profile says another machine serves the models.
+	RemoteModels bool
+	// UpdateFailed: the profile says the last self-update attempt failed.
+	UpdateFailed bool
+}
+
+// WithProfile adds what the Computer's last profile says; a nil profile
+// leaves those facts unknown.
+func (f LocalModelsReadinessFacts) WithProfile(profile *LocalComputerProfile) LocalModelsReadinessFacts {
+	if profile == nil {
+		return f
+	}
+	accelerators := profile.Accelerators
+	f.Accelerators, f.InstallKind = &accelerators, profile.InstallKind
+	f.RemoteModels = profile.LocalModels.Mode == "remote"
+	f.UpdateFailed = profile.Update.State == "failed"
+	return f
 }
 
 // LocalModelsReadiness applies the readiness rules in order; the first match
@@ -113,21 +132,36 @@ func LocalModelsReadiness(facts LocalModelsReadinessFacts, now time.Time) httpap
 		return result
 	}
 	versionKnown := facts.DaemonVersion != ""
+	// The desktop app ships a desktop Computer's Daemon, which never updates
+	// itself: one behind the release needs a desktop app update, never a
+	// reinstall.
+	desktop := facts.InstallKind == httpapi.LocalComputerInstallKindDesktop
+	updateStuck := facts.UpdatePendingSince != nil && now.Sub(*facts.UpdatePendingSince) > updateStuckAfter
 	switch {
 	case facts.Status == "upgrade_required" ||
 		versionKnown && !computerVersionAtLeast(facts.DaemonVersion, firstProtocol2ComputerVersion):
 		return readiness(httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessDaemonUnsupported)
 	case versionKnown && !computerVersionAtLeast(facts.DaemonVersion, firstLingerComputerVersion):
 		return readiness(httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessDaemonLegacy)
-	case facts.UpdatePendingSince != nil && now.Sub(*facts.UpdatePendingSince) > updateStuckAfter:
+	case desktop && updateStuck:
+		return readiness(httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessDesktopAppOutdated)
+	case !desktop && (facts.UpdateFailed || updateStuck):
 		return readiness(httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessUpdateFailed)
 	}
 	summary := facts.Summary
+	switch {
+	case summary == nil && desktop && facts.UpdatePendingSince != nil:
+		return readiness(httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessDesktopAppOutdated)
+	case summary == nil && (facts.UpdatePendingSince != nil ||
+		versionKnown && !computerVersionAtLeast(facts.DaemonVersion, firstServiceFeaturesComputerVersion)):
+		return readiness(httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessUpdatePending)
+	// A Computer whose models another machine serves runs no tool here; its
+	// snapshot says only that, so the profile decides.
+	case facts.RemoteModels:
+		return readiness(httpapi.LocalModelsReadinessManagedElsewhere, "")
+	}
 	if summary == nil {
 		switch {
-		case facts.UpdatePendingSince != nil,
-			versionKnown && !computerVersionAtLeast(facts.DaemonVersion, firstServiceFeaturesComputerVersion):
-			return readiness(httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessUpdatePending)
 		case facts.Online && facts.ConnectedAt != nil && now.Sub(*facts.ConnectedAt) < checkingWindow:
 			return readiness(httpapi.LocalModelsReadinessChecking, "")
 		default:

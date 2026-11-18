@@ -752,6 +752,141 @@ func (e FinishAgentLocalRunRequestTerminalType) Valid() bool {
 	}
 }
 
+// Defines values for LocalComputerAcceleratorGpuVendor.
+const (
+	LocalComputerGpuVendorAmd    LocalComputerAcceleratorGpuVendor = "amd"
+	LocalComputerGpuVendorApple  LocalComputerAcceleratorGpuVendor = "apple"
+	LocalComputerGpuVendorIntel  LocalComputerAcceleratorGpuVendor = "intel"
+	LocalComputerGpuVendorNvidia LocalComputerAcceleratorGpuVendor = "nvidia"
+	LocalComputerGpuVendorOther  LocalComputerAcceleratorGpuVendor = "other"
+)
+
+// Valid indicates whether the value is a known member of the LocalComputerAcceleratorGpuVendor enum.
+func (e LocalComputerAcceleratorGpuVendor) Valid() bool {
+	switch e {
+	case LocalComputerGpuVendorAmd:
+		return true
+	case LocalComputerGpuVendorApple:
+		return true
+	case LocalComputerGpuVendorIntel:
+		return true
+	case LocalComputerGpuVendorNvidia:
+		return true
+	case LocalComputerGpuVendorOther:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalComputerAcceleratorsProbe.
+const (
+	LocalComputerAcceleratorProbeFailed LocalComputerAcceleratorsProbe = "failed"
+	LocalComputerAcceleratorProbeOk     LocalComputerAcceleratorsProbe = "ok"
+)
+
+// Valid indicates whether the value is a known member of the LocalComputerAcceleratorsProbe enum.
+func (e LocalComputerAcceleratorsProbe) Valid() bool {
+	switch e {
+	case LocalComputerAcceleratorProbeFailed:
+		return true
+	case LocalComputerAcceleratorProbeOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalComputerInstallKind.
+const (
+	LocalComputerInstallKindCli       LocalComputerInstallKind = "cli"
+	LocalComputerInstallKindContainer LocalComputerInstallKind = "container"
+	LocalComputerInstallKindDesktop   LocalComputerInstallKind = "desktop"
+)
+
+// Valid indicates whether the value is a known member of the LocalComputerInstallKind enum.
+func (e LocalComputerInstallKind) Valid() bool {
+	switch e {
+	case LocalComputerInstallKindCli:
+		return true
+	case LocalComputerInstallKindContainer:
+		return true
+	case LocalComputerInstallKindDesktop:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalComputerProfileLocalModelsMode.
+const (
+	LocalComputerLocalModelsModeLocal  LocalComputerProfileLocalModelsMode = "local"
+	LocalComputerLocalModelsModeNone   LocalComputerProfileLocalModelsMode = "none"
+	LocalComputerLocalModelsModeRemote LocalComputerProfileLocalModelsMode = "remote"
+)
+
+// Valid indicates whether the value is a known member of the LocalComputerProfileLocalModelsMode enum.
+func (e LocalComputerProfileLocalModelsMode) Valid() bool {
+	switch e {
+	case LocalComputerLocalModelsModeLocal:
+		return true
+	case LocalComputerLocalModelsModeNone:
+		return true
+	case LocalComputerLocalModelsModeRemote:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalComputerProfileUpdateErrorCode.
+const (
+	LocalComputerUpdateActivateFailed LocalComputerProfileUpdateErrorCode = "ACTIVATE_FAILED"
+	LocalComputerUpdateArchiveInvalid LocalComputerProfileUpdateErrorCode = "ARCHIVE_INVALID"
+	LocalComputerUpdateDownloadFailed LocalComputerProfileUpdateErrorCode = "DOWNLOAD_FAILED"
+	LocalComputerUpdateStageFailed    LocalComputerProfileUpdateErrorCode = "STAGE_FAILED"
+	LocalComputerUpdateVerifyFailed   LocalComputerProfileUpdateErrorCode = "VERIFY_FAILED"
+)
+
+// Valid indicates whether the value is a known member of the LocalComputerProfileUpdateErrorCode enum.
+func (e LocalComputerProfileUpdateErrorCode) Valid() bool {
+	switch e {
+	case LocalComputerUpdateActivateFailed:
+		return true
+	case LocalComputerUpdateArchiveInvalid:
+		return true
+	case LocalComputerUpdateDownloadFailed:
+		return true
+	case LocalComputerUpdateStageFailed:
+		return true
+	case LocalComputerUpdateVerifyFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalComputerProfileUpdateState.
+const (
+	LocalComputerUpdateFailed  LocalComputerProfileUpdateState = "failed"
+	LocalComputerUpdateIdle    LocalComputerProfileUpdateState = "idle"
+	LocalComputerUpdateStaging LocalComputerProfileUpdateState = "staging"
+)
+
+// Valid indicates whether the value is a known member of the LocalComputerProfileUpdateState enum.
+func (e LocalComputerProfileUpdateState) Valid() bool {
+	switch e {
+	case LocalComputerUpdateFailed:
+		return true
+	case LocalComputerUpdateIdle:
+		return true
+	case LocalComputerUpdateStaging:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelArchitecture.
 const (
 	LocalModelArchitectureDense LocalModelArchitecture = "dense"
@@ -3111,6 +3246,85 @@ type ListRecentlyUsedAgentRuntimeContextsResult struct {
 	Contexts []RecentlyUsedAgentRuntimeContext `json:"contexts"`
 }
 
+// LocalComputerAcceleratorGpu defines model for LocalComputerAcceleratorGpu.
+type LocalComputerAcceleratorGpu struct {
+	// MemoryBytes Dedicated GPU memory; absent when the probe can't read it.
+	MemoryBytes *int64 `json:"memory_bytes,omitempty"`
+
+	// Name Display only; never matched on.
+	Name   string                            `json:"name"`
+	Vendor LocalComputerAcceleratorGpuVendor `json:"vendor"`
+}
+
+// LocalComputerAcceleratorGpuVendor defines model for LocalComputerAcceleratorGpu.Vendor.
+type LocalComputerAcceleratorGpuVendor string
+
+// LocalComputerAccelerators Hardware the Computer probed without the localmodels tool. probe failed means the lists say nothing about the hardware.
+type LocalComputerAccelerators struct {
+	AppleSilicon  bool                           `json:"apple_silicon"`
+	Gpus          []LocalComputerAcceleratorGpu  `json:"gpus"`
+	Probe         LocalComputerAcceleratorsProbe `json:"probe"`
+	RamTotalBytes int64                          `json:"ram_total_bytes"`
+
+	// UnifiedMemoryBytes Present only on Apple silicon; the memory the CPU and GPU share.
+	UnifiedMemoryBytes *int64 `json:"unified_memory_bytes,omitempty"`
+}
+
+// LocalComputerAcceleratorsProbe defines model for LocalComputerAccelerators.Probe.
+type LocalComputerAcceleratorsProbe string
+
+// LocalComputerInstallKind How the Computer was installed: desktop (the desktop app runs it), cli (the installer on a host), or container (a container runtime).
+type LocalComputerInstallKind string
+
+// LocalComputerProfile Facts the Computer reports about itself without the localmodels tool, from runner.computer_profile.
+type LocalComputerProfile struct {
+	// Accelerators Hardware the Computer probed without the localmodels tool. probe failed means the lists say nothing about the hardware.
+	Accelerators LocalComputerAccelerators `json:"accelerators"`
+
+	// InstallKind How the Computer was installed: desktop (the desktop app runs it), cli (the installer on a host), or container (a container runtime).
+	InstallKind LocalComputerInstallKind        `json:"install_kind"`
+	LocalModels LocalComputerProfileLocalModels `json:"local_models"`
+
+	// Update The Computer's last self-update attempt. A desktop Computer reports idle.
+	Update LocalComputerProfileUpdate `json:"update"`
+}
+
+// LocalComputerProfileLocalModels defines model for LocalComputerProfileLocalModels.
+type LocalComputerProfileLocalModels struct {
+	KitVersion *string `json:"kit_version,omitempty"`
+
+	// Managed The kit was installed by local-models enable, which keeps it upgraded.
+	Managed *bool `json:"managed,omitempty"`
+
+	// ManagedBy The machine that serves this Computer's models when its local_models mode is remote. computer_id names a Linger Computer when the config does.
+	ManagedBy *LocalModelsManagedBy `json:"managed_by,omitempty"`
+
+	// Mode none: the config names no localmodels tool. local: the tool runs on this Computer. remote: another machine serves the models.
+	Mode LocalComputerProfileLocalModelsMode `json:"mode"`
+}
+
+// LocalComputerProfileLocalModelsMode none: the config names no localmodels tool. local: the tool runs on this Computer. remote: another machine serves the models.
+type LocalComputerProfileLocalModelsMode string
+
+// LocalComputerProfileUpdate The Computer's last self-update attempt. A desktop Computer reports idle.
+type LocalComputerProfileUpdate struct {
+	// AttemptedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	AttemptedAt *Timestamp `json:"attempted_at,omitempty"`
+
+	// Detail Diagnostic text for display; never matched on.
+	Detail *string `json:"detail,omitempty"`
+
+	// ErrorCode Present only when failed.
+	ErrorCode *LocalComputerProfileUpdateErrorCode `json:"error_code,omitempty"`
+	State     LocalComputerProfileUpdateState      `json:"state"`
+}
+
+// LocalComputerProfileUpdateErrorCode Present only when failed.
+type LocalComputerProfileUpdateErrorCode string
+
+// LocalComputerProfileUpdateState defines model for LocalComputerProfileUpdate.State.
+type LocalComputerProfileUpdateState string
+
 // LocalModel One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them.
 type LocalModel struct {
 	// ActiveParameters Parameters active per token on an moe model, such as 3B.
@@ -3305,6 +3519,15 @@ type LocalModelPoolId = string
 
 // LocalModelState absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
 type LocalModelState string
+
+// LocalModelsManagedBy The machine that serves this Computer's models when its local_models mode is remote. computer_id names a Linger Computer when the config does.
+type LocalModelsManagedBy struct {
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId *Id `json:"computer_id,omitempty"`
+
+	// Label Display only, from the Computer's config.
+	Label string `json:"label"`
+}
 
 // LocalModelsSnapshot A Computer's model library as its Daemon reported it in runner.local_models, mapped from localmodels.library-status/v1. When available is false only reason and observed_at carry meaning and the lists are empty.
 type LocalModelsSnapshot struct {
@@ -3627,6 +3850,18 @@ type RecordAgentLocalRunOperationRequest struct {
 
 	// Usage The usage the Operation's terminal reported; absent when the Operation starts.
 	Usage *[]map[string]interface{} `json:"usage,omitempty"`
+}
+
+// RecordLocalComputerProfileRequest The latest runner.computer_profile of one Computer. TeamHub keeps only the latest per Computer.
+type RecordLocalComputerProfileRequest struct {
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId Id `json:"computer_id"`
+
+	// ObservedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	ObservedAt Timestamp `json:"observed_at"`
+
+	// Profile Facts the Computer reports about itself without the localmodels tool, from runner.computer_profile.
+	Profile LocalComputerProfile `json:"profile"`
 }
 
 // RecordLocalModelsRequest The latest runner.local_models snapshot of one Computer. TeamHub keeps only the latest per Computer, so an offline Computer still shows what it last reported.
@@ -4701,6 +4936,9 @@ type ConnectAgentRuntimeLocalComputerJSONRequestBody = ConnectAgentRuntimeLocalC
 
 // RecordAgentRuntimeLocalModelsJSONRequestBody defines body for RecordAgentRuntimeLocalModels for application/json ContentType.
 type RecordAgentRuntimeLocalModelsJSONRequestBody = RecordLocalModelsRequest
+
+// RecordAgentRuntimeLocalComputerProfileJSONRequestBody defines body for RecordAgentRuntimeLocalComputerProfile for application/json ContentType.
+type RecordAgentRuntimeLocalComputerProfileJSONRequestBody = RecordLocalComputerProfileRequest
 
 // RemoveAgentRuntimeLocalComputerJSONRequestBody defines body for RemoveAgentRuntimeLocalComputer for application/json ContentType.
 type RemoveAgentRuntimeLocalComputerJSONRequestBody = AgentRuntimeLocalComputerCredentialRequest

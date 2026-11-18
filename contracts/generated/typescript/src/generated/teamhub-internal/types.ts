@@ -742,6 +742,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/agent-runtime/local-computers/profile": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Store the latest profile a Computer reported.
+     * @description Agent Service forwards every runner.computer_profile. TeamHub replaces the Computer's stored profile, keeps it while the Computer is offline, and publishes a computers invalidation hint with the owner's Tenant ID.
+     */
+    post: operations["recordAgentRuntimeLocalComputerProfile"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/agents/{agentId}/identity": {
     parameters: {
       query?: never;
@@ -2722,6 +2742,84 @@ export interface components {
       snapshot: components["schemas"]["LocalModelsSnapshot"];
     };
     /**
+     * @description How the Computer was installed: desktop (the desktop app runs it), cli (the installer on a host), or container (a container runtime).
+     * @enum {string}
+     */
+    LocalComputerInstallKind: "desktop" | "cli" | "container";
+    LocalComputerAcceleratorGpu: {
+      /** @enum {string} */
+      vendor: "nvidia" | "amd" | "intel" | "apple" | "other";
+      /** @description Display only; never matched on. */
+      name: string;
+      /**
+       * Format: int64
+       * @description Dedicated GPU memory; absent when the probe can't read it.
+       */
+      memory_bytes?: number;
+    };
+    /** @description Hardware the Computer probed without the localmodels tool. probe failed means the lists say nothing about the hardware. */
+    LocalComputerAccelerators: {
+      /** @enum {string} */
+      probe: "ok" | "failed";
+      /** Format: int64 */
+      ram_total_bytes: number;
+      apple_silicon: boolean;
+      /**
+       * Format: int64
+       * @description Present only on Apple silicon; the memory the CPU and GPU share.
+       */
+      unified_memory_bytes?: number;
+      gpus: components["schemas"]["LocalComputerAcceleratorGpu"][];
+    };
+    /** @description The machine that serves this Computer's models when its local_models mode is remote. computer_id names a Linger Computer when the config does. */
+    LocalModelsManagedBy: {
+      /** @description Display only, from the Computer's config. */
+      label: string;
+      computer_id?: components["schemas"]["Id"];
+    };
+    LocalComputerProfileLocalModels: {
+      /**
+       * @description none: the config names no localmodels tool. local: the tool runs on this Computer. remote: another machine serves the models.
+       * @enum {string}
+       */
+      mode: "none" | "local" | "remote";
+      /** @description The kit was installed by local-models enable, which keeps it upgraded. */
+      managed?: boolean;
+      kit_version?: string;
+      managed_by?: components["schemas"]["LocalModelsManagedBy"];
+    };
+    /** @description The Computer's last self-update attempt. A desktop Computer reports idle. */
+    LocalComputerProfileUpdate: {
+      /** @enum {string} */
+      state: "idle" | "staging" | "failed";
+      attempted_at?: components["schemas"]["Timestamp"];
+      /**
+       * @description Present only when failed.
+       * @enum {string}
+       */
+      error_code?:
+        | "ARCHIVE_INVALID"
+        | "DOWNLOAD_FAILED"
+        | "VERIFY_FAILED"
+        | "STAGE_FAILED"
+        | "ACTIVATE_FAILED";
+      /** @description Diagnostic text for display; never matched on. */
+      detail?: string;
+    };
+    /** @description Facts the Computer reports about itself without the localmodels tool, from runner.computer_profile. */
+    LocalComputerProfile: {
+      install_kind: components["schemas"]["LocalComputerInstallKind"];
+      accelerators: components["schemas"]["LocalComputerAccelerators"];
+      local_models: components["schemas"]["LocalComputerProfileLocalModels"];
+      update: components["schemas"]["LocalComputerProfileUpdate"];
+    };
+    /** @description The latest runner.computer_profile of one Computer. TeamHub keeps only the latest per Computer. */
+    RecordLocalComputerProfileRequest: {
+      computer_id: components["schemas"]["Id"];
+      observed_at: components["schemas"]["Timestamp"];
+      profile: components["schemas"]["LocalComputerProfile"];
+    };
+    /**
      * @description Persisted Agent runtime type.
      * @enum {string}
      */
@@ -4674,6 +4772,32 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["RecordLocalModelsRequest"];
+      };
+    };
+    responses: {
+      /** @description Stored. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalError"];
+    };
+  };
+  recordAgentRuntimeLocalComputerProfile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RecordLocalComputerProfileRequest"];
       };
     };
     responses: {

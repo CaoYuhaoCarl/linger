@@ -110,7 +110,7 @@ func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string
 	readiness := agentruntimestate.LocalModelsReadiness(agentruntimestate.LocalModelsReadinessFacts{
 		Status: record.Status, Online: online, DaemonVersion: record.DaemonVersion, Platform: record.Platform,
 		ConnectedAt: record.ConnectedAt, UpdatePendingSince: record.UpdatePendingSince, Summary: record.Summary,
-	}, now)
+	}.WithProfile(record.Profile), now)
 	view := httpapi.LocalModelsView{
 		Computer: httpapi.LocalModelsComputer{
 			ComputerId: record.ComputerID, DisplayName: record.DisplayName,
@@ -129,6 +129,12 @@ func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string
 	}
 	if record.DaemonVersion != "" {
 		view.Computer.DaemonVersion = &record.DaemonVersion
+	}
+	if profile := record.Profile; profile != nil {
+		view.Computer.InstallKind, view.Computer.ManagedBy = installKind(profile), profile.LocalModels.ManagedBy
+		if view.ViewerIsOwner {
+			view.Computer.Accelerators = &profile.Accelerators
+		}
 	}
 	if len(record.Host) > 0 {
 		var host httpapi.LocalModelHost
@@ -214,7 +220,7 @@ func localModelsComputerSummary(computer agentruntimestate.LocalModelsComputer, 
 		Readiness: agentruntimestate.LocalModelsReadiness(agentruntimestate.LocalModelsReadinessFacts{
 			Status: computer.Status, Online: online, DaemonVersion: computer.DaemonVersion, Platform: computer.Platform,
 			ConnectedAt: computer.ConnectedAt, UpdatePendingSince: computer.UpdatePendingSince, Summary: computer.Summary,
-		}, now),
+		}.WithProfile(computer.Profile), now),
 		ObservedAt: computer.ObservedAt,
 	}
 	if online {
@@ -225,6 +231,11 @@ func localModelsComputerSummary(computer agentruntimestate.LocalModelsComputer, 
 	}
 	if computer.DaemonVersion != "" {
 		item.DaemonVersion = &computer.DaemonVersion
+	}
+	// Another member's row carries only its name, owner, status and
+	// readiness.
+	if profile := computer.Profile; profile != nil && item.ViewerIsOwner {
+		item.InstallKind, item.Accelerators, item.ManagedBy = installKind(profile), &profile.Accelerators, profile.LocalModels.ManagedBy
 	}
 	if summary := computer.Summary; summary != nil && summary.Available {
 		item.Counts = &httpapi.LocalModelsComputerCounts{
@@ -237,6 +248,14 @@ func localModelsComputerSummary(computer agentruntimestate.LocalModelsComputer, 
 		}
 	}
 	return item
+}
+
+func installKind(profile *agentruntimestate.LocalComputerProfile) *httpapi.LocalComputerInstallKind {
+	if !profile.InstallKind.Valid() {
+		return nil
+	}
+	kind := profile.InstallKind
+	return &kind
 }
 
 // refreshLocalComputerModels asks the owner's connected Computer to reread
@@ -385,6 +404,48 @@ func (a *App) recordAgentRuntimeLocalModels(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// recordAgentRuntimeLocalComputerProfile stores a Computer's latest profile
+// as the Agent Service forwarded it.
+func (a *App) recordAgentRuntimeLocalComputerProfile(c *gin.Context) {
+	var request teamhubinternal.RecordLocalComputerProfileRequest
+	if !a.decodeAgentRuntimeStateBody(c, &request) {
+		return
+	}
+	if !validLocalComputerProfile(request.Profile) {
+		a.writeAgentRuntimeStateError(c, "decode Local Computer profile", agentruntimestate.ErrInvalid)
+		return
+	}
+	profile, err := json.Marshal(request.Profile)
+	if err != nil {
+		a.writeAgentRuntimeStateError(c, "encode Local Computer profile", err)
+		return
+	}
+	err = a.agentRuntimeState.RecordLocalComputerProfile(c.Request.Context(), agentruntimestate.RecordLocalComputerProfileInput{
+		ComputerID: request.ComputerId, Profile: profile, ObservedAt: request.ObservedAt,
+	})
+	if a.writeAgentRuntimeStateError(c, "record Local Computer profile", err) {
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// validLocalComputerProfile checks every enum readiness and the Web branch
+// on; the generated types do not.
+func validLocalComputerProfile(profile teamhubinternal.LocalComputerProfile) bool {
+	accelerators, update := profile.Accelerators, profile.Update
+	if !profile.InstallKind.Valid() || !accelerators.Probe.Valid() || len(accelerators.Gpus) > 64 ||
+		!profile.LocalModels.Mode.Valid() || !update.State.Valid() ||
+		(update.ErrorCode != nil && !update.ErrorCode.Valid()) {
+		return false
+	}
+	for _, gpu := range accelerators.Gpus {
+		if !gpu.Vendor.Valid() {
+			return false
+		}
+	}
+	return true
 }
 
 // validLocalModelsSnapshot checks what the public view relies on: the

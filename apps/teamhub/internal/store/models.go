@@ -882,6 +882,13 @@ type LocalComputerModelSnapshot struct {
 	Summary    []byte             `json:"summary"`
 }
 
+type LocalComputerProfile struct {
+	ComputerID string             `json:"computer_id"`
+	Profile    []byte             `json:"profile"`
+	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MailCanvasDelivery struct {
 	DocumentID   string             `json:"document_id"`
 	ID           string             `json:"id"`

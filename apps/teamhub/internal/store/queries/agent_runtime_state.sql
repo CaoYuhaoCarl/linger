@@ -1417,21 +1417,45 @@ SET snapshot=EXCLUDED.snapshot,
 DELETE FROM local_computer_model_snapshots
 WHERE computer_id=sqlc.arg(computer_id)::text;
 
+-- name: UpsertLocalComputerProfile :exec
+INSERT INTO local_computer_profiles(computer_id,profile,observed_at,updated_at)
+VALUES(sqlc.arg(computer_id)::text,sqlc.arg(profile)::jsonb,sqlc.arg(observed_at)::timestamptz,clock_timestamp())
+ON CONFLICT (computer_id) DO UPDATE
+SET profile=EXCLUDED.profile,observed_at=EXCLUDED.observed_at,updated_at=EXCLUDED.updated_at;
+
+-- name: DeleteLocalComputerProfile :exec
+DELETE FROM local_computer_profiles
+WHERE computer_id=sqlc.arg(computer_id)::text;
+
+-- name: GetLocalComputerProfile :one
+SELECT profile
+FROM local_computer_profiles
+WHERE computer_id=sqlc.arg(computer_id)::text;
+
+-- name: ListOwnedLocalComputerProfiles :many
+SELECT profile.computer_id,profile.profile
+FROM local_computer_profiles profile
+JOIN local_computers computer ON computer.computer_id=profile.computer_id
+WHERE computer.owner_tenant_id=sqlc.arg(tenant_id)::text
+  AND computer.owner_actor_id=sqlc.arg(owner_actor_id)::text
+  AND computer.status<>'removed';
+
 -- name: GetLocalComputerModelSnapshot :one
 SELECT snapshot,host,summary
 FROM local_computer_model_snapshots
 WHERE computer_id=sqlc.arg(computer_id)::text;
 
 -- name: ListLocalModelsComputers :many
--- One row per Computer of the owner in the Tenant with its stored summary;
--- it never reads a snapshot.
+-- One row per Computer of the owner in the Tenant with its stored summary
+-- and profile; it never reads a snapshot.
 SELECT computer.computer_id,computer.display_name,computer.status,computer.last_seen_at,
        computer.connected_at,computer.update_pending_since,computer.platform,computer.daemon_version,
        computer.owner_actor_id,owner.display_name AS owner_display_name,
-       snapshot.summary,snapshot.observed_at
+       snapshot.summary,snapshot.observed_at,profile.profile
 FROM local_computers computer
 JOIN actors owner ON owner.id=computer.owner_actor_id AND owner.tenant_id=computer.owner_tenant_id
 LEFT JOIN local_computer_model_snapshots snapshot ON snapshot.computer_id=computer.computer_id
+LEFT JOIN local_computer_profiles profile ON profile.computer_id=computer.computer_id
 WHERE computer.owner_tenant_id=sqlc.arg(tenant_id)::text
   AND computer.owner_actor_id=sqlc.arg(owner_actor_id)::text
   AND computer.status<>'removed'
