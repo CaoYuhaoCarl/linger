@@ -93,6 +93,25 @@ function rebind(instance: Instance, repo: string): void {
       path.relative(previous, instance.computerExecutable),
     );
 }
+// Saves a moved port in instance.json without the checkout this start may
+// have bound in memory; saveSourceBinding records that once the services
+// restart from it.
+async function saveMovedPort(
+  instance: Instance,
+  name: keyof NonNullable<Instance["source"]>["ports"],
+): Promise<void> {
+  const stored = (await loadInstance({
+    name: instance.name,
+    home: path.resolve(instance.root, "../.."),
+  }))!;
+  stored.source!.ports[name] = instance.source!.ports[name];
+  stored.port = instance.port;
+  stored.origin = instance.origin;
+  await atomicPrivate(
+    path.join(stored.root, "instance.json"),
+    JSON.stringify(stored, null, 2) + "\n",
+  );
+}
 /**
  * Records that the instance's services run from the checkout it was
  * prepared with. Call it under the instance lock. Until then instance.json
@@ -239,10 +258,7 @@ export async function prepareSourceConfiguration(
         instance.port = next;
         instance.origin = `http://localhost:${next}`;
       }
-      await atomicPrivate(
-        path.join(instance.root, "instance.json"),
-        JSON.stringify(instance, null, 2) + "\n",
-      );
+      await saveMovedPort(instance, name);
       warnings.push(
         `Port ${port} is in use by another program; Linger's ${owner} uses port ${next} instead.\n`,
       );

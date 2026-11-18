@@ -210,6 +210,34 @@ test("an owned native instance follows a new checkout and keeps its data", async
   expect(saved?.releaseDir).toBe(next);
   expect(saved?.source).toEqual(moved.instance.source);
 });
+test("a port moved while following a new checkout keeps the running checkout recorded", async () => {
+  const f = await fixture();
+  const options = { home: f.home, name: "desktop" };
+  const first = await prepareNativeConfiguration(f.repo, options);
+  const next = path.join(f.home, "next");
+  await mkdir(path.join(next, "scripts"), { recursive: true });
+  for (const file of ["package.json", "scripts/source-native.mjs"])
+    await writeFile(
+      path.join(next, file),
+      await readFile(path.join(f.repo, file)),
+    );
+  const before = first.instance.source!.ports;
+  await occupy(before.teamhub);
+  const moved = await prepareNativeConfiguration(next, {
+    ...options,
+    rebindSource: true,
+  });
+  const teamhub = moved.instance.source!.ports.teamhub;
+  expect(teamhub).not.toBe(before.teamhub);
+  // The new port is saved, but instance.json still names the checkout the
+  // running services came from until they restart.
+  const stored = await loadInstance(options);
+  expect(stored?.source?.ports.teamhub).toBe(teamhub);
+  expect(stored?.releaseDir).toBe(f.repo);
+  expect(stored?.source?.repo).toBe(f.repo);
+  await saveSourceBinding(moved.instance);
+  expect(await loadInstance(options)).toEqual(moved.instance);
+});
 test("a resumed instance moves off ports another program took", async () => {
   const f = await fixture();
   const options = { home: f.home, name: "native-test" };
