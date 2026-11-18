@@ -25,9 +25,15 @@ build:assets` to check the initial JS budget.
   orders and labels them, picks the Make room default, renders family icons,
   capability/parameter badges, download speed/ETA and model-card facts from
   structured `LocalModel` fields in `local-models-rules.ts`, and maps every
-  code and enum label to English in `local-models-copy.ts`. Without `?computer=`
-  the desktop app opens
-  its own Computer. Only the Computer's owner can act; actions return at once
+  code and enum label to English in `local-models-copy.ts`. The Computer picker
+  lists only the viewer's own Computers from the summary list
+  (`local-models/computers?scope=mine`), with TeamHub's readiness as each
+  chip (`computer-picker-rules.ts`); a `?computer=` link to another member's
+  Computer opens it read-only, naming its owner. Without `?computer=` the page
+  opens this desktop's Computer, then the last one picked on this device
+  (localStorage), then the best online one, and writes it to the address.
+  A `local-models` hint also refreshes the summary list, at most once per 5 s.
+  Only the Computer's owner can act; actions return at once
   and progress arrives as `local-models` invalidation hints. From the click
   until a snapshot with another status or observation time, or a refusal, the
   row shows a requested load or download as started and spins the button of
