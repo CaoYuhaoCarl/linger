@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { atomicPrivate, privateDirectory, readPrivate } from "./instance.js";
 import { runProcess } from "./process.js";
 import {
+  currentNativeBirth,
   linuxProcessStates,
   nativeProcessIdentity as observed,
   nativeLeaseProcesses,
@@ -64,6 +65,18 @@ async function stored(
     !/^[a-f0-9]{64}$/.test(record.configuration)
   )
     throw new Error("Invalid native process identity record");
+  const birth = await currentNativeBirth(
+    record.pid,
+    record.lease,
+    record.birth,
+  );
+  if (birth) {
+    record.birth = birth;
+    await atomicPrivate(
+      paths(root, name).record,
+      JSON.stringify(record) + "\n",
+    );
+  }
   return record;
 }
 async function stillLive(pid: number): Promise<boolean> {

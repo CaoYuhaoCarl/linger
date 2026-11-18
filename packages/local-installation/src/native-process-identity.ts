@@ -5,11 +5,19 @@ const leaseKey = "LINGER_NATIVE_PROCESS_LEASE";
 function runProcess(
   executable: string,
   args: string[],
-  options: { timeoutMs: number },
+  options: { timeoutMs: number; locale?: "inherited" },
 ) {
   // Inspectors must not inherit the lease and appear among the owned processes.
   const env = { ...process.env };
   delete env[leaseKey];
+  // ps prints lstart with the caller's locale (strftime %c): launched from a
+  // Chinese Terminal it is four words, not five. Finder launches have no LANG
+  // and always recorded the C form, so births keep that form everywhere.
+  if (options.locale !== "inherited") {
+    for (const key of Object.keys(env))
+      if (key === "LANG" || key.startsWith("LC_")) delete env[key];
+    Object.assign(env, { LC_ALL: "C", LANG: "C" });
+  }
   return new Promise<{ code: number; stdout: string }>((resolve, reject) => {
     execFile(
       executable,
@@ -141,9 +149,11 @@ export async function nativeProcessIdentity(
     }
     if (process.platform === "darwin") {
       const [identity, environment] = await Promise.all([
+        // The fixed-width fields come first so the free-form start time,
+        // whatever its words, is the rest of the line.
         runProcess(
           "/bin/ps",
-          ["-p", String(pid), "-o", "lstart=,uid=,pgid=,stat="],
+          ["-p", String(pid), "-o", "uid=,pgid=,stat=,lstart="],
           { timeoutMs: 5_000 },
         ),
         // Read only this candidate. Never print the output: it contains
@@ -158,15 +168,56 @@ export async function nativeProcessIdentity(
         !environment.stdout.includes(`${leaseKey}=${lease}`)
       )
         return;
-      const parts = identity.stdout.trim().split(/\s+/);
+      const fields = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\S.*?)\s*$/.exec(
+        identity.stdout,
+      );
       if (
-        Number(parts[5]) !== process.getuid?.() ||
-        (requireLeader && Number(parts[6]) !== pid) ||
-        parts[7]?.startsWith("Z")
+        !fields ||
+        Number(fields[1]) !== process.getuid?.() ||
+        (requireLeader && Number(fields[2]) !== pid) ||
+        fields[3]!.startsWith("Z")
       )
         return;
-      return `darwin:${parts.slice(0, 7).join(":")}`;
+      // The same text earlier versions stored: start time words, uid, pgid.
+      return `darwin:${fields[4]!.split(/\s+/).join(":")}:${fields[1]}:${fields[2]}`;
     }
+  } catch {
+    return;
+  }
+}
+
+// What ps prints for lstart in the C locale.
+const C_BIRTH =
+  /^darwin:(Sun|Mon|Tue|Wed|Thu|Fri|Sat):(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec):\d{1,2}:\d\d:\d\d:\d\d:\d+:\d+:\d+$/;
+/**
+ * Earlier versions recorded a macOS birth in the launching terminal's locale.
+ * When the recorded leader still matches that form, returns its current
+ * birth so the running service stays manageable; otherwise undefined.
+ */
+export async function currentNativeBirth(
+  pid: number,
+  lease: string,
+  recorded: string,
+): Promise<string | undefined> {
+  if (
+    process.platform !== "darwin" ||
+    !recorded.startsWith("darwin:") ||
+    C_BIRTH.test(recorded)
+  )
+    return;
+  try {
+    const legacy = await runProcess(
+      "/bin/ps",
+      ["-p", String(pid), "-o", "lstart=,uid=,pgid=,stat="],
+      { timeoutMs: 5_000, locale: "inherited" },
+    );
+    const parts = legacy.stdout.trim().split(/\s+/);
+    if (
+      legacy.code !== 0 ||
+      `darwin:${parts.slice(0, 7).join(":")}` !== recorded
+    )
+      return;
+    return await nativeProcessIdentity(pid, lease);
   } catch {
     return;
   }
