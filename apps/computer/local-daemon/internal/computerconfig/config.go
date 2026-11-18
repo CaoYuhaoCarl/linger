@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -37,6 +38,18 @@ type Config struct {
 	// LocalModels locates the localmodels tool the installer prepared; nil
 	// when this Computer has none.
 	LocalModels *LocalModels
+	// RemoteLocalModels names the machine that serves this Computer's models
+	// when the config says so (mode remote); the Computer then runs no tool.
+	RemoteLocalModels *RemoteLocalModels
+}
+
+// RemoteLocalModels is a local_models section with mode remote. It is never
+// inferred from gateway URLs: only the config says it.
+type RemoteLocalModels struct {
+	// Label is display text naming the machine.
+	Label string
+	// ComputerID names that machine's Linger Computer, when the config does.
+	ComputerID string
 }
 
 // LocalModels is where the installer put the localmodels tool and its state.
@@ -48,6 +61,9 @@ type LocalModels struct {
 	ModuleDirectory string
 	StateDirectory  string
 	BaseDirectory   string
+	// Managed says local-models enable installed the kit and keeps it
+	// upgraded; a hand-written section is never touched.
+	Managed bool
 }
 
 // Desktop configures a Daemon owned by the Linger Desktop app. The app ships
@@ -90,12 +106,21 @@ type encodedConfig struct {
 	LocalModels             *encodedLocalModels `json:"local_models,omitempty"`
 }
 
+// encodedLocalModels is the local_models section. mode local (the default)
+// names the tool; mode remote names only the machine that serves the models.
 type encodedLocalModels struct {
-	Python          string `json:"python"`
-	ModuleDirectory string `json:"module_directory"`
-	StateDirectory  string `json:"state_directory"`
-	BaseDirectory   string `json:"base_directory"`
+	Mode            string `json:"mode,omitempty"`
+	Managed         bool   `json:"managed,omitempty"`
+	Python          string `json:"python,omitempty"`
+	ModuleDirectory string `json:"module_directory,omitempty"`
+	StateDirectory  string `json:"state_directory,omitempty"`
+	BaseDirectory   string `json:"base_directory,omitempty"`
+	Label           string `json:"label,omitempty"`
+	ComputerID      string `json:"computer_id,omitempty"`
 }
+
+// localModelsComputerID is the shape of a TeamHub Computer ID.
+var localModelsComputerID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
 type encodedDesktop struct {
 	TeamHubCLIDirectory string `json:"teamhub_cli_directory,omitempty"`
@@ -143,18 +168,9 @@ func Load(path string, environment map[string]string) (Config, error) {
 		}
 		desktop = &Desktop{TeamHubCLIDirectory: value.Desktop.TeamHubCLIDirectory}
 	}
-	var localModels *LocalModels
-	if value.LocalModels != nil {
-		encoded := value.LocalModels
-		for _, path := range []string{encoded.Python, encoded.ModuleDirectory, encoded.StateDirectory, encoded.BaseDirectory} {
-			if !filepath.IsAbs(path) {
-				return Config{}, errors.New("local_models paths must be absolute")
-			}
-		}
-		localModels = &LocalModels{
-			Python: encoded.Python, ModuleDirectory: encoded.ModuleDirectory,
-			StateDirectory: encoded.StateDirectory, BaseDirectory: encoded.BaseDirectory,
-		}
+	localModels, remoteLocalModels, err := decodeLocalModels(value.LocalModels)
+	if err != nil {
+		return Config{}, err
 	}
 	var token string
 	if value.Gateway.TokenFile != "" {
@@ -221,7 +237,42 @@ func Load(path string, environment map[string]string) (Config, error) {
 		MaxConcurrentOperations: value.MaxConcurrentOperations, RuntimePaths: value.RuntimePaths,
 		EnabledRuntimes: enabledRuntimes, PreferredRuntime: value.PreferredRuntime,
 		WorkspaceGrants: value.WorkspaceGrants, Owners: owners, Desktop: desktop, LocalModels: localModels,
+		RemoteLocalModels: remoteLocalModels,
 	}, nil
+}
+
+func decodeLocalModels(encoded *encodedLocalModels) (*LocalModels, *RemoteLocalModels, error) {
+	if encoded == nil {
+		return nil, nil, nil
+	}
+	paths := []string{encoded.Python, encoded.ModuleDirectory, encoded.StateDirectory, encoded.BaseDirectory}
+	switch encoded.Mode {
+	case "", "local":
+		if encoded.Label != "" || encoded.ComputerID != "" {
+			return nil, nil, errors.New("local_models label and computer_id need mode remote")
+		}
+		for _, path := range paths {
+			if !filepath.IsAbs(path) {
+				return nil, nil, errors.New("local_models paths must be absolute")
+			}
+		}
+		return &LocalModels{
+			Python: encoded.Python, ModuleDirectory: encoded.ModuleDirectory,
+			StateDirectory: encoded.StateDirectory, BaseDirectory: encoded.BaseDirectory, Managed: encoded.Managed,
+		}, nil, nil
+	case "remote":
+		for _, path := range paths {
+			if path != "" {
+				return nil, nil, errors.New("local_models mode remote runs no tool and takes no paths")
+			}
+		}
+		if encoded.Managed || encoded.Label == "" || len(encoded.Label) > 120 || strings.ContainsAny(encoded.Label, "\r\n") ||
+			(encoded.ComputerID != "" && !localModelsComputerID.MatchString(encoded.ComputerID)) {
+			return nil, nil, errors.New("local_models mode remote needs a label and an optional valid computer_id")
+		}
+		return nil, &RemoteLocalModels{Label: encoded.Label, ComputerID: encoded.ComputerID}, nil
+	}
+	return nil, nil, errors.New("local_models mode must be local or remote")
 }
 
 func codexAuthFile(value *encodedCodex) string {

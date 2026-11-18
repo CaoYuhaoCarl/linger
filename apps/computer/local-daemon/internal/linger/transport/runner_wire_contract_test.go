@@ -235,6 +235,12 @@ func runnerWireDaemonEvents(t *testing.T) []protocol.Event {
 	capability(protocol.EventCapabilityComputerPermissionFailed, "computer_permission", "failed", map[string]any{"action": "relaunch", "error": failure})
 	capability(protocol.EventCapabilityLocalModelsAccepted, "local_models", "accepted", map[string]any{"action": "download", "model_id": "qwen3-4b:Q4_K_M"})
 	capability(protocol.EventCapabilityLocalModelsRefused, "local_models", "refused", map[string]any{"action": "refresh", "refusal": map[string]any{"code": "TOOL_NOT_INSTALLED"}})
+	appendEvent(protocol.EventComputerProfile, map[string]any{"type": "runner.computer_profile", "protocol_version": "2", "runner_id": "computer-1", "sent_at": "2026-10-28T00:00:00Z", "revision": 1, "profile": map[string]any{
+		"install_kind": "container",
+		"accelerators": map[string]any{"probe": "ok", "ram_total_bytes": 68719476736, "apple_silicon": false, "gpus": []any{map[string]any{"vendor": "nvidia", "name": "NVIDIA L40S", "memory_bytes": 48305799168}}},
+		"local_models": map[string]any{"mode": "remote", "managed_by": map[string]any{"label": "GPU server lab-118", "computer_id": "computer-2"}},
+		"update":       map[string]any{"state": "failed", "attempted_at": "2026-10-28T00:00:00Z", "error_code": "VERIFY_FAILED", "detail": "sha256 does not match target_release"},
+	}})
 	appendEvent(protocol.EventLocalModels, map[string]any{"type": "runner.local_models", "protocol_version": "2", "runner_id": "computer-1", "sent_at": "2026-10-28T00:00:00Z", "revision": 1, "local_models": map[string]any{"available": false, "reason": map[string]any{"code": "TOOL_NOT_INSTALLED"}, "observed_at": "2026-10-28T00:00:00Z", "pools": []any{}, "models": []any{}}})
 	appendEvent(protocol.EventOperationPrepared, map[string]any{"prepare_command_id": "prepare-1", "prepared": true, "outcome": "ready", "duration_ms": 1})
 	appendEvent(protocol.EventOperationAccepted, map[string]any{"runner_pid": 123})

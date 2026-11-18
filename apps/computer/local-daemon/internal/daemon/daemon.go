@@ -67,6 +67,8 @@ type Options struct {
 	// LocalModels runs owner-chosen localmodels library actions; nil
 	// refuses each with TOOL_NOT_INSTALLED.
 	LocalModels LocalModelLibrary
+	// ComputerProfile supplies runner.computer_profile; nil sends none.
+	ComputerProfile ComputerProfiler
 }
 
 type OperationResolver interface {
@@ -138,32 +140,42 @@ type Daemon struct {
 	// localModelsMu orders runner.local_models sends with their revision.
 	localModelsMu       sync.Mutex
 	localModelsRevision uint64
-	operationWG         sync.WaitGroup
-	inputWG             sync.WaitGroup
-	preparationWG       sync.WaitGroup
-	cleanupWG           sync.WaitGroup
-	draining            bool
-	closing             bool
-	selfUpdate          SelfUpdater
-	retryDelay          func(int) time.Duration
-	stableConnection    time.Duration
-	now                 func() time.Time
-	displayName         string
-	capacity            *int
-	runtimes            []string
-	runtimeDiagnostics  json.RawMessage
-	workspaceGrants     json.RawMessage
-	stateDirectory      string
-	runtimeHomeRoot     string
-	runtimeObservations []transport.RegistrationObservation
-	inventoryMu         sync.RWMutex
-	diagnosticsRevision uint64
-	connectionMu        sync.Mutex
-	diagnosticsStream   transport.Stream
+	computerProfile     ComputerProfiler
+	// computerProfileMu orders runner.computer_profile sends with their
+	// revision and guards the last profile sent and its connection.
+	computerProfileMu       sync.Mutex
+	computerProfileRevision uint64
+	sentComputerProfile     []byte
+	sentComputerProfileOn   transport.Stream
+	operationWG             sync.WaitGroup
+	inputWG                 sync.WaitGroup
+	preparationWG           sync.WaitGroup
+	cleanupWG               sync.WaitGroup
+	draining                bool
+	closing                 bool
+	selfUpdate              SelfUpdater
+	retryDelay              func(int) time.Duration
+	stableConnection        time.Duration
+	now                     func() time.Time
+	displayName             string
+	capacity                *int
+	runtimes                []string
+	runtimeDiagnostics      json.RawMessage
+	workspaceGrants         json.RawMessage
+	stateDirectory          string
+	runtimeHomeRoot         string
+	runtimeObservations     []transport.RegistrationObservation
+	inventoryMu             sync.RWMutex
+	diagnosticsRevision     uint64
+	connectionMu            sync.Mutex
+	diagnosticsStream       transport.Stream
 	// localModelsStream is the live connection when its Agent Service
 	// accepts runner.local_models; nil otherwise.
 	localModelsStream transport.Stream
-	operationStream   transport.Stream
+	// computerProfileStream is the live connection when its Agent Service
+	// accepts runner.computer_profile; nil otherwise.
+	computerProfileStream transport.Stream
+	operationStream       transport.Stream
 	// dispatcher is the live connection's command dispatcher. It is atomic so
 	// DrainIfIdle can read it under admissionMu without taking connectionMu.
 	dispatcher           atomic.Pointer[commandDispatcher]
@@ -231,6 +243,7 @@ func New(options Options) (*Daemon, error) {
 		modelInvoker:         options.ModelInvoker,
 		modelInvokes:         make(map[string]*modelInvoke),
 		localModels:          options.LocalModels,
+		computerProfile:      options.ComputerProfile,
 		contextDispatchLimit: defaultContextDispatchLimit,
 		retryDelay:           defaultRetryDelay(options.RetryDelay),
 		stableConnection:     stableGatewayConnection,

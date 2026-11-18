@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerprofile"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/daemon"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/assignment"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
@@ -306,6 +307,19 @@ func run(args []string) (resultErr error) {
 		},
 	})
 	defer localModels.Close()
+	// updates is set below, before the Daemon runs; a desktop Computer has
+	// none because the desktop app ships its Daemon.
+	var updates *selfupdate.Manager
+	computerProfile := computerprofile.NewReporter(
+		computerprofile.HostInstallKind(computer.Desktop != nil, runtime.GOOS), computerprofile.LocalModels(computer),
+		func() selfupdate.Status {
+			if updates == nil {
+				return selfupdate.Status{State: selfupdate.StatusIdle}
+			}
+			return updates.Status()
+		},
+		computerprofile.Prober{GOOS: runtime.GOOS},
+	)
 	codexModelSessions := &provider.CodexSessions{Root: filepath.Join(computer.StateDirectory, "model-invoke", "codex-sessions")}
 	localDaemon, err = daemon.New(daemon.Options{
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName,
@@ -330,6 +344,7 @@ func run(args []string) (resultErr error) {
 		CLICredentials:      cliCredentials,
 		TeamHubCLIBin:       teamhubBin,
 		LocalModels:         localModels,
+		ComputerProfile:     computerProfile,
 		ModelInvoker: provider.ModelInvoker{
 			TempBase:         operationTempBase,
 			ClaudeConfigRoot: filepath.Join(computer.StateDirectory, "model-invoke", "claude", ".claude"),
@@ -356,7 +371,6 @@ func run(args []string) (resultErr error) {
 	}
 	// The Desktop app ships and updates its Daemon; an upgrade request only
 	// shows as the upgrade-required Gateway state.
-	var updates *selfupdate.Manager
 	if computer.Desktop == nil {
 		var stager selfupdate.Stager = selfupdate.ScriptStager{}
 		if runtime.GOOS == "windows" {
@@ -366,6 +380,7 @@ func run(args []string) (resultErr error) {
 			ReleaseVersion: transport.ReleaseVersion, GOOS: runtime.GOOS, Executable: executable, ComputerID: computer.ComputerID,
 			ConfigPath: absoluteConfig, Args: os.Args, Env: os.Environ(),
 			Admission: localDaemon, Stager: stager, Stop: cancel,
+			OnStatusChange: localDaemon.PublishComputerProfile,
 		})
 		localDaemon.SetSelfUpdater(updates)
 	}

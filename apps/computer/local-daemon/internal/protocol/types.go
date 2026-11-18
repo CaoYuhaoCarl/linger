@@ -143,6 +143,7 @@ const (
 	EventRuntimeObserved                       = wire.TypeRuntimeRegistrationObserved
 	EventRuntimeDiagnostics                    = wire.TypeRunnerRuntimeDiagnostics
 	EventLocalModels                           = wire.TypeRunnerLocalModels
+	EventComputerProfile                       = wire.TypeRunnerComputerProfile
 	EventAgentRunnerReady                      = wire.TypeAgentRunnerState + ":" + wire.StateReady
 	EventAgentRunnerRemoved                    = wire.TypeAgentRunnerState + ":" + wire.StateRemoved
 	EventAgentRunnerFailed                     = wire.TypeAgentRunnerState + ":" + wire.StateFailed
