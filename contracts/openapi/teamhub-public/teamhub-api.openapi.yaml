@@ -768,6 +768,68 @@ paths:
           $ref: '../components/common.yaml#/components/responses/Unauthenticated'
         '404':
           $ref: '../components/common.yaml#/components/responses/NotFound'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/refresh:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+    post:
+      tags: [Local Computers]
+      operationId: refreshLocalComputerModels
+      summary: Ask an owned, connected Local Computer to reread its model library.
+      description: >-
+        202 means the Computer accepted; the new snapshot arrives with a local-models invalidation
+        hint. Only the Computer owner may ask.
+      responses:
+        '202':
+          description: The Computer will send a new snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-models.yaml#/components/schemas/LocalModelsRefreshAccepted'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '502':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '503':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '504':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+  /v0/tenants/{tenantId}/local-models/computers:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      tags: [Local Computers]
+      operationId: listLocalModelsComputers
+      summary: List Local Computers with their local-models readiness in one request.
+      description: >-
+        scope mine lists the viewer's own Computers; scope space adds other members' Computers
+        with the reduced row. TeamHub answers from stored summaries and never parses snapshots
+        here. computers and local-models invalidation hints announce changes.
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            $ref: '../components/local-models.yaml#/components/schemas/LocalModelsComputerScope'
+      responses:
+        '200':
+          description: The Computers and their readiness.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-models.yaml#/components/schemas/LocalModelsComputerSummaryPage'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
   /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions:
     parameters:
       - $ref: '#/components/parameters/TenantId'

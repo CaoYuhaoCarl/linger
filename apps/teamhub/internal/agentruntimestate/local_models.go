@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/realtime"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 )
@@ -32,18 +33,39 @@ type LocalModelUser struct {
 }
 
 // LocalModelsRecord is what TeamHub keeps about a Computer's model library:
-// the Computer row, its latest snapshot (nil when it never sent one), the
-// last host a snapshot carried, and the Agents on runtime pi the viewer may
-// see.
+// the Computer row, its latest snapshot and summary (nil when it never sent
+// one), the last host a snapshot carried, and the Agents on runtime pi the
+// viewer may see.
 type LocalModelsRecord struct {
-	ComputerID  string
-	DisplayName string
-	Owner       LocalComputerOwner
-	Status      string
-	LastSeenAt  *time.Time
-	Snapshot    json.RawMessage
-	Host        json.RawMessage
-	Users       []LocalModelUser
+	ComputerID       string
+	DisplayName      string
+	Owner            LocalComputerOwner
+	OwnerDisplayName string
+	Status           string
+	LastSeenAt       *time.Time
+	ConnectedAt      *time.Time
+	Platform         string
+	DaemonVersion    string
+	Snapshot         json.RawMessage
+	Host             json.RawMessage
+	Summary          *LocalModelsSummary
+	Users            []LocalModelUser
+}
+
+// LocalModelsComputer is one row of the local-models Computer list: the
+// Computer, its owner, and the summary of its latest snapshot.
+type LocalModelsComputer struct {
+	ComputerID       string
+	DisplayName      string
+	OwnerActorID     string
+	OwnerDisplayName string
+	Status           string
+	LastSeenAt       *time.Time
+	ConnectedAt      *time.Time
+	Platform         string
+	DaemonVersion    string
+	Summary          *LocalModelsSummary
+	ObservedAt       *time.Time
 }
 
 // RecordLocalModels replaces a Computer's stored model library and tells the
@@ -89,13 +111,17 @@ func (s *Service) LocalModels(ctx context.Context, tenantID, viewerActorID, comp
 	if err != nil {
 		return LocalModelsRecord{}, err
 	}
+	ownerName, err := queries.GetLocalComputerOwnerName(ctx, store.GetLocalComputerOwnerNameParams{
+		ActorID: computer.OwnerActorID, TenantID: computer.OwnerTenantID,
+	})
+	if err != nil {
+		return LocalModelsRecord{}, err
+	}
 	record := LocalModelsRecord{
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName, Status: computer.Status,
-		Owner: LocalComputerOwner{TenantID: computer.OwnerTenantID, OwnerActorID: computer.OwnerActorID},
-	}
-	if computer.LastSeenAt.Valid {
-		lastSeenAt := computer.LastSeenAt.Time.UTC()
-		record.LastSeenAt = &lastSeenAt
+		Owner:            LocalComputerOwner{TenantID: computer.OwnerTenantID, OwnerActorID: computer.OwnerActorID},
+		OwnerDisplayName: ownerName, LastSeenAt: optionalTime(computer.LastSeenAt), ConnectedAt: optionalTime(computer.ConnectedAt),
+		Platform: computer.Platform.String, DaemonVersion: computer.DaemonVersion.String,
 	}
 	snapshot, err := queries.GetLocalComputerModelSnapshot(ctx, computerID)
 	if err != nil && !isNoRows(err) {
@@ -103,6 +129,9 @@ func (s *Service) LocalModels(ctx context.Context, tenantID, viewerActorID, comp
 	}
 	if err == nil {
 		record.Snapshot, record.Host = snapshot.Snapshot, snapshot.Host
+		if record.Summary, err = ParseLocalModelsSummary(snapshot.Summary); err != nil {
+			return LocalModelsRecord{}, err
+		}
 	}
 	users, err := queries.ListLocalModelUsersOnComputer(ctx, store.ListLocalModelUsersOnComputerParams{
 		TenantID: tenantID, ComputerID: computerID, ViewerActorID: viewerActorID,
@@ -115,6 +144,43 @@ func (s *Service) LocalModels(ctx context.Context, tenantID, viewerActorID, comp
 		record.Users[index] = LocalModelUser{AgentID: user.AgentID, Name: user.DisplayName, RuntimeModel: user.RuntimeModel}
 	}
 	return record, nil
+}
+
+// LocalModelsComputers lists the owner's Computers in the Tenant with their
+// stored summaries in one query; it never reads a snapshot.
+func (s *Service) LocalModelsComputers(ctx context.Context, tenantID, ownerActorID string) ([]LocalModelsComputer, error) {
+	if s == nil || s.pool == nil || tenantID == "" || ownerActorID == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := store.New(s.pool).ListLocalModelsComputers(ctx, store.ListLocalModelsComputersParams{
+		TenantID: tenantID, OwnerActorID: ownerActorID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	computers := make([]LocalModelsComputer, len(rows))
+	for index, row := range rows {
+		summary, err := ParseLocalModelsSummary(row.Summary)
+		if err != nil {
+			return nil, err
+		}
+		computers[index] = LocalModelsComputer{
+			ComputerID: row.ComputerID, DisplayName: row.DisplayName,
+			OwnerActorID: row.OwnerActorID, OwnerDisplayName: row.OwnerDisplayName,
+			Status: row.Status, LastSeenAt: optionalTime(row.LastSeenAt), ConnectedAt: optionalTime(row.ConnectedAt),
+			Platform: row.Platform.String, DaemonVersion: row.DaemonVersion.String,
+			Summary: summary, ObservedAt: optionalTime(row.ObservedAt),
+		}
+	}
+	return computers, nil
+}
+
+func optionalTime(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	at := value.Time.UTC()
+	return &at
 }
 
 func jsonObject(value json.RawMessage) bool {

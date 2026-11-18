@@ -470,6 +470,51 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/refresh": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ask an owned, connected Local Computer to reread its model library.
+     * @description 202 means the Computer accepted; the new snapshot arrives with a local-models invalidation hint. Only the Computer owner may ask.
+     */
+    post: operations["refreshLocalComputerModels"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/tenants/{tenantId}/local-models/computers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * List Local Computers with their local-models readiness in one request.
+     * @description scope mine lists the viewer's own Computers; scope space adds other members' Computers with the reduced row. TeamHub answers from stored summaries and never parses snapshots here. computers and local-models invalidation hints announce changes.
+     */
+    get: operations["listLocalModelsComputers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions": {
     parameters: {
       query?: never;
@@ -4561,12 +4606,12 @@ export interface components {
       last_seen_at?: components["schemas"]["Timestamp"];
       /** @description From the last snapshot that carried one. */
       host?: components["schemas"]["LocalModelHost"];
-      owner?: components["schemas"]["LocalModelsComputerOwner"];
+      owner: components["schemas"]["LocalModelsComputerOwner"];
       /** @enum {string} */
       platform?: "darwin" | "linux" | "win32";
       daemon_version?: string;
       install_kind?: components["schemas"]["LocalComputerInstallKind"];
-      readiness?: components["schemas"]["LocalModelsReadiness"];
+      readiness: components["schemas"]["LocalModelsReadiness"];
       accelerators?: components["schemas"]["LocalComputerAccelerators"];
       managed_by?: components["schemas"]["LocalModelsManagedBy"];
     };
@@ -4787,18 +4832,8 @@ export interface components {
       pools: components["schemas"]["LocalModelPool"][];
       models: components["schemas"]["LocalModelView"][];
     };
-    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first only with load. */
-    LocalModelActionRequest: {
-      /** @enum {string} */
-      action: "download" | "cancel" | "load" | "unload" | "remove";
-      /** @description Loaded models in the same pool to unload before the load starts. */
-      unload_first?: components["schemas"]["LocalModelId"][];
-    };
-    LocalModelActionAccepted: {
+    LocalModelsRefreshAccepted: {
       computer_id: components["schemas"]["Id"];
-      model_id: components["schemas"]["LocalModelId"];
-      /** @enum {string} */
-      action: "download" | "cancel" | "load" | "unload" | "remove";
     };
     /**
      * @description error.code of a refused local-models action (403, 409, 502, 503, 504); 400, 401, and 404 use the common codes. LOCAL_COMPUTER_OFFLINE: the Computer is not connected. LOCAL_MODEL_ACTION_FORBIDDEN: the viewer is not the Computer owner. LOCAL_MODELS_UNAVAILABLE: the Computer has no usable localmodels tool. LOCAL_MODEL_ACTION_FAILED: the Computer refused with a library error that has no code of its own here (502). LOCAL_MODELS_SERVICE_UNAVAILABLE: Agent Service could not be reached (503). LOCAL_MODEL_ACTION_UNCONFIRMED: the connected Computer had not decided by the action's deadline; it may still run the action, and the library snapshots show the outcome (504). The other LOCAL_MODEL_ codes are the Computer's refusal codes of the same name (409).
@@ -4830,6 +4865,64 @@ export interface components {
     };
     LocalModelsErrorResponse: {
       error: components["schemas"]["LocalModelsError"];
+    };
+    /**
+     * @description mine: the viewer's own Computers. space: also other members' Computers, with the reduced row.
+     * @enum {string}
+     */
+    LocalModelsComputerScope: "mine" | "space";
+    LocalModelsComputerCounts: {
+      loaded: number;
+      /** @description Models on disk, loaded or not. */
+      on_disk: number;
+      /** @description Models downloading or loading. */
+      working: number;
+    };
+    /** @description Memory in use across the Computer's pools, from its last snapshot. */
+    LocalModelsComputerMemory: {
+      /** Format: int64 */
+      used_bytes: number;
+      /** Format: int64 */
+      total_bytes: number;
+      /** @enum {string} */
+      kind: "gpu" | "unified";
+    };
+    /** @description One Computer in the local-models picker and overview. A row for another member's Computer carries only its name, owner, status and readiness; accelerators, counts, memory and versions are the owner's. */
+    LocalModelsComputerSummary: {
+      computer_id: components["schemas"]["Id"];
+      display_name: string;
+      owner: components["schemas"]["LocalModelsComputerOwner"];
+      viewer_is_owner: boolean;
+      /** @enum {string} */
+      status: "online" | "offline";
+      last_seen_at?: components["schemas"]["Timestamp"];
+      /** @enum {string} */
+      platform?: "darwin" | "linux" | "win32";
+      daemon_version?: string;
+      install_kind?: components["schemas"]["LocalComputerInstallKind"];
+      readiness: components["schemas"]["LocalModelsReadiness"];
+      accelerators?: components["schemas"]["LocalComputerAccelerators"];
+      counts?: components["schemas"]["LocalModelsComputerCounts"];
+      memory?: components["schemas"]["LocalModelsComputerMemory"];
+      managed_by?: components["schemas"]["LocalModelsManagedBy"];
+      /** @description When the Computer observed its last snapshot. */
+      observed_at?: components["schemas"]["Timestamp"];
+    };
+    LocalModelsComputerSummaryPage: {
+      items: components["schemas"]["LocalModelsComputerSummary"][];
+    };
+    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first only with load. */
+    LocalModelActionRequest: {
+      /** @enum {string} */
+      action: "download" | "cancel" | "load" | "unload" | "remove";
+      /** @description Loaded models in the same pool to unload before the load starts. */
+      unload_first?: components["schemas"]["LocalModelId"][];
+    };
+    LocalModelActionAccepted: {
+      computer_id: components["schemas"]["Id"];
+      model_id: components["schemas"]["LocalModelId"];
+      /** @enum {string} */
+      action: "download" | "cancel" | "load" | "unload" | "remove";
     };
     /**
      * @description The app macOS grants the permission to. linger is the Linger desktop app, which owns shell commands such as screencapture; computer_use is CuaDriver, which owns the computer-use tools.
@@ -8938,6 +9031,63 @@ export interface operations {
           "application/json": components["schemas"]["LocalModelsView"];
         };
       };
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  refreshLocalComputerModels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Computer will send a new snapshot. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelsRefreshAccepted"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["LocalModelsRefused"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["LocalModelsRefused"];
+      502: components["responses"]["LocalModelsRefused"];
+      503: components["responses"]["LocalModelsRefused"];
+      504: components["responses"]["LocalModelsRefused"];
+    };
+  };
+  listLocalModelsComputers: {
+    parameters: {
+      query?: {
+        scope?: components["schemas"]["LocalModelsComputerScope"];
+      };
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Computers and their readiness. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelsComputerSummaryPage"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
     };

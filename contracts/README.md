@@ -122,3 +122,12 @@ from `LocalComputerProfile`, which a Computer reports without the tool.
 `fixtures/local-models/readiness.json` holds one valid example per readiness
 rule, and `tests/local-models-readiness.contract.test.ts` checks that every
 state and reason has one.
+
+TeamHub stores a small `summary` beside each snapshot (counts, memory in use,
+a host digest) through the SQL function `local_models_snapshot_summary`, so
+`listLocalModelsComputers` (`GET /v0/tenants/{tenantId}/local-models/computers`)
+answers the picker and overview with one query and never reads a snapshot.
+`refreshLocalComputerModels`
+(`POST /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/refresh`)
+sends the existing `refresh` action to the owner's connected Computer; the new
+snapshot arrives with a `local-models` hint.
