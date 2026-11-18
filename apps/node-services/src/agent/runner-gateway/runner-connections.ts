@@ -222,6 +222,8 @@ export class RunnerConnections {
         seenAt: new Date().toISOString(),
         daemonVersion: hello.daemonVersion,
         recommendedVersion: release.version,
+        // It connected only to be told to update.
+        releaseCurrent: false,
       });
       const connectionEpoch = nextConnectionEpoch(
         this.#connectionEpochs.get(claims.runnerId) ?? 0,
@@ -287,6 +289,7 @@ export class RunnerConnections {
         ...(this.context.options.computerRelease
           ? { recommendedVersion: this.context.options.computerRelease.version }
           : {}),
+        ...this.releaseFacts(hello),
       })) ?? [];
     const pending = this.owners
       .operations()
@@ -316,6 +319,27 @@ export class RunnerConnections {
       this.disconnect(connection);
       throw error;
     }
+  }
+
+  /**
+   * Whether an admitted Computer runs this deployment's release, sent with
+   * every observation so TeamHub can tell an update in progress from a stuck
+   * one. The hello carries no app sha256, so a Computer at or above the
+   * release version counts as current and a same-version build that is
+   * behind is missed. Without a release there is nothing to be behind.
+   */
+  releaseFacts(hello: Pick<RunnerHello, "daemon_version">): {
+    readonly releaseCurrent?: boolean;
+  } {
+    const release = this.context.options.computerRelease;
+    return release
+      ? {
+          releaseCurrent: isComputerVersionAtLeast(
+            hello.daemon_version,
+            release.version,
+          ),
+        }
+      : {};
   }
 
   async runLocalComputerMutation<T>(
@@ -537,6 +561,7 @@ export class RunnerConnections {
               activeOperations: this.owners
                 .operations()
                 .activeOperations(connection.runnerId).length,
+              ...this.releaseFacts(connection.hello),
             });
             connection.lastSeenWrittenAtMs = now;
           }
@@ -581,6 +606,7 @@ export class RunnerConnections {
         seenAt: envelope.sent_at,
         runtimes: connection.hello.runtimes,
         runtimeDiagnostics: envelope.runtime_diagnostics,
+        ...this.releaseFacts(connection.hello),
       });
       connection.hello.runtime_registrations =
         connection.hello.runtime_registrations.map((observation) => {
@@ -914,6 +940,7 @@ export class RunnerConnections {
         ?.touch(connection.runnerId, {
           status: "offline",
           seenAt: new Date().toISOString(),
+          ...this.releaseFacts(connection.hello),
         })
         .catch(() => undefined);
     }

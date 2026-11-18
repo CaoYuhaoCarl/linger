@@ -63,11 +63,66 @@ describe("RunnerGateway", () => {
         status: "offline",
         daemonVersion: "0.42.0",
         recommendedVersion: testComputerRelease.version,
+        releaseCurrent: false,
       }),
     );
     expect(gateway.isLocalComputerExecutionReady("runner-local")).toBe(false);
     await expect(gateway.startOperation(runTarget())).rejects.toThrow();
   });
+
+  it.each([
+    ["0.51.0", "0.52.0", true, false],
+    ["0.52.0", "0.52.0", true, true],
+    ["0.53.0", "0.52.0", true, true],
+    ["dev", "0.52.0", true, true],
+    ["0.51.0", undefined, false, undefined],
+  ])(
+    "tells TeamHub on every observation whether %s runs the %s release",
+    async (daemonVersion, releaseVersion, shipsRelease, releaseCurrent) => {
+      const gateway = createTestRunnerGateway({
+        heartbeatIntervalMs: 60_000,
+        createId: sequenceIds(),
+        computerRelease: shipsRelease
+          ? { ...testComputerRelease, version: releaseVersion! }
+          : undefined,
+      });
+      const registry = testRegistryOf(gateway);
+      const connect = vi.spyOn(registry, "connect");
+      const touch = vi.spyOn(registry, "touch");
+      const connection = await acceptReadyConnection(
+        gateway,
+        new RecordingPeer(),
+        { ...hello(), daemon_version: daemonVersion },
+      );
+      await connection.receive({
+        type: "runner.heartbeat",
+        protocol_version: "2",
+        runner_id: "runner-local",
+        sent_at: new Date().toISOString(),
+        active_operation_ids: [],
+      });
+      await connection.receive({
+        type: "runner.runtime_diagnostics",
+        protocol_version: "2",
+        runner_id: "runner-local",
+        sent_at: new Date().toISOString(),
+        revision: 1,
+        runtime_diagnostics: runtimeDiagnostics({ ready: ["codex", "pi"] }),
+      });
+      connection.disconnect();
+
+      const observations = [
+        ...connect.mock.calls.map(([observation]) => observation),
+        ...touch.mock.calls.map(([, observation]) => observation),
+      ];
+      // connect, ready, heartbeat, diagnostics and disconnect
+      expect(observations).toHaveLength(5);
+      for (const observation of observations) {
+        expect(observation.releaseCurrent).toBe(releaseCurrent);
+        expect("releaseCurrent" in observation).toBe(shipsRelease);
+      }
+    },
+  );
 
   it("has no update answer when this image ships no Computer release", async () => {
     const gateway = createTestRunnerGateway({
