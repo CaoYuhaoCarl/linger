@@ -44,6 +44,13 @@ func probedAccelerators(appleSilicon bool, unified int64, gpus ...httpapi.LocalC
 	return accelerators
 }
 
+// profile is a stored profile of a Linux host with one 24 GiB NVIDIA GPU.
+func profile(installKind httpapi.LocalComputerInstallKind, mode, update string) *LocalComputerProfile {
+	stored := &LocalComputerProfile{InstallKind: installKind, Accelerators: *probedAccelerators(false, 0, nvidiaGPU(24<<30))}
+	stored.LocalModels.Mode, stored.Update.State = mode, update
+	return stored
+}
+
 func nvidiaGPU(memory int64) httpapi.LocalComputerAcceleratorGpu {
 	return httpapi.LocalComputerAcceleratorGpu{Vendor: httpapi.LocalComputerGpuVendorNvidia, Name: "NVIDIA GPU", MemoryBytes: &memory}
 }
@@ -135,6 +142,20 @@ func TestLocalModelsReadinessRules(t *testing.T) {
 			want{httpapi.LocalModelsReadinessUnsupportedHardware, httpapi.LocalModelsReadinessPlatformUnsupported, httpapi.LocalModelsSetupPathUnknown}},
 		{"10b: the profile overrides the host", LocalModelsReadinessFacts{DaemonVersion: "0.52.0", Platform: "linux", Summary: ready, Accelerators: probedAccelerators(false, 0)},
 			want{httpapi.LocalModelsReadinessUnsupportedHardware, httpapi.LocalModelsReadinessNoSupportedGpu, httpapi.LocalModelsSetupPathUnknown}},
+		{"3d: a desktop Computer stuck behind the release needs a desktop app update", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.53.0", Platform: "linux", UpdatePendingSince: &pendingTooLong, Summary: ready}.WithProfile(profile("desktop", "local", "idle")),
+			want{httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessDesktopAppOutdated, httpapi.LocalModelsSetupPathNvidia}},
+		{"4d: a desktop Computer behind the release without a snapshot", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.53.0", Platform: "linux", UpdatePendingSince: &justConnected}.WithProfile(profile("desktop", "none", "idle")),
+			want{httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessDesktopAppOutdated, httpapi.LocalModelsSetupPathNvidia}},
+		{"3: the last self-update failed", LocalModelsReadinessFacts{DaemonVersion: "0.53.0", Platform: "linux", Summary: ready}.WithProfile(profile("cli", "none", "failed")),
+			want{httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessUpdateFailed, httpapi.LocalModelsSetupPathNvidia}},
+		{"3: a desktop Computer is never told to reinstall", LocalModelsReadinessFacts{DaemonVersion: "0.53.0", Platform: "linux", Summary: ready}.WithProfile(profile("desktop", "local", "failed")),
+			want{httpapi.LocalModelsReadinessReady, "", httpapi.LocalModelsSetupPathNvidia}},
+		{"5: models served by another machine", LocalModelsReadinessFacts{DaemonVersion: "0.53.0", Platform: "linux", Summary: notInstalled}.WithProfile(profile("container", "remote", "idle")),
+			want{httpapi.LocalModelsReadinessManagedElsewhere, "", httpapi.LocalModelsSetupPathNvidia}},
+		{"5: before its first snapshot", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.53.0", ConnectedAt: &justConnected}.WithProfile(profile("cli", "remote", "idle")),
+			want{httpapi.LocalModelsReadinessManagedElsewhere, "", httpapi.LocalModelsSetupPathNvidia}},
+		{"9: the profile's NVIDIA GPU", LocalModelsReadinessFacts{DaemonVersion: "0.53.0", Platform: "linux", Summary: notInstalled}.WithProfile(profile("container", "none", "idle")),
+			want{httpapi.LocalModelsReadinessNotSetUp, httpapi.LocalModelsReadinessSetupAvailable, httpapi.LocalModelsSetupPathNvidia}},
 		{"12: working wins over loaded", LocalModelsReadinessFacts{DaemonVersion: "0.52.0", Summary: working},
 			want{httpapi.LocalModelsReadinessWorking, "", httpapi.LocalModelsSetupPathNvidia}},
 		{"13: loaded on Apple silicon", LocalModelsReadinessFacts{DaemonVersion: "0.52.0", Platform: "darwin", Summary: loaded},

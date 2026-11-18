@@ -67,6 +67,16 @@ func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenant
 			return nil, err
 		}
 	}
+	profileRows, err := queries.ListOwnedLocalComputerProfiles(ctx, store.ListOwnedLocalComputerProfilesParams{TenantID: tenantID, OwnerActorID: ownerActorID})
+	if err != nil {
+		return nil, err
+	}
+	profiles := make(map[string]*agentruntimestate.LocalComputerProfile, len(profileRows))
+	for _, row := range profileRows {
+		if profiles[row.ComputerID], err = agentruntimestate.ParseLocalComputerProfile(row.Profile); err != nil {
+			return nil, err
+		}
+	}
 	items := make([]httpapi.LocalComputer, 0, len(rows))
 	for _, row := range rows {
 		item, listed, err := projectStoredLocalComputer(row, tenantID, now)
@@ -86,7 +96,7 @@ func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenant
 		if row.UpdatePendingSince.Valid {
 			facts.UpdatePendingSince = &row.UpdatePendingSince.Time
 		}
-		readiness := agentruntimestate.LocalModelsReadiness(facts, now)
+		readiness := agentruntimestate.LocalModelsReadiness(facts.WithProfile(profiles[row.ComputerID]), now)
 		item.LocalModelsReadiness = &readiness
 		items = append(items, item)
 	}
