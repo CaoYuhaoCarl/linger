@@ -67,7 +67,8 @@ type Prepared struct {
 }
 
 // StageError reports which step of staging failed, for structured logs.
-// Stage is one of "download", "verify", "install", "activate", or "timeout".
+// Stage is one of "download", "verify", "archive", "install", "activate", or
+// "timeout".
 type StageError struct {
 	Stage      string
 	ExitCode   int
@@ -113,7 +114,8 @@ func (s ScriptStager) Prepare(ctx context.Context, request StageRequest) (*Prepa
 	}
 	installer, err := extractInstaller(archive)
 	if err != nil {
-		return nil, &StageError{Stage: "verify", Err: err}
+		// The archive matched its sha256, so its layout is what is wrong.
+		return nil, &StageError{Stage: "archive", Err: err}
 	}
 	if err := runInstaller(ctx, directory, installer, request, "prepare", "install",
 		"LINGER_COMPUTER_APP_ARCHIVE="+archive,
