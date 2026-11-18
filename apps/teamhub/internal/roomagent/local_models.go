@@ -31,6 +31,10 @@ type LocalModelActionCommand struct {
 	ExpiresAt                          time.Time
 }
 
+// LocalModelActionRefresh asks the Computer to reread its library; it names
+// no model.
+const LocalModelActionRefresh = string(nodeservicesinternal.LocalModelActionKindRefresh)
+
 // LocalModelActionRefusal is the Computer's reason for not starting an
 // action. Pool, NeedBytes and FreeBytes come with a refusal for room.
 type LocalModelActionRefusal struct {

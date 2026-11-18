@@ -1068,7 +1068,7 @@ components:
         accelerators is present only for the Computer owner.
       type: object
       additionalProperties: false
-      required: [computer_id, display_name, status]
+      required: [computer_id, display_name, status, owner, readiness]
       properties:
         computer_id:
           $ref: "./common.yaml#/components/schemas/Id"
