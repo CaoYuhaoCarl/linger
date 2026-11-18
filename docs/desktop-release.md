@@ -71,18 +71,19 @@ folder, read only by the signing tools and removed after the build.
 Set these under Settings → Secrets and variables → Actions of the repository
 that runs the workflow:
 
-| Name                            | Kind                 | Required                                  | Purpose                                                                                                                                                                                                                                           |
-| ------------------------------- | -------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LINGER_NATIVE_DEPS_URL`        | secret (or variable) | no                                        | Folder serving the archives `apps/desktop/distribution/*.json` pins; the `native-deps` prerelease when unset. Each download is checked against its pin.                                                                                           |
-| `LINGER_DIAGNOSTICS_UPLOAD_URL` | secret               | no                                        | https URL of the hosted diagnostics receiver ([diagnostics-upload.md](diagnostics-upload.md)) that the build carries. A secret, so the address stays masked in logs. Without it Send Diagnostics is hidden unless `config.json` names a receiver. |
-| `RELEASE_REPO`                  | variable             | no                                        | `owner/name` that receives the release; `simplexai-labs/linger` when unset.                                                                                                                                                                       |
-| `LINGER_RELEASE_TOKEN`          | secret               | when `RELEASE_REPO` is another repository | Fine-grained token for `RELEASE_REPO` only, with Contents: read and write. Not needed in simplexai-labs/linger itself.                                                                                                                            |
-| `MACOS_DEVELOPER_ID_P12_BASE64` | secret               | no                                        | Base64 of the Developer ID `.p12`. Without it the app is signed ad hoc.                                                                                                                                                                           |
-| `MACOS_DEVELOPER_ID_PASSWORD`   | secret               | with the `.p12`                           | Password of that `.p12`.                                                                                                                                                                                                                          |
-| `MACOS_NOTARY_KEY_JSON`         | secret               | no                                        | App Store Connect API key JSON; needs the Developer ID.                                                                                                                                                                                           |
-| `DESKTOP_UPDATE_KEY_PEM`        | secret               | for auto-update                           | Ed25519 private key (PEM) that signs `manifest.json`. Without it the release has no manifest and installed apps are not offered it.                                                                                                               |
-| `WINDOWS_SIGNING_P12_BASE64`    | secret               | no                                        | Base64 of an Authenticode `.p12`. Without it the setup program is unsigned.                                                                                                                                                                       |
-| `WINDOWS_SIGNING_PASSWORD`      | secret               | with the `.p12`                           | Password of that `.p12`.                                                                                                                                                                                                                          |
+| Name                            | Kind                 | Required                                  | Purpose                                                                                                                                                                                                                                                   |
+| ------------------------------- | -------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LINGER_NATIVE_DEPS_URL`        | secret (or variable) | no                                        | Folder serving the archives `apps/desktop/distribution/*.json` pins; the `native-deps` prerelease when unset. Each download is checked against its pin.                                                                                                   |
+| `LINGER_DIAGNOSTICS_UPLOAD_URL` | secret               | no                                        | https URL of the hosted diagnostics receiver ([diagnostics-upload.md](diagnostics-upload.md)) that the build carries. A secret, so the address stays masked in logs. Without it Send Diagnostics is hidden unless `config.json` names a receiver.         |
+| `RELEASE_REPO`                  | variable             | no                                        | `owner/name` that receives the release; `simplexai-labs/linger` when unset.                                                                                                                                                                               |
+| `LINGER_RELEASE_TOKEN`          | secret               | when `RELEASE_REPO` is another repository | Fine-grained token for `RELEASE_REPO` only, with Contents: read and write. Not needed in simplexai-labs/linger itself.                                                                                                                                    |
+| `MACOS_DEVELOPER_ID_P12_BASE64` | secret               | no                                        | Base64 of the Developer ID `.p12`. Without it the app is signed ad hoc.                                                                                                                                                                                   |
+| `MACOS_DEVELOPER_ID_PASSWORD`   | secret               | with the `.p12`                           | Password of that `.p12`.                                                                                                                                                                                                                                  |
+| `MACOS_NOTARY_KEY_JSON`         | secret               | no                                        | App Store Connect API key JSON; needs the Developer ID.                                                                                                                                                                                                   |
+| `DESKTOP_UPDATE_KEY_PEM`        | secret               | for auto-update                           | Ed25519 private key (PEM) that signs `manifest.json`. Without it the release has no manifest and installed apps are not offered it.                                                                                                                       |
+| `WINDOWS_SIGNING_P12_BASE64`    | secret               | no                                        | Base64 of an Authenticode `.p12`. Without it the setup program is unsigned.                                                                                                                                                                               |
+| `WINDOWS_SIGNING_PASSWORD`      | secret               | with the `.p12`                           | Password of that `.p12`.                                                                                                                                                                                                                                  |
+| `NPM_TOKEN`                     | secret               | for the China update feed                 | npm automation token that may publish `@simplexai/linger-desktop-*`. Without it the version is not published to npm; installed apps in China then find nothing newer there and take it from the GitHub release ([China update feed](#china-update-feed)). |
 
 ### Bundled archives
 
@@ -130,6 +131,9 @@ Each package bundles the source package, PostgreSQL, voice tools, TeamHub and
 the Native services as described in
 [Packaging Details](#packaging-details).
 
+With the update key and `NPM_TOKEN`, the same version also goes to npm as the
+[China update feed](#china-update-feed).
+
 ## Auto-update
 
 Installed apps update from the GitHub Releases themselves
@@ -153,7 +157,12 @@ with its size and SHA-256:
     "darwin-arm64": {
       "file": "Linger-0.16.36-macos-arm64.app.tar.gz",
       "sha256": "…",
-      "size": 123
+      "size": 300000123,
+      "parts": [
+        { "sha256": "…", "size": 150000000 },
+        { "sha256": "…", "size": 150000000 },
+        { "sha256": "…", "size": 123 }
+      ]
     },
     "linux-x64": {
       "file": "Linger-0.16.36-linux-x64.tar.gz",
@@ -169,8 +178,11 @@ with its size and SHA-256:
 }
 ```
 
-The app downloads the package from `releases/download/desktop-v<version>/` and
-checks its size and SHA-256 while downloading. What happens next depends on
+`parts` pins the pieces of the package that the
+[China update feed](#china-update-feed) publishes; apps from before it ignore
+the key. The app downloads the package from
+`releases/download/desktop-v<version>/` and checks its size and SHA-256 while
+downloading. What happens next depends on
 how Linger was installed:
 
 | Install                 | Update                                                                                                                                                                                                                                                                 |
@@ -205,7 +217,68 @@ them to its source package (see LocalServer in
 `updateFeedUrl` in the desktop config (`config.json` in the app's data
 folder) points the app at another releases URL with the same layout, such as
 `https://github.com/<owner>/<repo>/releases`; it must be https and its
-manifest must be signed by the same key.
+manifest must be signed by the same key. Such a feed is the only source: the
+npm packages below mirror the default feed alone.
+
+### China update feed
+
+GitHub is slow or unreachable from mainland China, and the packages are
+350–400 MB. So every release with a manifest is also published to npm, which
+the npmmirror registry in China mirrors, and apps whose Linger home resolves
+to the `cn` download region (`packages/local-installation/src/region.ts`,
+`SIMPLEX_REGION` or the registry probe, recorded in `runtime/region.json`)
+take their updates from there:
+
+| npm package                                            | Holds                                                                      |
+| ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `@simplexai/linger-desktop-update@<version>`           | `manifest.json` and `manifest.json.sig`, byte for byte as in the release   |
+| `@simplexai/linger-desktop-<target>-part<N>@<version>` | `part`: piece N (from 1) of the package of `<target>`, e.g. `darwin-arm64` |
+
+`desktop-release.sh manifest` cuts each package into pieces of at most
+150,000,000 bytes (`DESKTOP_NPM_PART_BYTES`; npmmirror has served tarballs up
+to 172 MB and documents no limit) and pins each piece's size and SHA-256 in
+`parts`, so the signature covers them. `npm-pack` then cuts the pieces at those
+sizes, checks each against the manifest and packs the packages with `npm pack`;
+`npm-publish --publish` publishes them with `NPM_TOKEN`, the parts before the
+manifest, under the dist-tag `latest` for a stable version and `next` for a
+prerelease (matching the GitHub latest release), skips versions npm already
+has, and asks npmmirror to sync each package
+(`PUT https://registry-direct.npmmirror.com/-/package/<name>/syncs`). Without
+`--publish` it only lists what it would publish. The `release` job runs both
+after the GitHub Release when `NPM_TOKEN` is set.
+
+In `cn` an app checks:
+
+1. the `latest` dist-tag of `@simplexai/linger-desktop-update` on
+   `registry.npmmirror.com`, then that version's tarball from
+   `cdn.npmmirror.com`; then the same on `registry.npmjs.org`; then the GitHub
+   release. The first source whose manifest names a version newer than the app
+   (with a package for it) wins; a source that is behind, because npm was not
+   published, the mirror has not synced or a source failed, passes to the next,
+   so a release npm never got still reaches China from GitHub. A prerelease
+   under `latest` (npm tags a package's first version `latest` whatever it is)
+   offers nothing. Whatever the source, the manifest must carry the signature
+   of `UPDATE_PUBLIC_KEY` and name the tagged version. When npm answered that
+   the app is current, an unreachable GitHub is no failure.
+2. for a manifest from npm, each part's tarball, from `cdn.npmmirror.com` and
+   then `registry.npmjs.org`, checking the part's size and SHA-256; the parts
+   are joined and checked as the whole package. When a part fails on both, it
+   downloads the whole package from the GitHub release instead. For a
+   manifest only the GitHub release had, the package comes from there.
+
+The app unpacks only the expected files from a tarball (`update-npm.ts`: a
+regular `package/part`, or `package/manifest.json` and its `.sig`, plus npm's
+`package/package.json`, each within its size) and rejects anything else.
+npmmirror's per-file endpoint needs a whitelist our packages are not on, so
+the app reads the tarball itself. In `global` the app checks GitHub first,
+exactly as described above, and asks npm (`registry.npmjs.org`, then
+npmmirror) only when GitHub cannot be reached. When the other region serves
+what the home's region could not, other than a file the mirror has not synced
+yet, the home's region becomes that one (`recordRegionFallback`), for the
+installer's downloads too.
+
+npmmirror syncs a new version minutes after it is published; until then apps
+in China find the previous version, or take a missing part from npm.
 
 ### Signing key
 
@@ -234,7 +307,12 @@ DESKTOP_VERSION=0.16.36-rc.1 RCODESIGN=/path/to/rcodesign \
 DESKTOP_UPDATE_KEY=/path/to/ed25519.pem \
   scripts/ci/desktop-release.sh manifest .linger-runtime/desktop-release/assets 0.16.36-rc.1
 scripts/ci/desktop-release.sh checksums .linger-runtime/desktop-release/assets 0.16.36-rc.1
+scripts/ci/desktop-release.sh npm-pack .linger-runtime/desktop-release/assets 0.16.36-rc.1 \
+  .linger-runtime/desktop-release/npm
+scripts/ci/desktop-release.sh npm-publish .linger-runtime/desktop-release/npm 0.16.36-rc.1
 ```
+
+`npm-publish` publishes only with `--publish` and `NPM_TOKEN` set.
 
 With the archives already in `LINGER_NATIVE_POSTGRES_DIR` (default
 `~/.cache/linger-desktop`), `LINGER_NATIVE_DEPS_URL` is not needed.

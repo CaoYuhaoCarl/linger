@@ -16,6 +16,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  UPDATE_NPM_PACKAGE,
+  extractNpmTarball,
+  partNpmPackage,
+} from "../../apps/desktop/src/main/update-npm.ts";
+
 const script = join(process.cwd(), "scripts/ci/desktop-release.sh");
 const temporary: string[] = [];
 
@@ -191,6 +197,12 @@ describe("desktop-release.sh manifest", () => {
             file,
             sha256: createHash("sha256").update(file).digest("hex"),
             size: file.length,
+            parts: [
+              {
+                sha256: createHash("sha256").update(file).digest("hex"),
+                size: file.length,
+              },
+            ],
           },
         ]),
       ),
@@ -200,6 +212,33 @@ describe("desktop-release.sh manifest", () => {
     const sums = readFileSync(join(dir, "SHA256SUMS.txt"), "utf8");
     expect(sums).toContain("  manifest.json\n");
     expect(sums).toContain("  manifest.json.sig\n");
+  });
+
+  it("pins the parts of each package npm-pack publishes", () => {
+    const dir = release();
+    const repo = checkout();
+
+    const result = run(
+      ["manifest", dir, version],
+      { DESKTOP_UPDATE_KEY: repo.key, DESKTOP_NPM_PART_BYTES: "16" },
+      repo.script,
+    );
+
+    expect(result.status).toBe(0);
+    const manifest = JSON.parse(
+      readFileSync(join(dir, "manifest.json"), "utf8"),
+    ) as { packages: Record<string, { parts: { size: number }[] }> };
+    // Linger-0.16.33-windows-x64-setup.exe is 36 bytes.
+    expect(
+      manifest.packages["win32-x64"]!.parts.map((part) => part.size),
+    ).toEqual([16, 16, 4]);
+    expect(
+      run(
+        ["manifest", dir, version],
+        { DESKTOP_UPDATE_KEY: repo.key, DESKTOP_NPM_PART_BYTES: "0" },
+        repo.script,
+      ).stderr,
+    ).toContain("DESKTOP_NPM_PART_BYTES");
   });
 
   it("warns and writes nothing without the key", () => {
@@ -452,5 +491,204 @@ describe("desktop-release.sh install-scripts", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Stack release pin drift");
     expect(existsSync(join(dir, "install.sh"))).toBe(false);
+  });
+});
+
+describe("desktop-release.sh npm-pack and npm-publish", () => {
+  const version = "0.16.33";
+  const packages = {
+    "darwin-arm64": `Linger-${version}-macos-arm64.app.tar.gz`,
+    "linux-x64": `Linger-${version}-linux-x64.tar.gz`,
+    "win32-x64": `Linger-${version}-windows-x64-setup.exe`,
+  };
+  // A release of the three packages, 40 bytes each, signed with parts of
+  // at most 16 bytes by a throwaway key.
+  const signedRelease = () => {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const root = folder();
+    mkdirSync(join(root, "scripts/ci"), { recursive: true });
+    mkdirSync(join(root, "apps/desktop/src/main"), { recursive: true });
+    copyFileSync(script, join(root, "scripts/ci/desktop-release.sh"));
+    writeFileSync(
+      join(root, "apps/desktop/src/main/update-manifest.ts"),
+      `export const UPDATE_PUBLIC_KEY = \`${publicKey.export({ type: "spki", format: "pem" }).toString().trim()}\`;\n`,
+    );
+    const key = join(folder(), "update.pem");
+    writeFileSync(
+      key,
+      privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    );
+    const dir = folder();
+    for (const [target, name] of Object.entries(packages))
+      writeFileSync(join(dir, name), `${target}:`.padEnd(40, target[0]));
+    const signed = run(
+      ["manifest", dir, version],
+      { DESKTOP_UPDATE_KEY: key, DESKTOP_NPM_PART_BYTES: "16" },
+      join(root, "scripts/ci/desktop-release.sh"),
+    );
+    expect(signed.status).toBe(0);
+    return dir;
+  };
+
+  // The members of a packed tarball, read as installed apps read them.
+  const extract = async (tarball: string, ...members: string[]) => {
+    const chunks: Record<string, Buffer[]> = {};
+    await extractNpmTarball(
+      [readFileSync(tarball)],
+      Object.fromEntries(members.map((member) => [member, 1024 * 1024])),
+      (member, chunk) => {
+        (chunks[member] ??= []).push(Buffer.from(chunk));
+      },
+    );
+    return Object.fromEntries(
+      Object.entries(chunks).map(([member, parts]) => [
+        member,
+        Buffer.concat(parts),
+      ]),
+    );
+  };
+
+  it("packs the manifest and every part the way installed apps read them", async () => {
+    const dir = signedRelease();
+    const out = join(folder(), "npm");
+
+    const result = run(["npm-pack", dir, version, out]);
+
+    expect(result.status, result.stderr).toBe(0);
+    const lines = readFileSync(join(out, "packages.txt"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => line.split(" ") as [string, string]);
+    const targets = Object.keys(packages).sort();
+    expect(lines.map(([name]) => name)).toEqual([
+      ...targets.flatMap((target) =>
+        [0, 1, 2].map((index) => partNpmPackage(target, index)),
+      ),
+      // Last, so no manifest names parts npm does not have yet.
+      UPDATE_NPM_PACKAGE,
+    ]);
+    const tarballs = Object.fromEntries(lines);
+    for (const [target, file] of Object.entries(packages)) {
+      const joined = Buffer.concat(
+        await Promise.all(
+          [0, 1, 2].map((index) =>
+            extract(
+              join(out, tarballs[partNpmPackage(target, index)]!),
+              "package/part",
+            ).then((members) => members["package/part"]!),
+          ),
+        ),
+      );
+      expect(joined).toEqual(readFileSync(join(dir, file)));
+    }
+    expect(
+      await extract(
+        join(out, tarballs[UPDATE_NPM_PACKAGE]!),
+        "package/manifest.json",
+        "package/manifest.json.sig",
+      ),
+    ).toEqual({
+      "package/manifest.json": readFileSync(join(dir, "manifest.json")),
+      "package/manifest.json.sig": readFileSync(join(dir, "manifest.json.sig")),
+    });
+    expect(existsSync(join(out, ".staging"))).toBe(false);
+  });
+
+  it("refuses a package that changed after the manifest was signed", () => {
+    const dir = signedRelease();
+    writeFileSync(join(dir, packages["linux-x64"]), "x".repeat(40));
+
+    const result = run(["npm-pack", dir, version, join(folder(), "npm")]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(packages["linux-x64"]);
+  });
+
+  it("needs the signed manifest", () => {
+    const dir = folder();
+    const result = run(["npm-pack", dir, version, join(folder(), "npm")]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("signed manifest");
+  });
+
+  // An npm and a curl that record their arguments, the npm config they
+  // were given, and an npm that has no version yet.
+  const publish = (args: string[], env: Record<string, string> = {}) => {
+    const out = folder();
+    const bin = folder();
+    const log = join(out, "calls.log");
+    writeFileSync(join(out, "a.tgz"), "");
+    writeFileSync(join(out, "b.tgz"), "");
+    writeFileSync(
+      join(out, "packages.txt"),
+      "@simplexai/linger-desktop-linux-x64-part1 a.tgz\n@simplexai/linger-desktop-update b.tgz\n",
+    );
+    writeFileSync(
+      join(bin, "npm"),
+      `#!/bin/sh\necho "npm $*" >>"${log}"\nprev=\nfor a; do [ "$prev" = --userconfig ] && cat "$a" >>"${log}"; prev=$a; done\nexit 0\n`,
+    );
+    writeFileSync(join(bin, "curl"), `#!/bin/sh\necho "curl $*" >>"${log}"\n`);
+    chmodSync(join(bin, "npm"), 0o755);
+    chmodSync(join(bin, "curl"), 0o755);
+    const result = run(["npm-publish", out, ...args], {
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      ...env,
+    });
+    let calls = "";
+    try {
+      calls = readFileSync(log, "utf8");
+    } catch {
+      // nothing ran
+    }
+    return { ...result, calls };
+  };
+
+  it("only lists the packages without --publish", () => {
+    const result = publish([version], { NPM_TOKEN: "token" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      `would publish @simplexai/linger-desktop-update@${version} (latest)`,
+    );
+    expect(result.calls).toBe("");
+  });
+
+  it("needs NPM_TOKEN to publish", () => {
+    const result = publish([version, "--publish"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("NPM_TOKEN");
+    expect(result.calls).toBe("");
+  });
+
+  it("publishes the parts, then the manifest, and asks npmmirror to sync", () => {
+    const result = publish([version, "--publish"], {
+      NPM_TOKEN: "secret-token",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const publishes = result.calls
+      .split("\n")
+      .filter((line) => line.startsWith("npm publish"));
+    expect(publishes).toHaveLength(2);
+    expect(publishes[0]).toContain("/a.tgz --access public --tag latest");
+    expect(publishes[1]).toContain("/b.tgz --access public --tag latest");
+    expect(result.calls).toContain(
+      "curl -fsS --retry 3 -X PUT https://registry-direct.npmmirror.com/-/package/@simplexai/linger-desktop-update/syncs",
+    );
+    // npm expands the token itself; it is never written to a file.
+    expect(result.calls).toContain(
+      "//registry.npmjs.org/:_authToken=${NPM_TOKEN}",
+    );
+    expect(result.calls + result.stdout).not.toContain("secret-token");
+  });
+
+  it("tags a prerelease next", () => {
+    const result = publish(["1.0.0-rc.1", "--publish"], { NPM_TOKEN: "t" });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain("--tag next");
+    expect(result.calls).not.toContain("--tag latest");
   });
 });

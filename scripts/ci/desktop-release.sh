@@ -20,6 +20,13 @@ set -euo pipefail
 #                                                 verify stack pins and copy install.sh
 #                                                 and install.ps1 into <dir>
 #   desktop-release.sh checksums <dir> <version>  write <dir>/SHA256SUMS.txt
+#   desktop-release.sh npm-pack <dir> <version> <out>
+#                                                 pack the China update feed from <dir>'s
+#                                                 signed manifest: npm tarballs into <out>
+#   desktop-release.sh npm-publish <out> <version> [--publish]
+#                                                 list what npm-pack made; with --publish
+#                                                 (and NPM_TOKEN) publish it to npm and ask
+#                                                 npmmirror to sync it
 #   desktop-release.sh gitlab-upload <dir> <version>
 #                                                 upload <dir>'s files to a GitLab generic
 #                                                 package from a GitLab CI job (test builds only)
@@ -45,6 +52,8 @@ set -euo pipefail
 #   MACOS_NOTARY_KEY             App Store Connect API key JSON; notarizes and staples
 #   DESKTOP_UPDATE_KEY           Ed25519 PEM file that signs the update manifest; without
 #                                it the release has no manifest and offers no update
+#   DESKTOP_NPM_PART_BYTES       largest npm part of a package (150000000)
+#   NPM_TOKEN                    npm automation token with publish rights to @simplexai
 #   WINDOWS_SIGNING_P12, WINDOWS_SIGNING_PASSWORD_FILE
 #                                Authenticode .p12 and a file with its password for
 #                                the setup program (osslsigncode); unsigned without
@@ -71,7 +80,8 @@ die() {
 usage() {
   echo "Usage: $0 version <tag> | fetch-native|compile|package|build <target>" \
     "| manifest|install-scripts|checksums <dir> <version> | github-release <dir> <tag> <version>" \
-    "| gitlab-upload <dir> <version>" >&2
+    "| gitlab-upload <dir> <version> | npm-pack <dir> <version> <out>" \
+    "| npm-publish <out> <version> [--publish]" >&2
   exit 2
 }
 
@@ -279,13 +289,23 @@ cmd_build() {
 # portable Windows folder only link to the release.
 update_packages='darwin-arm64:macos-arm64.app.tar.gz linux-x64:linux-x64.tar.gz win32-x64:windows-x64-setup.exe'
 
+# The largest part of a package published to npm. npmmirror has served
+# tarballs of 172 MB; it documents no limit, so parts stay below that.
+part_bytes() {
+  local bytes="${DESKTOP_NPM_PART_BYTES:-150000000}"
+  [[ "$bytes" =~ ^[1-9][0-9]*$ ]] || die "DESKTOP_NPM_PART_BYTES must be a byte count"
+  echo "$bytes"
+}
+
 # manifest.json lists every platform's package with its size and sha256, and
-# manifest.json.sig is its Ed25519 signature, made with DESKTOP_UPDATE_KEY.
+# the size and sha256 of each part of it that npm-pack publishes (at most
+# DESKTOP_NPM_PART_BYTES each). manifest.json.sig is its Ed25519 signature,
+# made with DESKTOP_UPDATE_KEY.
 # Installed apps read both from the latest release and download the package
 # from the release of the version it names. Without the key the release goes
 # out without them, and no installed app is offered it.
 cmd_manifest() {
-  local dir="${1:-}" version="${2:-}" entry target suffix packages=()
+  local dir="${1:-}" version="${2:-}" entry target suffix part_size packages=()
   [[ -d "$dir" ]] || die "manifest needs the folder holding the release files"
   [[ "$version" =~ $version_pattern ]] || die "manifest needs the release version"
   rm -f "$dir/manifest.json" "$dir/manifest.json.sig"
@@ -294,6 +314,7 @@ cmd_manifest() {
     return 0
   fi
   [[ -f "$DESKTOP_UPDATE_KEY" ]] || die "DESKTOP_UPDATE_KEY names no file"
+  part_size="$(part_bytes)"
   for entry in $update_packages; do
     target="${entry%%:*}"
     suffix="${entry#*:}"
@@ -302,18 +323,25 @@ cmd_manifest() {
   done
   # The key file is read only here; the built-in public key decides whether
   # installed apps would accept the signature.
-  node - "$dir" "$version" "$DESKTOP_UPDATE_KEY" "$desktop/src/main/update-manifest.ts" "${packages[@]}" <<'NODE' ||
+  node - "$dir" "$version" "$DESKTOP_UPDATE_KEY" "$desktop/src/main/update-manifest.ts" "$part_size" "${packages[@]}" <<'NODE' ||
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const [dir, version, keyFile, source, ...pairs] = process.argv.slice(2);
+const [dir, version, keyFile, source, partBytes, ...pairs] = process.argv.slice(2);
+const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const packages = {};
 for (let i = 0; i < pairs.length; i += 2) {
   const bytes = fs.readFileSync(path.join(dir, pairs[i + 1]));
+  const parts = [];
+  for (let start = 0; start < bytes.length; start += Number(partBytes)) {
+    const part = bytes.subarray(start, start + Number(partBytes));
+    parts.push({ sha256: sha256(part), size: part.length });
+  }
   packages[pairs[i]] = {
     file: pairs[i + 1],
-    sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+    sha256: sha256(bytes),
     size: bytes.length,
+    parts,
   };
 }
 const manifest = Buffer.from(
@@ -367,6 +395,68 @@ cmd_checksums() {
   done
   mv "$dir/SHA256SUMS.txt.part" "$dir/SHA256SUMS.txt"
   cat "$dir/SHA256SUMS.txt"
+}
+
+# The China update feed (docs/desktop-release.md#china-update-feed): the
+# signed manifest and every package's parts as npm packages, which npmmirror
+# mirrors. <out> must be outside <dir>, whose files all go to the release.
+cmd_npm_pack() {
+  local dir="${1:-}" version="${2:-}" out="${3:-}"
+  [[ -d "$dir" && -n "$out" && "$version" =~ $version_pattern ]] ||
+    die "npm-pack needs the folder of release files, the release version and an out folder"
+  [[ -f "$dir/manifest.json" && -f "$dir/manifest.json.sig" ]] ||
+    die "npm-pack needs the signed manifest; run '$0 manifest $dir $version' with DESKTOP_UPDATE_KEY"
+  command -v npm >/dev/null || die "npm-pack needs npm"
+  node "$repo_root/scripts/ci/desktop-npm-pack.mjs" "$dir" "$version" "$out"
+}
+
+# Publishes what npm-pack made only with --publish; otherwise it lists it.
+# npm's dist-tag follows the GitHub release: latest for a stable version,
+# next for a prerelease. A version npm already has is skipped, so a retried
+# job goes on where it stopped. npmmirror then syncs each package; until it
+# has, installed apps in China take them from npm or GitHub.
+cmd_npm_publish() {
+  local out="${1:-}" version="${2:-}" mode="${3:-}" tag=latest name tarball names=()
+  [[ -f "$out/packages.txt" && "$version" =~ $version_pattern ]] ||
+    die "npm-publish needs the out folder of '$0 npm-pack' and the release version"
+  [[ -z "$mode" || "$mode" == --publish ]] || die "npm-publish takes only --publish"
+  [[ "$version" == *-* ]] && tag=next
+  while read -r name tarball <&3; do
+    [[ -n "$name" ]] || continue
+    [[ -f "$out/$tarball" ]] || die "$out has no $tarball"
+    names+=("$name")
+    [[ "$mode" == --publish ]] || echo "desktop-release: would publish $name@$version ($tag) from $tarball"
+  done 3<"$out/packages.txt"
+  if [[ "$mode" != --publish ]]; then
+    echo "desktop-release: nothing published; pass --publish with NPM_TOKEN set to publish"
+    return 0
+  fi
+  [[ -n "${NPM_TOKEN:-}" ]] || die "npm-publish --publish needs NPM_TOKEN"
+  command -v npm >/dev/null || die "npm-publish needs npm"
+  # npm reads the token from the environment; it is never written down.
+  # Global, since the trap runs after this function returns.
+  npmrc="$(mktemp)"
+  trap 'rm -f "$npmrc"' EXIT
+  # shellcheck disable=SC2016
+  printf '%s\n' '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >"$npmrc"
+  while read -r name tarball <&3; do
+    [[ -n "$name" ]] || continue
+    if [[ -n "$(npm view "$name@$version" version --userconfig "$npmrc" --registry https://registry.npmjs.org/ 2>/dev/null)" ]]; then
+      echo "desktop-release: $name@$version is already on npm"
+      continue
+    fi
+    npm publish "$out/$tarball" --access public --tag "$tag" \
+      --userconfig "$npmrc" --registry https://registry.npmjs.org/ </dev/null ||
+      die "could not publish $name@$version"
+    echo "desktop-release: published $name@$version ($tag)"
+  done 3<"$out/packages.txt"
+  for name in "${names[@]}"; do
+    if curl -fsS --retry 3 -X PUT "https://registry-direct.npmmirror.com/-/package/$name/syncs" >/dev/null; then
+      echo "desktop-release: asked npmmirror to sync $name"
+    else
+      echo "::warning::npmmirror did not take the sync of $name; it also syncs new versions on its own, later."
+    fi
+  done
 }
 
 gitlab_env() {
@@ -448,6 +538,8 @@ case "$command" in
   manifest) cmd_manifest "$@" ;;
   install-scripts) cmd_install_scripts "$@" ;;
   checksums) cmd_checksums "$@" ;;
+  npm-pack) cmd_npm_pack "$@" ;;
+  npm-publish) cmd_npm_publish "$@" ;;
   gitlab-upload) cmd_gitlab_upload "$@" ;;
   github-release) cmd_github_release "$@" ;;
   *) usage ;;

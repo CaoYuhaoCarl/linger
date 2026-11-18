@@ -20,13 +20,34 @@ MCowBQYDK2VwAyEA985QJ8UAvzK0ZLPW6YPaIkiCS2A+qPbEaZvi0aAccR4=
 
 const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$/;
 
+const SHA256 = /^[0-9a-f]{64}$/;
+
+// Not strict: an app ignores keys a newer release adds, as apps from before
+// `parts` ignore that one.
 const updatePackage = z.object({
   // A bare file name: the package always comes from the manifest's release.
   file: z.string().regex(/^[A-Za-z0-9._-]+$/),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  sha256: z.string().regex(SHA256),
   size: z.number().int().positive(),
+  // The package cut into consecutive pieces, each its own npm package
+  // (update-npm.ts), so the China mirror can serve it. The pieces join into
+  // the whole file above.
+  parts: z
+    .array(
+      z.object({
+        sha256: z.string().regex(SHA256),
+        size: z.number().int().positive(),
+      }),
+    )
+    .min(1)
+    .optional(),
 });
 export type UpdatePackage = z.infer<typeof updatePackage>;
+
+/** Whether `value` is a version a manifest may name. */
+export function isReleaseVersion(value: unknown): value is string {
+  return typeof value === "string" && VERSION.test(value);
+}
 
 const updateManifest = z.object({
   schema: z.literal(2),

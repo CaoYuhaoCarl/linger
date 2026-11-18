@@ -3,11 +3,22 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ComputerDaemonModule } from "./computer-daemon.js";
 import type { DesktopConfig } from "./config.js";
-import { stubModule, tempDirectory, testHost } from "./test-support.js";
+import {
+  npmTarball,
+  stubModule,
+  tempDirectory,
+  testHost,
+} from "./test-support.js";
+import {
+  UPDATE_NPM_PACKAGE,
+  distTagsUrl,
+  npmTarballUrl,
+  partNpmPackage,
+} from "./update-npm.js";
 import {
   type SpawnSetup,
   type UpdateState,
@@ -18,7 +29,20 @@ import {
 } from "./updater.js";
 
 const RELEASES = "https://github.com/simplexai-labs/linger/releases";
+const MIRROR = "https://registry.npmmirror.com/";
+const NPMJS = "https://registry.npmjs.org/";
 const PACKAGE = Buffer.from("new app archive");
+const sha256 = (bytes: Buffer) =>
+  createHash("sha256").update(bytes).digest("hex");
+const PACKAGE_JSON: [string, Buffer] = [
+  "package/package.json",
+  Buffer.from('{"name":"x"}'),
+];
+
+beforeEach(() => {
+  vi.stubEnv("SIMPLEX_REGION", "");
+  return () => vi.unstubAllEnvs();
+});
 
 const release = (
   version: string,
@@ -27,32 +51,73 @@ const release = (
     target = "darwin-arm64",
     file = `Linger-${version}-macos-arm64.app.tar.gz`,
     feed = RELEASES,
+    // Splits the package into parts of this size, as the release does.
+    partSize = 0,
+    // Registries that hold the npm packages of the release.
+    npm = [] as readonly string[],
+    // The version npm has, when it lags the release.
+    npmVersion = version,
   } = {},
 ) => {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const manifest = Buffer.from(
-    JSON.stringify({
-      schema: 2,
-      version,
-      packages: {
-        [target]: {
-          file,
-          sha256: createHash("sha256").update(PACKAGE).digest("hex"),
-          size: PACKAGE.length,
+  const pieces: Buffer[] = [];
+  for (let i = 0; partSize && i < PACKAGE.length; i += partSize)
+    pieces.push(PACKAGE.subarray(i, i + partSize));
+  const manifestOf = (version: string) =>
+    Buffer.from(
+      JSON.stringify({
+        schema: 2,
+        version,
+        packages: {
+          [target]: {
+            file,
+            sha256: sha256(PACKAGE),
+            size: PACKAGE.length,
+            ...(partSize
+              ? {
+                  parts: pieces.map((piece) => ({
+                    sha256: sha256(piece),
+                    size: piece.length,
+                  })),
+                }
+              : {}),
+          },
         },
-      },
-    }),
-  );
+      }),
+    );
+  const signatureOf = (manifest: Buffer) =>
+    Buffer.from(sign(null, manifest, privateKey).toString("base64"));
+  const manifest = manifestOf(version);
+  const signature = signatureOf(manifest);
+  const npmManifest = manifestOf(npmVersion);
   const files: Record<string, Buffer> = {
     [`${feed}/latest/download/manifest.json`]: manifest,
-    [`${feed}/latest/download/manifest.json.sig`]: Buffer.from(
-      sign(null, manifest, privateKey).toString("base64"),
-    ),
+    [`${feed}/latest/download/manifest.json.sig`]: signature,
     [`${feed}/download/desktop-v${version}/${file}`]: body,
   };
+  for (const registry of npm) {
+    files[distTagsUrl(registry, UPDATE_NPM_PACKAGE).toString()] = Buffer.from(
+      JSON.stringify({ latest: npmVersion }),
+    );
+    files[npmTarballUrl(registry, UPDATE_NPM_PACKAGE, npmVersion).toString()] =
+      npmTarball([
+        PACKAGE_JSON,
+        ["package/manifest.json", npmManifest],
+        ["package/manifest.json.sig", signatureOf(npmManifest)],
+      ]);
+    pieces.forEach((piece, index) => {
+      files[partUrl(registry, target, index, npmVersion)] = npmTarball([
+        PACKAGE_JSON,
+        ["package/part", piece],
+      ]);
+    });
+  }
   const requested: string[] = [];
+  // Hosts whose connections fail.
+  const unreachable = new Set<string>();
   const fetch = (async (url: URL) => {
     requested.push(url.toString());
+    if (unreachable.has(url.host)) throw new TypeError("fetch failed");
     const content = files[url.toString()];
     return content
       ? new Response(new Uint8Array(content))
@@ -61,17 +126,44 @@ const release = (
   return {
     fetch,
     files,
+    manifest,
+    signature,
     requested,
+    unreachable,
     publicKey: publicKey.export({ type: "spki", format: "pem" }).toString(),
   };
 };
+
+const partUrl = (
+  registry: string,
+  target: string,
+  index: number,
+  version: string,
+) => npmTarballUrl(registry, partNpmPackage(target, index), version).toString();
+const manifestUrl = (registry: string, version: string) =>
+  npmTarballUrl(registry, UPDATE_NPM_PACKAGE, version).toString();
+const tagsUrl = (registry: string) =>
+  distTagsUrl(registry, UPDATE_NPM_PACKAGE).toString();
 
 const setup = async (
   feed: ReturnType<typeof release>,
   options: Partial<UpdaterOptions> = {},
   config: Partial<DesktopConfig> = {},
+  region: "cn" | "global" = "global",
 ) => {
   const root = tempDirectory();
+  // The home's download region, resolved earlier (region.ts).
+  const home = path.join(root, "home");
+  mkdirSync(path.join(home, "runtime"), { recursive: true });
+  writeFileSync(
+    path.join(home, "runtime", "region.json"),
+    JSON.stringify({
+      schema: "simplex.region/v1",
+      region,
+      resolved_at: new Date().toISOString(),
+      method: "probe",
+    }),
+  );
   const applications = path.join(root, "Applications");
   const bundle = path.join(applications, "Linger.app");
   mkdirSync(bundle, { recursive: true });
@@ -92,6 +184,7 @@ const setup = async (
     arch: "arm64",
     install: { kind: "app-bundle", appBundle: bundle },
     downloadDirectory: downloads,
+    home,
     restart: async () => {
       restarts += 1;
     },
@@ -125,6 +218,11 @@ const setup = async (
     bundle,
     applications,
     downloads,
+    home,
+    region: () =>
+      JSON.parse(
+        readFileSync(path.join(home, "runtime", "region.json"), "utf8"),
+      ) as { region: string; method: string },
     setRunning,
     opened,
     announced,
@@ -179,6 +277,7 @@ describe("UpdaterModule", () => {
       arch: "arm64",
       install: { kind: "app-bundle", appBundle: bundle },
       downloadDirectory: tempDirectory(),
+      home: tempDirectory(),
       restart: async () => {},
       quit: async () => {},
       openExternal: async () => {},
@@ -279,6 +378,219 @@ describe("UpdaterModule", () => {
       kind: "failed",
       error: "The update feed must use https",
     });
+  });
+});
+
+describe("UpdaterModule with the npm packages", () => {
+  const VERSION = "0.17.0";
+  const TARGET = "darwin-arm64";
+  const ASSET = `${RELEASES}/download/desktop-v${VERSION}/Linger-${VERSION}-macos-arm64.app.tar.gz`;
+  const parts = (registry: string) =>
+    [0, 1, 2].map((index) => partUrl(registry, TARGET, index, VERSION));
+  const published = (npm: readonly string[] = [MIRROR, NPMJS]) =>
+    release(VERSION, { partSize: 6, npm });
+
+  it("in cn takes the manifest and the parts from the China mirror", async () => {
+    const feed = published();
+    const { updater, bundle, downloads, restarts, region } = await setup(
+      feed,
+      {},
+      {},
+      "cn",
+    );
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: VERSION });
+    expect(feed.requested).toEqual([
+      tagsUrl(MIRROR),
+      manifestUrl(MIRROR, VERSION),
+      ...parts(MIRROR),
+    ]);
+    expect(feed.requested[1]).toMatch(/^https:\/\/cdn\.npmmirror\.com\//);
+    expect(readdirSync(downloads)).toEqual([]);
+    await updater.install();
+    await waitFor(() => restarts() === 1);
+    // The joined parts are the package the manifest names.
+    expect(readFileSync(path.join(bundle, "version"))).toEqual(PACKAGE);
+    expect(region()).toMatchObject({ region: "cn", method: "probe" });
+  });
+
+  it("in cn takes a tampered part from npm instead and prefers global after", async () => {
+    const feed = published();
+    feed.files[parts(MIRROR)[1]!] = npmTarball([
+      ["package/part", Buffer.from("XXXXXX")],
+    ]);
+    const { updater, bundle, restarts, region } = await setup(
+      feed,
+      {},
+      {},
+      "cn",
+    );
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: VERSION });
+    expect(feed.requested.slice(2)).toEqual([
+      parts(MIRROR)[0],
+      parts(MIRROR)[1],
+      parts(NPMJS)[1],
+      parts(MIRROR)[2],
+    ]);
+    await updater.install();
+    await waitFor(() => restarts() === 1);
+    expect(readFileSync(path.join(bundle, "version"))).toEqual(PACKAGE);
+    expect(region()).toMatchObject({ region: "global", method: "fallback" });
+  });
+
+  it("in cn takes the release asset when a part is on no registry", async () => {
+    const feed = published([MIRROR]);
+    delete feed.files[parts(MIRROR)[2]!];
+    const { updater, downloads, region } = await setup(feed, {}, {}, "cn");
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: VERSION });
+    expect(feed.requested.slice(-3)).toEqual([
+      parts(MIRROR)[2],
+      parts(NPMJS)[2],
+      ASSET,
+    ]);
+    expect(readdirSync(downloads)).toEqual([]);
+    // A part the mirror has not synced yet says nothing about the network.
+    expect(region()).toMatchObject({ region: "cn", method: "probe" });
+  });
+
+  it("in cn refuses a manifest whose package was tampered with", async () => {
+    const feed = published([MIRROR]);
+    const tampered = Buffer.from(
+      feed.manifest.toString().replace(sha256(PACKAGE), "0".repeat(64)),
+    );
+    feed.files[manifestUrl(MIRROR, VERSION)] = npmTarball([
+      ["package/manifest.json", tampered],
+      ["package/manifest.json.sig", feed.signature],
+    ]);
+    delete feed.files[`${RELEASES}/latest/download/manifest.json`];
+    const { updater } = await setup(feed, {}, {}, "cn");
+    await updater.check();
+    expect(updater.state()).toEqual({
+      kind: "failed",
+      error: "Update signature does not match",
+    });
+    expect(feed.requested.some((url) => url.includes("-part"))).toBe(false);
+  });
+
+  it("in cn checks a manifest from npm against the built-in key", async () => {
+    // Signed by the release key, so only UPDATE_PUBLIC_KEY decides.
+    const feed = published([MIRROR]);
+    const { updater } = await setup(feed, { publicKey: undefined }, {}, "cn");
+    await updater.check();
+    expect(updater.state()).toEqual({
+      kind: "failed",
+      error: "Update signature does not match",
+    });
+  });
+
+  it("in cn falls back to the release feed when npm is unreachable", async () => {
+    const feed = published();
+    feed.unreachable.add("registry.npmmirror.com");
+    feed.unreachable.add("cdn.npmmirror.com");
+    feed.unreachable.add("registry.npmjs.org");
+    const { updater, region } = await setup(feed, {}, {}, "cn");
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: VERSION });
+    expect(feed.requested).toEqual([
+      tagsUrl(MIRROR),
+      tagsUrl(NPMJS),
+      `${RELEASES}/latest/download/manifest.json`,
+      `${RELEASES}/latest/download/manifest.json.sig`,
+      // A manifest only the release served: its package comes from there.
+      ASSET,
+    ]);
+    expect(region()).toMatchObject({ region: "global", method: "fallback" });
+  });
+
+  it("in cn takes a version npm lacks from the release", async () => {
+    // npm still has the running version: its publish failed or was skipped.
+    const feed = release(VERSION, {
+      partSize: 6,
+      npm: [MIRROR, NPMJS],
+      npmVersion: "0.16.7",
+    });
+    const { updater, bundle, restarts, region } = await setup(
+      feed,
+      {},
+      {},
+      "cn",
+    );
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: VERSION });
+    expect(feed.requested).toEqual([
+      tagsUrl(MIRROR),
+      manifestUrl(MIRROR, "0.16.7"),
+      tagsUrl(NPMJS),
+      manifestUrl(NPMJS, "0.16.7"),
+      `${RELEASES}/latest/download/manifest.json`,
+      `${RELEASES}/latest/download/manifest.json.sig`,
+      ASSET,
+    ]);
+    await updater.install();
+    await waitFor(() => restarts() === 1);
+    expect(readFileSync(path.join(bundle, "version"))).toEqual(PACKAGE);
+    expect(region()).toMatchObject({ region: "cn", method: "probe" });
+  });
+
+  it("in cn stays idle when npm is current and GitHub cannot be reached", async () => {
+    const feed = release("0.16.7", { partSize: 6, npm: [MIRROR, NPMJS] });
+    feed.unreachable.add("github.com");
+    const { updater } = await setup(feed, {}, {}, "cn");
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "idle" });
+  });
+
+  it("does not offer a prerelease npm tags latest", async () => {
+    const feed = release("0.17.0-rc.1", { partSize: 6, npm: [MIRROR] });
+    delete feed.files[`${RELEASES}/latest/download/manifest.json`];
+    const { updater } = await setup(feed, {}, {}, "cn");
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "idle" });
+    expect(feed.requested).toContain(tagsUrl(MIRROR));
+    expect(feed.requested).not.toContain(manifestUrl(MIRROR, "0.17.0-rc.1"));
+  });
+
+  it("in global keeps to the release while it answers", async () => {
+    const feed = published();
+    const { updater } = await setup(feed);
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: VERSION });
+    expect(feed.requested).toEqual([
+      `${RELEASES}/latest/download/manifest.json`,
+      `${RELEASES}/latest/download/manifest.json.sig`,
+      ASSET,
+    ]);
+  });
+
+  it("in global falls back to npm when the release cannot be reached", async () => {
+    const feed = published();
+    feed.unreachable.add("github.com");
+    const { updater, bundle, restarts, region } = await setup(feed);
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: VERSION });
+    expect(feed.requested).toEqual([
+      `${RELEASES}/latest/download/manifest.json`,
+      `${RELEASES}/latest/download/manifest.json.sig`,
+      tagsUrl(NPMJS),
+      manifestUrl(NPMJS, VERSION),
+      ASSET,
+      ...parts(NPMJS),
+    ]);
+    await updater.install();
+    await waitFor(() => restarts() === 1);
+    expect(readFileSync(path.join(bundle, "version"))).toEqual(PACKAGE);
+    expect(region()).toMatchObject({ region: "global", method: "probe" });
+  });
+
+  it("asks no npm registry for a feed of its own", async () => {
+    const own = "https://releases.example.com/linger";
+    const feed = release(VERSION, { feed: own, partSize: 6, npm: [MIRROR] });
+    const { updater } = await setup(feed, {}, { updateFeedUrl: own }, "cn");
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: VERSION });
+    expect(feed.requested.every((url) => url.startsWith(own))).toBe(true);
   });
 });
 

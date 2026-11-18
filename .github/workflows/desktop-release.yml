@@ -223,3 +223,20 @@ jobs:
         run: >-
           scripts/ci/desktop-release.sh github-release release
           "${{ needs.prepare.outputs.tag }}" "${{ needs.prepare.outputs.version }}"
+      # The China update feed: the signed manifest and each package's parts
+      # as npm packages, which npmmirror serves. Without NPM_TOKEN or a
+      # manifest nothing goes to npm; apps in China, finding nothing newer
+      # there, then take this version from the GitHub release.
+      - name: Publish the npm update feed
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$NPM_TOKEN" ] || [ ! -f release/manifest.json ]; then
+            echo "::warning::No NPM_TOKEN or no update manifest: $VERSION is not published to npm (docs/desktop-release.md#china-update-feed)."
+            exit 0
+          fi
+          scripts/ci/desktop-release.sh npm-pack release "$VERSION" "$RUNNER_TEMP/npm"
+          scripts/ci/desktop-release.sh npm-publish "$RUNNER_TEMP/npm" "$VERSION" --publish

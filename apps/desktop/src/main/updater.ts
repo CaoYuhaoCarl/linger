@@ -1,11 +1,18 @@
 import { execFile, spawn as spawnProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
+
+import {
+  recordRegionFallback,
+  resolveRegion,
+  type Region,
+} from "@linger/local-installation/region";
+import { orderByRegion, sourceRegion } from "@linger/service-kit";
 
 import type { ComputerDaemonModule } from "./computer-daemon.js";
 import type { Module, ModuleContext } from "./modules.js";
@@ -15,12 +22,25 @@ import {
   UPDATE_PUBLIC_KEY,
   compareVersions,
   feedUrls,
+  isReleaseVersion,
   packageFor,
   packageUrl,
   releasePageUrl,
   verifyManifest,
+  type UpdateManifest,
   type UpdatePackage,
 } from "./update-manifest.js";
+import {
+  NPM_MANIFEST_MEMBER,
+  NPM_PART_MEMBER,
+  NPM_REGISTRIES,
+  NPM_SIGNATURE_MEMBER,
+  UPDATE_NPM_PACKAGE,
+  distTagsUrl,
+  extractNpmTarball,
+  npmTarballUrl,
+  partNpmPackage,
+} from "./update-npm.js";
 
 export type UpdateState =
   | { readonly kind: "idle" }
@@ -62,6 +82,9 @@ export interface UpdaterOptions {
   readonly install: UpdateInstall | undefined;
   // Downloads live here until they are installed.
   readonly downloadDirectory: string;
+  // The Linger home whose download region (region.ts) orders the sources
+  // of the default feed.
+  readonly home: string;
   // Stops modules, including the daemon, and relaunches the app from
   // the app bundle, which by then holds the new version and its daemon.
   readonly restart: () => Promise<void>;
@@ -99,6 +122,8 @@ const CHECK_DELAY_MS = 60_000;
 const CHECK_INTERVAL_MS = 60 * 60_000;
 // A dropped connection should not cost a whole check interval.
 const RETRY_DELAY_MS = 5 * 60_000;
+const MANIFEST_MAX = 1024 * 1024;
+const SIGNATURE_MAX = 4096;
 const STAGED_PREFIX = ".Linger-update-";
 const OLD_PREFIX = ".Linger-old-";
 
@@ -110,10 +135,29 @@ const untar = async (archive: string, directory: string): Promise<void> => {
 };
 
 export class UpdateError extends Error {}
+// The source does not have the file (yet: the mirror syncs a new version
+// minutes after it is published). Unlike other failures it says nothing
+// about the region's network.
+class UpdateNotFound extends UpdateError {}
+
+// Where one check takes its files from.
+interface Route {
+  readonly region: Region;
+  // The npm packages mirror the default feed only; a feed of its own is the
+  // only source.
+  readonly npm: boolean;
+  // A source in `region` failed for a reason other than not having the file.
+  regionFailed: boolean;
+  // The manifest came from npm, so its parts are there too; in cn a manifest
+  // only the release had is downloaded from the release.
+  fromNpm: boolean;
+}
 
 // Self-update without Squirrel: a signed manifest in the newest GitHub
 // Release (or a feed with the same layout), a sha256-checked package from
-// that same release, and an install that waits for running tasks. Sign-in and
+// that same release, and an install that waits for running tasks. The same
+// manifest and the package in parts also come as npm packages, which the
+// China mirror serves to homes in the cn region (update-npm.ts). Sign-in and
 // the computer identity live outside the installed app, so they carry over.
 export class UpdaterModule implements Module {
   readonly name = "Updater";
@@ -214,28 +258,18 @@ export class UpdaterModule implements Module {
   async #check(): Promise<void> {
     const ctx = this.#ctx!;
     const install = this.#options.install!;
-    const feed = ctx.config.get().updateFeedUrl ?? DEFAULT_FEED_URL;
+    const configured = ctx.config.get().updateFeedUrl;
+    const feed = configured ?? DEFAULT_FEED_URL;
     this.#setState({ kind: "checking" });
     try {
       if (new URL(feed).protocol !== "https:")
         throw new UpdateError("The update feed must use https");
-      const urls = feedUrls(feed);
-      const [bytes, signature] = await Promise.all([
-        this.#get(urls.manifest),
-        this.#get(urls.signature),
-      ]);
-      // The newest release was published without a manifest: nothing to
-      // offer until one is.
-      if (!bytes || !signature) {
-        ctx.log.info("update.no_manifest", { feed });
+      const route = await this.#route(configured === undefined);
+      const manifest = await this.#manifest(feed, route);
+      if (!manifest) {
         this.#setState({ kind: "idle" });
         return;
       }
-      const manifest = verifyManifest(
-        bytes,
-        signature.toString("utf8"),
-        this.#options.publicKey ?? UPDATE_PUBLIC_KEY,
-      );
       const pkg = packageFor(
         manifest,
         this.#options.platform,
@@ -260,7 +294,7 @@ export class UpdaterModule implements Module {
       }
       this.#setState({ kind: "downloading", version });
       const file = path.join(this.#options.downloadDirectory, pkg.file);
-      await this.#download(packageUrl(feed, version, pkg.file), file, pkg);
+      await this.#downloadPackage(feed, version, pkg, file, route);
       this.#staged =
         install.kind === "app-bundle"
           ? { path: await this.#extract(file, version), pkg }
@@ -271,6 +305,337 @@ export class UpdaterModule implements Module {
     } catch (error) {
       this.#fail("update.check_failed", error);
     }
+  }
+
+  async #route(npm: boolean): Promise<Route> {
+    let region: Region = "global";
+    if (npm) {
+      try {
+        region = await resolveRegion(this.#options.home, {
+          fetcher: this.#options.fetch ?? fetch,
+        });
+      } catch (error) {
+        this.#ctx!.log.warn("update.region_failed", { error: String(error) });
+      }
+    }
+    return { region, npm, regionFailed: false, fromNpm: false };
+  }
+
+  #failed(route: Route, source: URL, error: unknown): void {
+    this.#ctx!.log.warn("update.source_failed", {
+      source: source.host,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    if (
+      !(error instanceof UpdateNotFound) &&
+      sourceRegion(source) === route.region
+    )
+      route.regionFailed = true;
+  }
+
+  // The other region served what the home's region could not: downloads
+  // from this home prefer it from now on.
+  async #served(route: Route, source: URL): Promise<void> {
+    const served = sourceRegion(source);
+    if (!route.regionFailed || served === route.region) return;
+    route.regionFailed = false;
+    this.#ctx!.log.info("update.region_fallback", { region: served });
+    await recordRegionFallback(this.#options.home, served);
+  }
+
+  // The verified manifest, or undefined when there is none to offer. In
+  // global the release feed comes first, exactly as without npm, and the npm
+  // packages are asked only when it cannot be reached; in cn the npm
+  // packages come first, the China mirror's before npm's. Every source's
+  // manifest must carry the built-in key's signature.
+  async #manifest(
+    feed: string,
+    route: Route,
+  ): Promise<UpdateManifest | undefined> {
+    const release = new URL(feed);
+    if (!route.npm) return this.#releaseManifest(feed);
+    const registries = orderByRegion(route.region, NPM_REGISTRIES);
+    if (route.region === "global") {
+      try {
+        return await this.#releaseManifest(feed);
+      } catch (error) {
+        // A manifest the key refuses is no network failure.
+        if (error instanceof ManifestError) throw error;
+        this.#failed(route, release, error);
+        for (const registry of registries) {
+          try {
+            const manifest = await this.#npmManifest(registry);
+            if (!manifest) continue;
+            await this.#served(route, new URL(registry));
+            return manifest;
+          } catch (npmError) {
+            this.#failed(route, new URL(registry), npmError);
+          }
+        }
+        throw error;
+      }
+    }
+    // npm can lag the release (a publish that failed or was skipped, a
+    // stalled mirror sync), so a source with nothing newer than this app
+    // passes to the next one, ending with the release itself. The first
+    // source offering a newer version wins.
+    let first: unknown;
+    let current: UpdateManifest | undefined;
+    for (const registry of registries) {
+      try {
+        const manifest = await this.#npmManifest(registry);
+        if (!manifest) continue;
+        if (!this.#offers(manifest)) {
+          current ??= manifest;
+          continue;
+        }
+        route.fromNpm = true;
+        await this.#served(route, new URL(registry));
+        return manifest;
+      } catch (error) {
+        first ??= error;
+        this.#failed(route, new URL(registry), error);
+      }
+    }
+    let manifest: UpdateManifest | undefined;
+    try {
+      manifest = await this.#releaseManifest(feed);
+    } catch (error) {
+      // An npm source that answered says this app is current: the release
+      // being unreachable from China is no failure then.
+      if (current) {
+        this.#failed(route, release, error);
+        return current;
+      }
+      throw first ?? error;
+    }
+    if (manifest && this.#offers(manifest)) {
+      await this.#served(route, release);
+      return manifest;
+    }
+    // Nothing to offer is quiet only when no source failed; a failure is
+    // retried sooner than a quiet check.
+    if (!manifest && !current && first !== undefined) throw first;
+    return manifest ?? current;
+  }
+
+  // Whether `manifest` names a newer version with a package for this app.
+  #offers(manifest: UpdateManifest): boolean {
+    return (
+      compareVersions(manifest.version, this.#options.version) > 0 &&
+      packageFor(manifest, this.#options.platform, this.#options.arch) !==
+        undefined
+    );
+  }
+
+  // manifest.json and its .sig from the latest release of the feed.
+  async #releaseManifest(feed: string): Promise<UpdateManifest | undefined> {
+    const urls = feedUrls(feed);
+    const [bytes, signature] = await Promise.all([
+      this.#get(urls.manifest),
+      this.#get(urls.signature),
+    ]);
+    // The newest release was published without a manifest: nothing to
+    // offer until one is.
+    if (!bytes || !signature) {
+      this.#ctx!.log.info("update.no_manifest", { feed });
+      return undefined;
+    }
+    return verifyManifest(
+      bytes,
+      signature.toString("utf8"),
+      this.#options.publicKey ?? UPDATE_PUBLIC_KEY,
+    );
+  }
+
+  // The manifest of the update package's `latest` version on `registry`;
+  // undefined while the registry has none.
+  async #npmManifest(registry: string): Promise<UpdateManifest | undefined> {
+    const tags = await this.#get(distTagsUrl(registry, UPDATE_NPM_PACKAGE));
+    if (!tags) return undefined;
+    let latest: unknown;
+    try {
+      latest = (JSON.parse(tags.toString("utf8")) as { latest?: unknown })
+        .latest;
+    } catch {
+      throw new UpdateError("The npm dist-tags are not JSON");
+    }
+    if (!isReleaseVersion(latest))
+      throw new UpdateError("The npm dist-tags name no version");
+    // A prerelease is never tagged latest on purpose, but npm tags the first
+    // version of a package latest whatever it is.
+    if (latest.includes("-")) return undefined;
+    const url = npmTarballUrl(registry, UPDATE_NPM_PACKAGE, latest);
+    const response = await (this.#options.fetch ?? fetch)(url);
+    if (response.status === 404) return undefined;
+    if (!response.ok || !response.body)
+      throw new UpdateError(`${url.pathname} returned ${response.status}`);
+    const files: Record<string, Buffer[]> = {};
+    await extractNpmTarball(
+      Readable.fromWeb(response.body as never),
+      {
+        [NPM_MANIFEST_MEMBER]: MANIFEST_MAX,
+        [NPM_SIGNATURE_MEMBER]: SIGNATURE_MAX,
+      },
+      (member, chunk) => {
+        (files[member] ??= []).push(chunk);
+      },
+    );
+    const manifest = verifyManifest(
+      Buffer.concat(files[NPM_MANIFEST_MEMBER] ?? []),
+      Buffer.concat(files[NPM_SIGNATURE_MEMBER] ?? []).toString("utf8"),
+      this.#options.publicKey ?? UPDATE_PUBLIC_KEY,
+    );
+    // An older signed manifest under a newer tag is refused here; one under
+    // its own older tag is only never newer than this app.
+    if (manifest.version !== latest)
+      throw new ManifestError("Update manifest does not match its npm version");
+    return manifest;
+  }
+
+  // The package from the release, or joined from its npm parts. In global
+  // the release comes first and the parts only when it fails; in cn the
+  // parts come first, and the release when any part fails on every registry,
+  // unless the manifest came from the release, whose version npm lacks.
+  async #downloadPackage(
+    feed: string,
+    version: string,
+    pkg: UpdatePackage,
+    file: string,
+    route: Route,
+  ): Promise<void> {
+    const url = packageUrl(feed, version, pkg.file);
+    const release = () => this.#download(url, file, pkg);
+    if (!route.npm || !pkg.parts) return release();
+    if (route.region === "cn" && !route.fromNpm) {
+      await release();
+      return;
+    }
+    const parts = () =>
+      this.#downloadParts(
+        version,
+        `${this.#options.platform}-${this.#options.arch}`,
+        pkg,
+        file,
+        route,
+      );
+    if (route.region === "global") {
+      try {
+        await release();
+      } catch (error) {
+        this.#failed(route, url, error);
+        try {
+          await parts();
+        } catch {
+          throw error;
+        }
+      }
+      return;
+    }
+    try {
+      await parts();
+      return;
+    } catch (error) {
+      try {
+        await release();
+      } catch {
+        throw error;
+      }
+    }
+    await this.#served(route, url);
+  }
+
+  // Each part from the first registry that serves it, checked against the
+  // manifest, then joined into `file` and checked as a whole.
+  async #downloadParts(
+    version: string,
+    target: string,
+    pkg: UpdatePackage,
+    file: string,
+    route: Route,
+  ): Promise<void> {
+    const parts = pkg.parts!;
+    if (parts.reduce((total, part) => total + part.size, 0) !== pkg.size)
+      throw new UpdateError("Update parts do not add up to the package");
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    const registries = orderByRegion(route.region, NPM_REGISTRIES);
+    const pieces: string[] = [];
+    try {
+      for (const [index, part] of parts.entries()) {
+        const piece = `${file}.part${index + 1}`;
+        pieces.push(piece);
+        let first: unknown;
+        let served = false;
+        for (const registry of registries) {
+          const url = npmTarballUrl(
+            registry,
+            partNpmPackage(target, index),
+            version,
+          );
+          try {
+            await this.#downloadPart(url, piece, part);
+            await this.#served(route, url);
+            served = true;
+            break;
+          } catch (error) {
+            first ??= error;
+            this.#failed(route, url, error);
+          }
+        }
+        if (!served) throw first;
+      }
+      // Each piece is removed once it is joined, so the disk holds about one
+      // package's worth at a time.
+      async function* joined(): AsyncGenerator<Buffer> {
+        for (const piece of pieces) {
+          for await (const chunk of createReadStream(piece))
+            yield chunk as Buffer;
+          await rm(piece, { force: true });
+        }
+      }
+      await this.#verify(
+        Readable.from(joined()),
+        pkg,
+        createWriteStream(file, { mode: 0o600 }),
+      );
+    } catch (error) {
+      await rm(file, { force: true });
+      throw error;
+    } finally {
+      for (const piece of pieces) await rm(piece, { force: true });
+    }
+  }
+
+  async #downloadPart(
+    url: URL,
+    piece: string,
+    part: { readonly sha256: string; readonly size: number },
+  ): Promise<void> {
+    const response = await (this.#options.fetch ?? fetch)(url);
+    if (response.status === 404) {
+      await response.body?.cancel();
+      throw new UpdateNotFound(`${url.pathname} returned 404`);
+    }
+    if (!response.ok || !response.body)
+      throw new UpdateError(`${url.pathname} returned ${response.status}`);
+    const hash = createHash("sha256");
+    let received = 0;
+    const handle = await open(piece, "w", 0o600);
+    try {
+      await extractNpmTarball(
+        Readable.fromWeb(response.body as never),
+        { [NPM_PART_MEMBER]: part.size },
+        async (_member, chunk) => {
+          hash.update(chunk);
+          received += chunk.length;
+          await handle.write(chunk);
+        },
+      );
+    } finally {
+      await handle.close();
+    }
+    if (received !== part.size || hash.digest("hex") !== part.sha256)
+      throw new UpdateError("Update part does not match its checksum");
   }
 
   // Follows redirects: GitHub sends release files from another host. The

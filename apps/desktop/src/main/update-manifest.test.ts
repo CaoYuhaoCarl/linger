@@ -80,6 +80,40 @@ describe("update manifest", () => {
     );
   });
 
+  it("reads the npm parts of a package", () => {
+    const { privateKey, publicPem } = keys();
+    const parts = [
+      { sha256: "b".repeat(64), size: 6 },
+      { sha256: "c".repeat(64), size: 4 },
+    ];
+    const withParts = structuredClone(manifest);
+    Object.assign(withParts.packages["darwin-arm64"], { parts });
+    const { bytes, signature } = signed(withParts, privateKey);
+    expect(
+      packageFor(verifyManifest(bytes, signature, publicPem), "darwin", "arm64")
+        ?.parts,
+    ).toEqual(parts);
+
+    const bad = structuredClone(manifest);
+    Object.assign(bad.packages["darwin-arm64"], {
+      parts: [{ sha256: "nope", size: 6 }],
+    });
+    const refused = signed(bad, privateKey);
+    expect(() =>
+      verifyManifest(refused.bytes, refused.signature, publicPem),
+    ).toThrow("Update manifest is invalid");
+  });
+
+  // Apps read manifests of releases newer than themselves.
+  it("ignores keys it does not know", () => {
+    const { privateKey, publicPem } = keys();
+    const newer = structuredClone(manifest);
+    Object.assign(newer, { channel: "stable" });
+    Object.assign(newer.packages["darwin-arm64"], { mirrors: ["x"] });
+    const { bytes, signature } = signed(newer, privateKey);
+    expect(verifyManifest(bytes, signature, publicPem)).toEqual(manifest);
+  });
+
   it("compares versions numerically", () => {
     expect(compareVersions("0.16.10", "0.16.9")).toBeGreaterThan(0);
     expect(compareVersions("0.16.0", "0.16.0")).toBe(0);
