@@ -79,3 +79,19 @@ export function actOnLocalComputerModel(
     }),
   );
 }
+
+const localModelsRefreshPath =
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/refresh";
+
+/** Asks the owner's Computer to reread its library; a local-models hint brings the result. */
+export function refreshLocalComputerModels(
+  client: TeamHubClient,
+  tenantId: string,
+  computerId: string,
+) {
+  return teamHubData(
+    client.api.POST(localModelsRefreshPath, {
+      params: { path: { computerId, tenantId } },
+    }),
+  );
+}

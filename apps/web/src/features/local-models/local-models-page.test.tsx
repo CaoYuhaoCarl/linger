@@ -858,26 +858,34 @@ describe("LocalModelsPage", () => {
   it.each([
     [
       "TOOL_NOT_INSTALLED",
+      { reason: "HARDWARE_UNKNOWN", state: "not_set_up" },
       "Local models aren't set up on lab-118",
-      "Run Quick Install",
+      "Set them up the way lab-118 was installed",
     ],
     [
       "TOOL_FAILED",
+      { reason: "TOOL_FAILED", state: "needs_attention" },
       "Couldn't read the local models on lab-118",
       "didn't answer",
     ],
     [
       "NOT_REPORTED",
-      "lab-118 hasn't reported local models yet",
-      "up-to-date Linger app",
+      { reason: "NOT_REPORTED", state: "not_reported" },
+      "lab-118 hasn't reported local models",
+      "Restart Linger on lab-118",
     ],
   ] as const)(
-    "explains a Computer without a model library (%s)",
-    async (code, title, body) => {
+    "explains a Computer without a model library from its readiness (%s)",
+    async (code, readiness, title, body) => {
+      const lab = labView();
       renderPage(
         setup([
           labView({
             available: false,
+            computer: {
+              ...lab.computer,
+              readiness: { enable_command: false, ...readiness },
+            },
             models: [],
             pools: [],
             reason: { code, detail: "raw tool output" },
@@ -887,7 +895,6 @@ describe("LocalModelsPage", () => {
 
       const empty = await screen.findByRole("region", { name: title });
       expect(empty).toHaveTextContent(body);
-      expect(empty).not.toHaveTextContent("raw tool output");
       expect(
         screen.queryByRole("region", { name: "Models" }),
       ).not.toBeInTheDocument();
@@ -896,6 +903,69 @@ describe("LocalModelsPage", () => {
       ).not.toBeInTheDocument();
     },
   );
+
+  it("hides every model action on a host without a supported GPU, even with a library", async () => {
+    const lab = labView();
+    renderPage(
+      setup([
+        labView({
+          computer: {
+            ...lab.computer,
+            readiness: {
+              enable_command: false,
+              reason: "NO_SUPPORTED_GPU",
+              state: "unsupported_hardware",
+            },
+          },
+        }),
+      ]),
+    );
+
+    expect(
+      await screen.findByRole("region", {
+        name: "lab-118 has no supported GPU",
+      }),
+    ).toHaveTextContent("they don't run on the CPU alone");
+    expect(
+      screen.queryByRole("region", { name: "Models" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Details" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/GPU memory in use/)).not.toBeInTheDocument();
+  });
+
+  it("tells another member whom to ask instead of the read-only notice", async () => {
+    const lab = labView();
+    renderPage(
+      setup([
+        labView({
+          available: false,
+          computer: {
+            ...lab.computer,
+            readiness: {
+              enable_command: false,
+              reason: "DAEMON_LEGACY",
+              state: "needs_reinstall",
+            },
+          },
+          models: [],
+          pools: [],
+          reason: { code: "NOT_REPORTED" },
+          viewer_is_owner: false,
+        }),
+      ]),
+    );
+
+    expect(
+      await screen.findByRole("region", { name: "Move lab-118 to Linger" }),
+    ).toHaveTextContent(
+      "Only Ada Owner can set up local models on lab-118. Ask them to reinstall Linger.",
+    );
+    expect(
+      screen.queryByText(/can download, load or remove its models/),
+    ).not.toBeInTheDocument();
+  });
 
   it("sends a Tenant without Computers to Computers", async () => {
     renderPage(setup([], []));
