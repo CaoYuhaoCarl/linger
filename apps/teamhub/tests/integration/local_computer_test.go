@@ -316,6 +316,12 @@ func TestLocalComputerEnrollmentByDaemonIDOverHTTP(t *testing.T) {
 	env := &testEnv{t: t, databaseURL: databaseURL, pool: pool, server: server}
 	alice, bob := env.login("alice", alicePassword), seedPeerHuman(t, env)
 
+	// A desktop newer than its server names the Daemon only when /v0/me
+	// lists the capability; an older TeamHub rejects the unknown field.
+	if status, _, body := env.request(alice, http.MethodGet, "/v0/me", nil, ""); status != http.StatusOK ||
+		!strings.Contains(string(body), `"server_capabilities":["local_computer_enrollment_daemon_id"]`) {
+		t.Fatalf("read the enrollment capability: status=%d body=%s", status, body)
+	}
 	computerID := enrollLocalComputerOverHTTP(t, env, alice, "Alice's Mac", "")
 	publicKey := sha256.Sum256([]byte("daemon-public-key"))
 	daemonHash := sha256.Sum256(publicKey[:])

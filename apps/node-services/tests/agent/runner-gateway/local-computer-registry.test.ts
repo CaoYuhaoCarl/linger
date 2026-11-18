@@ -8,6 +8,7 @@ import {
   CURRENT_RUNNER_CAPABILITIES,
   currentRunnerIdentity,
 } from "../test-support/runner-capabilities.js";
+import { runtimeDiagnostics } from "./runtime-diagnostics-fixture.js";
 
 const unused = (): never => {
   throw new Error("not called");
@@ -45,7 +46,7 @@ describe("TeamHub Local Computer registry", () => {
           connection_nonce: "nonce-1",
           sent_at: "2026-07-29T00:00:00.000Z",
           runtimes: ["codex"],
-          runtime_diagnostics: [],
+          runtime_diagnostics: runtimeDiagnostics(),
           workspace_grants: [],
           agent_runners: [],
           active_operations: [],

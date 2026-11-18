@@ -30,6 +30,7 @@ interface Call {
 
 const fakeServer = (
   overrides: {
+    capabilities?: readonly string[];
     createStatus?: number;
     createError?: string;
     exchangeStatus?: number;
@@ -52,7 +53,12 @@ const fakeServer = (
     const json = (value: unknown, status = 200): Response =>
       new Response(JSON.stringify(value), { status });
     if (input.pathname === "/v0/me")
-      return json({ actors: [{ kind: "human", tenant_id: "tenant_acme" }] });
+      return json({
+        actors: [{ kind: "human", tenant_id: "tenant_acme" }],
+        ...(overrides.capabilities
+          ? { server_capabilities: overrides.capabilities }
+          : {}),
+      });
     if (input.pathname.endsWith("/local-computer-enrollments")) {
       if (overrides.createStatus)
         return json(
@@ -161,13 +167,27 @@ describe("enrollComputer", () => {
   });
 
   it("names the machine's Daemon so TeamHub can renew the Computer it holds", async () => {
-    const server = fakeServer();
-    await enrollComputer({
+    const server = fakeServer({ capabilities: DAEMON_CAPABLE });
+    const enrolled = await enrollComputer({
       ...input,
       daemonId: DAEMON_ID,
       fetch: server.fetch,
     });
     expect(server.calls[1]?.body).toMatchObject({ daemon_id: DAEMON_ID });
+    expect(enrolled.daemonId).toBe(DAEMON_ID);
+  });
+
+  it("enrolls without the Daemon on a server that does not accept it", async () => {
+    // A team server older than the desktop rejects fields it does not know.
+    const server = fakeServer({ capabilities: [] });
+    const enrolled = await enrollComputer({
+      ...input,
+      daemonId: DAEMON_ID,
+      fetch: server.fetch,
+    });
+    expect(server.calls[1]?.body).not.toHaveProperty("daemon_id");
+    expect(enrolled).toMatchObject({ computerId: "computer_1" });
+    expect(enrolled.daemonId).toBeUndefined();
   });
 
   it("reports a Daemon another account's Computer holds", async () => {
@@ -175,6 +195,7 @@ describe("enrollComputer", () => {
       ...input,
       daemonId: DAEMON_ID,
       fetch: fakeServer({
+        capabilities: DAEMON_CAPABLE,
         createStatus: 409,
         createError: "DAEMON_IDENTITY_IN_USE",
       }).fetch,
@@ -211,6 +232,7 @@ describe("enrollComputer", () => {
 // The daemon keeps its identity key (public and private) here; the Daemon ID
 // is the SHA-256 of the raw public key, as the daemon derives it.
 const PUBLIC_KEY = Buffer.alloc(32, 7);
+const DAEMON_CAPABLE = ["local_computer_enrollment_daemon_id"];
 const DAEMON_ID = createHash("sha256").update(PUBLIC_KEY).digest("base64url");
 
 const daemonIdentityFile = (): string => {
@@ -227,9 +249,14 @@ const daemonIdentityFile = (): string => {
 
 const startEnrollment = async (
   config: Partial<DesktopConfig>,
-  options: { credentialFor?: string } = {},
+  options: {
+    credentialFor?: string;
+    capabilities?: readonly string[];
+  } = {},
 ) => {
-  const server = fakeServer();
+  const server = fakeServer({
+    capabilities: options.capabilities ?? DAEMON_CAPABLE,
+  });
   const credentials = new CredentialStore(
     path.join(tempDirectory(), "credential.json"),
   );
@@ -301,6 +328,38 @@ describe("EnrollmentModule", () => {
       )?.body,
     ).toMatchObject({ computer_id: "computer_9", daemon_id: DAEMON_ID });
     expect(host.ctx.config.get().daemonId).toBe(DAEMON_ID);
+  });
+
+  it("enrolls without the daemon's identity on a server that does not accept it", async () => {
+    const { host, module, server } = await startEnrollment(
+      {},
+      { capabilities: [] },
+    );
+    await module.enroll();
+    expect(
+      server.calls.find((call) =>
+        call.url.endsWith("/local-computer-enrollments"),
+      )?.body,
+    ).not.toHaveProperty("daemon_id");
+    expect(host.ctx.config.get()).toMatchObject({ computerId: "computer_1" });
+    expect(host.ctx.config.get().daemonId).toBeUndefined();
+  });
+
+  it("does not renew at start only to name the daemon to a server that cannot take it", async () => {
+    const { host, server } = await startEnrollment(
+      {
+        computerId: "computer_9",
+        tenantId: "tenant_acme",
+        ownerActorId: "actor_ann",
+      },
+      { credentialFor: "computer_9", capabilities: [] },
+    );
+    await vi.waitFor(() =>
+      expect(server.calls.map((call) => call.url)).toEqual(["/v0/me"]),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(server.calls.map((call) => call.url)).toEqual(["/v0/me"]);
+    expect(host.ctx.config.get().computerId).toBe("computer_9");
   });
 
   it("does not renew an enrollment made with the daemon's identity", async () => {

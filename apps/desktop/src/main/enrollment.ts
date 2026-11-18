@@ -11,6 +11,11 @@ type CreateRequest = Schemas["LocalComputerEnrollmentCreateRequest"];
 type Authorization = Schemas["LocalComputerEnrollmentAuthorization"];
 type ExchangeRequest = Schemas["LocalComputerEnrollmentExchangeRequest"];
 type CredentialBundle = Schemas["LocalComputerCredentialBundle"];
+type ServerCapability = NonNullable<
+  Schemas["CurrentIdentity"]["server_capabilities"]
+>[number];
+const DAEMON_ID_CAPABILITY: ServerCapability =
+  "local_computer_enrollment_daemon_id";
 
 // The main process both creates and exchanges the enrollment, so nothing is
 // ever redirected here. TeamHub still requires a loopback redirect URI.
@@ -41,7 +46,8 @@ export interface EnrollInput {
   // Keeps the same Computer identity when enrolling again.
   readonly computerId?: string;
   // This machine's Daemon ID. TeamHub renews the owner's Computer that holds
-  // it instead of computerId or a new Computer.
+  // it instead of computerId or a new Computer. Sent only to a server that
+  // lists the capability, since an older one rejects the field.
   readonly daemonId?: string;
   readonly fetch?: typeof fetch;
 }
@@ -54,6 +60,8 @@ export interface Enrolled {
   // The Runner Gateway the daemon connects to (ws or wss).
   readonly gatewayUrl: string;
   readonly credential: string;
+  // The Daemon ID the enrollment named, when the server accepted one.
+  readonly daemonId?: string;
 }
 
 // PKCE enrollment for this computer with the current web session:
@@ -82,9 +90,12 @@ export const enrollComputer = async (input: EnrollInput): Promise<Enrolled> => {
   if (me.status === 401)
     throw new EnrollmentError("NOT_SIGNED_IN", "Sign in before enrolling");
   if (!me.ok) throw rejected("Reading the signed-in account", me.status);
-  const tenantId = humanTenant(await me.json());
+  const identity: unknown = await me.json();
+  const tenantId = humanTenant(identity);
   if (!tenantId)
     throw new EnrollmentError("NO_TENANT", "The account has no workspace");
+  const daemonId =
+    input.daemonId && acceptsDaemonId(identity) ? input.daemonId : undefined;
 
   const verifier = randomBytes(32).toString("base64url");
   const createBody: CreateRequest = {
@@ -92,7 +103,7 @@ export const enrollComputer = async (input: EnrollInput): Promise<Enrolled> => {
     redirect_uri: REDIRECT_URI,
     code_challenge: createHash("sha256").update(verifier).digest("base64url"),
     ...(input.computerId ? { computer_id: input.computerId } : {}),
-    ...(input.daemonId ? { daemon_id: input.daemonId } : {}),
+    ...(daemonId ? { daemon_id: daemonId } : {}),
   };
   const created = await call(
     `/v0/tenants/${encodeURIComponent(tenantId)}/local-computer-enrollments`,
@@ -151,7 +162,18 @@ export const enrollComputer = async (input: EnrollInput): Promise<Enrolled> => {
     ownerActorId,
     gatewayUrl: bundle.gateway_url,
     credential: bundle.gateway_token,
+    ...(daemonId ? { daemonId } : {}),
   };
+};
+
+// Whether the server's /v0/me lists that its enrollment accepts daemon_id.
+// A TeamHub older than the desktop omits the list and rejects the field.
+export const acceptsDaemonId = (identity: unknown): boolean => {
+  const capabilities = (identity as { server_capabilities?: unknown })
+    ?.server_capabilities;
+  return (
+    Array.isArray(capabilities) && capabilities.includes(DAEMON_ID_CAPABILITY)
+  );
 };
 
 const isGatewayUrl = (value: unknown): value is string => {
@@ -275,22 +297,25 @@ export class EnrollmentModule implements Module {
       );
     });
     // Enrollments made before the owner was kept, or whose credential did
-    // not carry over from the bridge, are renewed for the same Computer. So
-    // are enrollments made without the daemon's identity: Set Up Again in an
-    // earlier release paired a new Computer whose daemon identity another
-    // Computer holds, and TeamHub renews the holder instead.
+    // not carry over from the bridge, are renewed for the same Computer.
     const config = ctx.config.get();
-    const daemonId = readDaemonId(this.#options.daemonIdentityFile);
+    if (!config.computerId) return;
+    const renewFailed = (error: unknown): void =>
+      ctx.log.warn("enrollment.renew_failed", { error: String(error) });
     if (
-      config.computerId &&
-      (!config.ownerActorId ||
-        this.#options.credentials.read()?.computerId !== config.computerId ||
-        (daemonId !== undefined && config.daemonId !== daemonId))
+      !config.ownerActorId ||
+      this.#options.credentials.read()?.computerId !== config.computerId
     ) {
-      void this.enroll().catch((error: unknown) =>
-        ctx.log.warn("enrollment.renew_failed", { error: String(error) }),
-      );
+      void this.enroll().catch(renewFailed);
+      return;
     }
+    // So are enrollments that did not name the daemon's identity, once the
+    // server accepts it: Set Up Again in an earlier release paired a new
+    // Computer whose daemon identity another Computer holds, and TeamHub
+    // renews the holder instead.
+    const daemonId = readDaemonId(this.#options.daemonIdentityFile);
+    if (daemonId !== undefined && config.daemonId !== daemonId)
+      void this.#nameDaemon().catch(renewFailed);
   }
 
   async stop(): Promise<void> {
@@ -299,10 +324,16 @@ export class EnrollmentModule implements Module {
 
   // Whether the window holds a valid session for the configured server.
   async signedIn(): Promise<boolean> {
+    return (await this.#identity()) !== undefined;
+  }
+
+  // The signed-in identity (/v0/me) on the configured server, or undefined
+  // when signed out or unreachable.
+  async #identity(): Promise<unknown> {
     const serverUrl = this.#ctx!.config.get().serverUrl;
-    if (!serverUrl) return false;
+    if (!serverUrl) return undefined;
     const cookie = await this.#options.sessionCookie(serverUrl);
-    if (!cookie) return false;
+    if (!cookie) return undefined;
     try {
       const response = await (this.#options.fetch ?? fetch)(
         new URL("/v0/me", serverUrl),
@@ -312,10 +343,16 @@ export class EnrollmentModule implements Module {
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         },
       );
-      return response.ok;
+      return response.ok ? ((await response.json()) as unknown) : undefined;
     } catch {
-      return false;
+      return undefined;
     }
+  }
+
+  // Renews the enrollment so it names the daemon's identity, only on a
+  // server that accepts it; on an older one nothing changes until it does.
+  async #nameDaemon(): Promise<void> {
+    if (acceptsDaemonId(await this.#identity())) await this.enroll();
   }
 
   enroll(): Promise<{ computerId: string }> {
@@ -364,7 +401,7 @@ export class EnrollmentModule implements Module {
       computerId: enrolled.computerId,
       tenantId: enrolled.tenantId,
       ownerActorId: enrolled.ownerActorId,
-      daemonId,
+      daemonId: enrolled.daemonId,
     });
     ctx.bus.emit("computer.changed", enrolled.computerId);
     ctx.log.info("enrollment.completed", { computer_id: enrolled.computerId });

@@ -54,15 +54,18 @@ Gateway and runs Agents. The daemon exits with the app.
 - `src/main/enrollment.ts`: Enrollment. Every enrollment names this
   machine's Daemon ID, read from the public key in
   `<userData>/computer/state/daemon-identity.json`, which outlives
-  unenrolling. TeamHub then renews the signed-in owner's Computer that holds
+  unenrolling, when the server's `/v0/me` lists the
+  `local_computer_enrollment_daemon_id` server capability; a TeamHub older
+  than the desktop omits it and gets the request without `daemon_id`, which
+  it would reject. TeamHub then renews the signed-in owner's Computer that holds
   that Daemon Identity, with its Agents, instead of pairing a new one, and
   removes the Computer the request named if it never connected and has no
   Agents (the orphan an earlier Set Up Again left). Another account's
   Computer holding it refuses with `DAEMON_IDENTITY_IN_USE`, shown as "This
   computer is connected to another Linger account". The config keeps the
   Daemon ID the enrollment named; at start an enrollment that named none or
-  another one is renewed once, which heals a computer stuck behind its own
-  Daemon Identity. The Runner Gateway closes a Computer whose Daemon Identity
+  another one is renewed once the server lists the capability, which heals a
+  computer stuck behind its own Daemon Identity. The Runner Gateway closes a Computer whose Daemon Identity
   another Computer holds with 1008 `daemon_identity_in_use:`.
 - `src/main/local-server.ts`: LocalServer, the setup page's Quick Install
   path. It fetches the pinned Node runtime and unpacks the linger source package
