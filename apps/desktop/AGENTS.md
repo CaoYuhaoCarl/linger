@@ -169,7 +169,10 @@ Gateway and runs Agents. The daemon exits with the app.
   when the instance's `user.env` changed. A source folder removed since, or
   one the installer no longer accepts as a Linger checkout (such as one the
   earlier Simplex app unpacked), is unpacked again from the app's package
-  first and replaces the recorded one. A Quick Install that stopped
+  first and replaces the recorded one. If the current package's source
+  directory is invalid, the staged replacement is validated before the old
+  directory is removed and its saved settings move to `user.env`.
+  A Quick Install that stopped
   before the computer enrolled is not resumed: setup shows again and Install
   finishes it, reusing a finished job only while its origin answers (a stopped
   server gets a new job, which starts the services again). The start failure
@@ -267,8 +270,9 @@ Gateway and runs Agents. The daemon exits with the app.
   installer left unconverted are logged as
   `local_server.legacy_instance_skipped` with their home and reason and do
   not hold the app back; only when `desktop` in the home in use stayed
-  unconverted, or the installer could not run there, LocalServer enters the
-  failed state with that reason, and Retry runs the migration again. There is
+  unconverted, its location cannot be read, or the installer could not run
+  there, LocalServer enters the failed state with that reason. Retry checks
+  the selected location again and resumes after migration. There is
   no downgrade path: an older build reads neither the converted instances nor
   the moved data folder. The bundle ID and
   Windows AppUserModelID are `com.simplexai.linger.desktop.preview`. The

@@ -90,8 +90,17 @@ export interface SourceDependencies {
   readonly mirrors?: readonly string[];
   readonly sha256: string;
 }
-// A file every complete source tree has.
-const SOURCE_MARKER = "scripts/source-native.mjs";
+// Checks whether a staged tree can replace the current one. Simple tool
+// archives only need a marker. Source packages also validate their manifest.
+type ArchiveMarker =
+  | string
+  | ((unpacked: string, directory: string) => Promise<boolean>);
+
+const isSourceRepository = (directory: string): Promise<boolean> =>
+  validateSourceRepository(directory).then(
+    () => true,
+    () => false,
+  );
 // Where scripts/source-native.mjs looks for that store in the checkout.
 const DEPENDENCY_STORE = ".linger-runtime/pnpm-store";
 
@@ -471,7 +480,7 @@ export class LocalServerModule implements Module {
       !!record && config.serverUrl === record.origin && !!config.computerId;
     if (migrationFailure) {
       // Resume would fail on the legacy record with a less useful error;
-      // Retry resumes, and the installer migrates again first.
+      // Retry checks the installation again before resuming.
       this.#set("failed", migrationFailure);
       if (resumes)
         ctx
@@ -483,7 +492,7 @@ export class LocalServerModule implements Module {
     });
     this.#offRetry = ctx.bus.on("local-server.retry", () => {
       if (this.#phase === "failed" && record) {
-        void this.#resume(record, this.#abort.signal);
+        void this.#resume(record, this.#abort.signal, !!migrationFailure);
       }
     });
     this.#offReset = ctx.bus.on("local-server.reset", () => {
@@ -1258,11 +1267,19 @@ export class LocalServerModule implements Module {
     ctx: ModuleContext,
     home: string,
   ): Promise<string | undefined> {
-    if (
-      !(await legacyMigrationPending(home)) ||
-      !existsSync(this.#installerScript())
-    )
-      return undefined;
+    let pending: boolean;
+    try {
+      pending = await legacyMigrationPending(home);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const failure = `Could not read the local installation: ${detail}`;
+      ctx.log.warn("local_server.home_migration_failed", {
+        home,
+        error: failure,
+      });
+      return failure;
+    }
+    if (!pending || !existsSync(this.#installerScript())) return undefined;
     const outcome = await new Promise<LegacyMigrationRun>((resolve) => {
       const child = spawn(
         process.execPath,
@@ -1414,7 +1431,7 @@ export class LocalServerModule implements Module {
       "source",
       archive.sha256.slice(0, 16),
     );
-    if (await isFile(path.join(directory, SOURCE_MARKER))) {
+    if (await isSourceRepository(directory)) {
       await this.#timed("teamhub_binaries", () =>
         this.#ensureTeamhubBinaries(directory, archive.sha256, signal),
       );
@@ -1423,13 +1440,25 @@ export class LocalServerModule implements Module {
       );
       return directory;
     }
+    const alreadyPublished = async (unpacked: string, current: string) => {
+      if (await isSourceRepository(current)) return true;
+      await validateSourceRepository(unpacked);
+      const previous = await stat(current).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return undefined;
+          throw error;
+        },
+      );
+      if (previous?.isDirectory()) await this.#adoptSourceKeys(home, current);
+      return false;
+    };
     if ("file" in archive)
-      await this.#extract(archive, directory, SOURCE_MARKER, signal);
+      await this.#extract(archive, directory, alreadyPublished, signal);
     else
       await this.#unpack(
         { ...archive, maxBytes: 1024 * MiB },
         directory,
-        SOURCE_MARKER,
+        alreadyPublished,
         path.join(home, "desktop", "downloads"),
         signal,
         (bytes) =>
@@ -1440,8 +1469,6 @@ export class LocalServerModule implements Module {
             bytes,
           ),
       );
-    if (!(await isFile(path.join(directory, SOURCE_MARKER))))
-      throw new Error("The source package is not a Linger source tree");
     await this.#timed("teamhub_binaries", () =>
       this.#ensureTeamhubBinaries(directory, archive.sha256, signal),
     );
@@ -1666,14 +1693,19 @@ export class LocalServerModule implements Module {
   // update deleted. They move once into the instance's user.env, which the
   // installer reads and every update keeps; a developer's checkout is left
   // alone.
-  async #adoptSourceKeys(home: string): Promise<void> {
+  async #adoptSourceKeys(home: string, source?: string): Promise<void> {
     if (this.#options.checkout) return;
     const parent = path.join(home, "desktop", "source");
     const root = path.join(home, "instances", LOCAL_INSTANCE);
-    for (const entry of await readdir(parent).catch(() => [] as string[])) {
+    const sources = source
+      ? [source]
+      : (await readdir(parent).catch(() => [] as string[])).map((entry) =>
+          path.join(parent, entry),
+        );
+    for (const directory of sources) {
       const moved = await adoptUserEnvironment(
         root,
-        path.join(parent, entry, ".env"),
+        path.join(directory, ".env"),
         (keys) => this.#ctx?.log.warn("local_server.keys_not_moved", { keys }),
       );
       if (moved.length)
@@ -1709,7 +1741,7 @@ export class LocalServerModule implements Module {
       maxBytes: number;
     },
     directory: string,
-    marker: string,
+    marker: ArchiveMarker,
     downloads: string,
     signal: AbortSignal,
     onBytes?: (bytes: { completed: number; total: number }) => void,
@@ -1749,7 +1781,7 @@ export class LocalServerModule implements Module {
   async #extract(
     archive: { file: string; sha256: string },
     directory: string,
-    marker: string,
+    marker: ArchiveMarker,
     signal: AbortSignal,
   ): Promise<void> {
     const file = path.resolve(this.#options.installerDirectory, archive.file);
@@ -1812,10 +1844,14 @@ export class LocalServerModule implements Module {
   async #publish(
     unpacked: string,
     directory: string,
-    marker: string,
+    marker: ArchiveMarker,
     signal: AbortSignal,
   ): Promise<void> {
-    if (existsSync(path.join(directory, marker))) return;
+    const alreadyPublished =
+      typeof marker === "string"
+        ? existsSync(path.join(directory, marker))
+        : await marker(unpacked, directory);
+    if (alreadyPublished) return;
     await removeRetrying(directory);
     await renameRetrying(unpacked, directory, {
       ...(this.#options.platform ? { platform: this.#options.platform } : {}),
@@ -2044,11 +2080,19 @@ export class LocalServerModule implements Module {
   // the services that are not running and asks for nothing. A newer source
   // package in an updated app waits for the person (updateSource) while the
   // installed one is still there.
-  async #resume(record: LocalRecord, signal: AbortSignal): Promise<void> {
+  async #resume(
+    record: LocalRecord,
+    signal: AbortSignal,
+    retryMigration = false,
+  ): Promise<void> {
     this.#origin = record.origin;
     const windows = this.#ctx?.get<WindowManagerModule>("WindowManager");
     try {
       this.#set("preparing", "Starting Linger on this computer…");
+      if (retryMigration) {
+        const failure = await this.#migrateLegacyHome(this.#ctx!, record.home);
+        if (failure) throw new Error(failure);
+      }
       // The window would show the server as unreachable until it is back.
       if (!(await this.#reachable(record.origin))) windows?.showStarting();
       const newer = this.#newerSource(record);
@@ -2058,10 +2102,7 @@ export class LocalServerModule implements Module {
       const repo =
         this.#options.sourceArchive &&
         !this.#options.checkout &&
-        !(await validateSourceRepository(record.repo).then(
-          () => true,
-          () => false,
-        ))
+        !(await isSourceRepository(record.repo))
           ? await this.#ensureSource(record.home, signal)
           : record.repo;
       await this.#runResume(record, repo, signal);

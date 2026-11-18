@@ -2166,6 +2166,80 @@ describe("LocalServerModule install location", () => {
 });
 
 describe("LocalServerModule after a restart", () => {
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "reports an unreadable chosen home and can retry after access is restored",
+    async () => {
+      const chosen = path.join(tempDirectory(), "chosen");
+      legacyInstance(chosen);
+      const blocked = path.join(chosen, "instances");
+      const f = fixture({}, enrolled, (home) => {
+        mkdirSync(path.join(home, "desktop"), { recursive: true });
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home: chosen,
+            repo: "/source",
+            origin: "http://localhost:3000",
+          }),
+        );
+      });
+      chmodSync(blocked, 0);
+      try {
+        await f.host.start();
+        expect(f.module.status().phase).toBe("failed");
+        expect(f.showStartFailed).toHaveBeenCalledWith(
+          expect.stringMatching(/could not read.*EACCES/i),
+        );
+        chmodSync(blocked, 0o700);
+        f.bus.emit("local-server.retry");
+        await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+        expect(instanceProject(chosen)).toBe("linger-desktop-1");
+      } finally {
+        chmodSync(blocked, 0o700);
+        await f.host.stop("quit");
+      }
+    },
+  );
+
+  it("replaces an invalid current source and keeps its saved settings", async () => {
+    const archive = sourceArchive(tempDirectory());
+    const file = path.join(tempDirectory(), "linger.tar.gz");
+    writeFileSync(file, archive.bytes);
+    const repo = (home: string) =>
+      path.join(home, "desktop", "source", archive.sha256.slice(0, 16));
+    const f = fixture(
+      { sourceArchive: { file, sha256: archive.sha256 } },
+      enrolled,
+      (home) => {
+        unpackedSource(repo(home), "invalid-package");
+        writeFileSync(path.join(repo(home), ".env"), "TZ=Asia/Shanghai\n");
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: repo(home),
+            origin: "http://localhost:3000",
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    try {
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(
+        readFileSync(path.join(repo(f.home), "package.json"), "utf8"),
+      ).toBe(JSON.stringify({ name: "linger" }));
+      expect(
+        readFileSync(
+          path.join(f.home, "instances", "desktop", "user.env"),
+          "utf8",
+        ),
+      ).toContain("TZ='Asia/Shanghai'");
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
   // This computer connected to the installed server, so setup finished.
   const enrolled = {
     serverUrl: "http://localhost:3000",
