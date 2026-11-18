@@ -14,6 +14,7 @@ import {
 import { localComputersQueryKey } from "@/features/local-computer/local-computer-queries";
 import {
   localModelsQueryKey,
+  localModelsSummaryQueryKey,
   tenantLocalModelsQueryKey,
 } from "@/features/local-models/local-models-queries";
 import { teamHubDocumentsQueryKey } from "@/features/teamhub/document-queries";
@@ -171,8 +172,11 @@ async function applyInvalidation(
       ]);
       return;
     case "local-models":
-      await refreshActiveQueries(queryClient, [
-        localModelsQueryKey(tenantId, hint.id),
+      await Promise.all([
+        refreshActiveQueries(queryClient, [
+          localModelsQueryKey(tenantId, hint.id),
+        ]),
+        refreshLocalModelsSummary(queryClient, tenantId),
       ]);
       return;
     case "another-me":
@@ -219,6 +223,44 @@ function refreshDocument(queryClient: QueryClient, documentId: string) {
       predicate: (query) => query.queryKey.includes(documentId),
     }),
   ]);
+}
+
+/**
+ * A downloading Computer sends a snapshot every 2 s, so the Computer list
+ * that summarizes every snapshot refreshes at most once per interval: at
+ * once when the last refresh is old enough, otherwise once when it is.
+ */
+const LOCAL_MODELS_SUMMARY_REFRESH_MS = 5_000;
+const summaryRefreshes = new WeakMap<
+  QueryClient,
+  Map<string, { at: number; timer?: ReturnType<typeof setTimeout> }>
+>();
+
+async function refreshLocalModelsSummary(
+  queryClient: QueryClient,
+  tenantId: string,
+) {
+  let tenants = summaryRefreshes.get(queryClient);
+  if (!tenants) {
+    tenants = new Map();
+    summaryRefreshes.set(queryClient, tenants);
+  }
+  const state = tenants.get(tenantId) ?? { at: -Infinity };
+  tenants.set(tenantId, state);
+  if (state.timer) return;
+  const refresh = () => {
+    state.timer = undefined;
+    state.at = Date.now();
+    return refreshActiveQueries(queryClient, [
+      localModelsSummaryQueryKey(tenantId),
+    ]);
+  };
+  const wait = state.at + LOCAL_MODELS_SUMMARY_REFRESH_MS - Date.now();
+  if (wait <= 0) {
+    await refresh();
+    return;
+  }
+  state.timer = setTimeout(() => void refresh(), wait);
 }
 
 // Agent availability and Room activity.

@@ -12,9 +12,13 @@ export type LocalModelPool = Schemas["LocalModelPool"];
 export type LocalModelHost = Schemas["LocalModelHost"];
 export type LocalModelActionRequest = Schemas["LocalModelActionRequest"];
 export type LocalModelAction = LocalModelActionRequest["action"];
+export type LocalModelsComputerSummary = Schemas["LocalModelsComputerSummary"];
+export type LocalModelsReadinessState = Schemas["LocalModelsReadinessState"];
 
 const localModelsPath =
   "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models";
+const localModelsComputersPath =
+  "/v0/tenants/{tenantId}/local-models/computers";
 const localModelActionPath =
   "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions";
 
@@ -25,6 +29,32 @@ export function tenantLocalModelsQueryKey(tenantId: string) {
 
 export function localModelsQueryKey(tenantId: string, computerId: string) {
   return [...tenantLocalModelsQueryKey(tenantId), computerId] as const;
+}
+
+/**
+ * The viewer's own Computers with their readiness, as the picker lists them.
+ * It sits under the Tenant prefix, so a computers hint refreshes it; a
+ * local-models hint refreshes it too, throttled.
+ */
+export function localModelsSummaryQueryKey(tenantId: string) {
+  return [...tenantLocalModelsQueryKey(tenantId), "summary", "mine"] as const;
+}
+
+export function localModelsSummaryQueryOptions(
+  client: TeamHubClient,
+  tenantId: string,
+) {
+  return queryOptions({
+    queryFn: ({ signal }) =>
+      teamHubData(
+        client.api.GET(localModelsComputersPath, {
+          params: { path: { tenantId }, query: { scope: "mine" } },
+          signal,
+        }),
+      ),
+    queryKey: localModelsSummaryQueryKey(tenantId),
+    retry: false,
+  });
 }
 
 /**

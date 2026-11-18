@@ -7,7 +7,10 @@ import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
-import { localModelsQueryKey } from "@/features/local-models/local-models-queries";
+import {
+  localModelsQueryKey,
+  localModelsSummaryQueryKey,
+} from "@/features/local-models/local-models-queries";
 import { teamHubDocumentsQueryKey } from "@/features/teamhub/document-queries";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubRoomEvent } from "@/features/teamhub/teamhub-types";
@@ -165,6 +168,42 @@ describe("TeamHub event signals", () => {
     await vi.waitFor(() => expect(mac.fetch).toHaveBeenCalledTimes(2));
     lab.stop();
     mac.stop();
+  });
+
+  it("refreshes the Computer list for local-models hints at most once per 5 s", async () => {
+    vi.useFakeTimers();
+    try {
+      const queryClient = new QueryClient();
+      const summary = observe(
+        queryClient,
+        localModelsSummaryQueryKey("tenant-a"),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(summary.fetch).toHaveBeenCalledOnce();
+      const snapshot = () =>
+        applyTeamHubEventSignal(queryClient, {
+          hint: { id: "lab", resource: "local-models", tenant_id: "tenant-a" },
+          type: "resource.invalidated",
+        });
+
+      await snapshot();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(summary.fetch).toHaveBeenCalledTimes(2);
+
+      // Snapshots every 2 s while a download runs: one trailing refresh.
+      await snapshot();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await snapshot();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(summary.fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(summary.fetch).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(summary.fetch).toHaveBeenCalledTimes(3);
+      summary.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refreshes the directory, the Room members and the Room list it shows", async () => {
