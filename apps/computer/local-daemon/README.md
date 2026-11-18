@@ -157,6 +157,41 @@ model.
   passed through as `localmodels` reports it; the endpoint keeps only the
   loaded engine's `base_url`.
 
+## Computer profile
+
+`runner.computer_profile` tells TeamHub what local-models readiness needs
+before the tool runs. `internal/computerprofile` gathers it:
+
+- Install kind: `desktop` when the config has a `desktop` section; `container`
+  when `/.dockerenv` (Docker) or `/run/.containerenv` (Podman) exists or PID
+  1's cgroup path names Docker, containerd, Kubernetes, Podman or LXC;
+  otherwise `cli`.
+- Accelerators, probed within 5 s on each welcomed connection and every 6 h
+  while it lasts, off the connection path. NVIDIA GPUs and their memory come
+  only from `nvidia-smi --query-gpu=name,memory.total`: a missing
+  `nvidia-smi`, or one that exits because no driver answers, means no usable
+  NVIDIA GPU. A Mac reads `hw.memsize`, `hw.optional.arm64` and the CPU brand
+  with `sysctl`; on Apple silicon the memory is the GPU's unified memory.
+  Linux reads `MemTotal` and lists AMD and Intel GPUs from the PCI display
+  class in sysfs; Windows reads memory and adapters from one PowerShell CIM
+  query, keyed by the PnP vendor ID. A probe that times out or cannot read the
+  memory reports `probe: failed`, which says nothing about the hardware.
+- Local models: the config's `local_models` section with `mode` `local` (the
+  default; the tool paths above, and `managed: true` when the
+  `local-models enable` command installed the kit) or `remote` (`label` and
+  an optional Linger `computer_id` of the machine that serves the models, and
+  no tool, so the library reports `TOOL_NOT_INSTALLED`). Remote mode is only
+  ever set in the config, never inferred.
+- Update: `internal/selfupdate`'s last attempt. A failure (`ARCHIVE_INVALID`,
+  `DOWNLOAD_FAILED`, `VERIFY_FAILED`, `STAGE_FAILED`, `ACTIVATE_FAILED`,
+  including a rollback after an unconfirmed upgrade) stays reported through
+  retries until an attempt succeeds or the target is the running build. A
+  desktop Computer does not update itself and reports `idle`.
+
+The frame is sent only on a connection whose welcome names `computer_profile`
+(the Agent Service names it for Computer 0.53.0 or later), after the first
+probe, and again only when the profile changes; it is not periodic.
+
 ## Codex models cache
 
 Signed in with ChatGPT, Codex blocks its first `thread/start` on a 4–5 s

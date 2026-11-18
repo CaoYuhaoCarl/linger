@@ -1,0 +1,17 @@
+{
+  "memory": 34282242048,
+  "gpus": [
+    {
+      "name": "NVIDIA GeForce RTX 4070",
+      "pnp": "PCI\\VEN_10DE\u0026DEV_2786\u0026SUBSYS_51151462\u0026REV_A1\\4\u00262B8F0C1F\u00260\u00260008"
+    },
+    {
+      "name": "Intel(R) UHD Graphics 770",
+      "pnp": "PCI\\VEN_8086\u0026DEV_4680\u0026SUBSYS_7D891462\u0026REV_0C\\3\u002611583659\u00260\u002610"
+    },
+    {
+      "name": "Microsoft Basic Display Adapter",
+      "pnp": "ROOT\\BASICDISPLAY\\0000"
+    }
+  ]
+}

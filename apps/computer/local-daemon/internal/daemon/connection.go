@@ -317,13 +317,19 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 		d.prewarmOnce.Do(func() { go p.Prewarm(ctx) })
 	}
 	d.setGatewayState("connected")
-	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
-	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, localModels); err != nil {
+	features := serviceFeatures{
+		localModels:     slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels),
+		computerProfile: slices.Contains(command.ServiceFeatures, serviceFeatureComputerProfile),
+	}
+	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, features); err != nil {
 		return err
 	}
 	go d.heartbeatLoop(connectionCtx, stream, command.HeartbeatIntervalMs)
-	if localModels {
+	if features.localModels {
 		d.refreshLocalModels(connectionCtx)
+	}
+	if features.computerProfile && d.computerProfile != nil {
+		go d.computerProfileLoop(connectionCtx)
 	}
 	return nil
 }
@@ -401,6 +407,9 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 	}
 	if d.localModelsStream == stream {
 		d.localModelsStream = nil
+	}
+	if d.computerProfileStream == stream {
+		d.computerProfileStream = nil
 	}
 	d.connectionMu.Unlock()
 }
@@ -511,16 +520,26 @@ func (d *Daemon) replayRetainedEvents(ctx context.Context, stream transport.Stre
 	return nil
 }
 
-// activateStreamAndReplay makes stream the live connection; localModels says
-// whether its Agent Service accepts runner.local_models.
-func (d *Daemon) activateStreamAndReplay(ctx context.Context, stream transport.Stream, operationIDs []string, localModels bool) error {
+// serviceFeatures are the gated frame families the connection's Agent
+// Service accepts, from its runner.welcome.
+type serviceFeatures struct {
+	localModels     bool
+	computerProfile bool
+}
+
+// activateStreamAndReplay makes stream the live connection and opens the
+// frame families its Agent Service accepts.
+func (d *Daemon) activateStreamAndReplay(ctx context.Context, stream transport.Stream, operationIDs []string, features serviceFeatures) error {
 	d.connectionMu.Lock()
 	defer d.connectionMu.Unlock()
 	d.diagnosticsStream = stream
 	d.operationStream = stream
-	d.localModelsStream = nil
-	if localModels {
+	d.localModelsStream, d.computerProfileStream = nil, nil
+	if features.localModels {
 		d.localModelsStream = stream
+	}
+	if features.computerProfile {
+		d.computerProfileStream = stream
 	}
 	return d.replayRetainedEvents(ctx, stream, operationIDs)
 }
