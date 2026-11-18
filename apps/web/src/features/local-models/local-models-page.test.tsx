@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { TeamHubEventSync } from "@/features/rooms/event-sync";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
-import type { TeamHubLocalComputerPage } from "@/features/teamhub/teamhub-types";
 import {
   createTestTeamHubRuntime,
   type TestTeamHubRuntime,
@@ -21,14 +20,19 @@ import {
 import { teamHubErrorResponse } from "@/test/teamhub-test-server";
 
 import { LocalModelsPage } from "./local-models-page";
-import type { LocalModelsView } from "./local-models-queries";
+import type {
+  LocalModelsComputerSummary,
+  LocalModelsView,
+} from "./local-models-queries";
 import {
+  computerSummary,
   gb,
   gpuPool,
   labView,
   localModel,
   macView,
   modelView,
+  summaryOf,
 } from "./local-models-test-support";
 
 const tenantId = "tenant-northstar";
@@ -37,36 +41,39 @@ const viewPath =
 const actionPath =
   "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/{modelId}/actions";
 
-type InventoryComputer = TeamHubLocalComputerPage["items"][number];
+const summaryPath = "/v0/tenants/{tenantId}/local-models/computers";
 
 interface Fixture {
   actions: { body: unknown; computerId: string; modelId: string }[];
+  computers: LocalModelsComputerSummary[];
   runtime: TestTeamHubRuntime;
+  summaryScopes: (string | null)[];
   views: Record<string, LocalModelsView>;
 }
 
+/**
+ * Serves each view, and the viewer's Computer list: by default one row per
+ * view, each the viewer's own.
+ */
 function setup(
   views: LocalModelsView[] = [labView(), macView()],
-  inventory?: InventoryComputer[],
+  computers: LocalModelsComputerSummary[] = views.map(summaryOf),
 ): Fixture {
   const runtime = createTestTeamHubRuntime();
-  const template = runtime.seed.localComputers[0]!;
-  runtime.seed.localComputers =
-    inventory ??
-    views.map((view) => ({
-      ...template,
-      computer_id: view.computer.computer_id,
-      display_name: view.computer.display_name,
-      status: view.computer.status,
-    }));
   const fixture: Fixture = {
     actions: [],
+    computers,
     runtime,
+    summaryScopes: [],
     views: Object.fromEntries(
       views.map((view) => [view.computer.computer_id, view]),
     ),
   };
   runtime.server
+    .on("GET", summaryPath, ({ query }) => {
+      fixture.summaryScopes.push(query.get("scope"));
+      return { items: fixture.computers };
+    })
     .on("GET", viewPath, ({ params }) => {
       const view = fixture.views[params.computerId!];
       return view ?? teamHubErrorResponse(404, "LOCAL_COMPUTER_NOT_FOUND");
@@ -87,16 +94,6 @@ function setup(
       );
     });
   return fixture;
-}
-
-function inventoryComputer(view: LocalModelsView): InventoryComputer {
-  const template = createTestTeamHubRuntime().seed.localComputers[0]!;
-  return {
-    ...template,
-    computer_id: view.computer.computer_id,
-    display_name: view.computer.display_name,
-    status: view.computer.status,
-  };
 }
 
 function CurrentSearch() {
@@ -219,8 +216,20 @@ function withModel(
   };
 }
 
+/** lab-118 as another member, Wei Hao, connected it. */
+function sharedLabView() {
+  return labView({
+    computer: {
+      ...labView().computer,
+      owner: { actor_id: "actor-wei", display_name: "Wei Hao" },
+    },
+    viewer_is_owner: false,
+  });
+}
+
 afterEach(() => {
   delete (window as { lingerDesktop?: unknown }).lingerDesktop;
+  window.localStorage.clear();
 });
 
 describe("LocalModelsPage", () => {
@@ -616,7 +625,7 @@ describe("LocalModelsPage", () => {
 
   it("opens a Computer the viewer may read but does not own", async () => {
     // The owned-Computer inventory is empty; the library API allows the read.
-    const fixture = setup([labView({ viewer_is_owner: false })], []);
+    const fixture = setup([sharedLabView()], []);
     renderPage(fixture, "?computer=computer-lab");
     await findModels();
 
@@ -625,7 +634,7 @@ describe("LocalModelsPage", () => {
     );
     expect(
       screen.getByText(
-        "Only the person who connected lab-118 can download, load or remove its models.",
+        "Only Wei Hao, who connected lab-118, can download, load or remove its models.",
       ),
     ).toBeVisible();
     expect(
@@ -637,10 +646,7 @@ describe("LocalModelsPage", () => {
   });
 
   it("keeps a shared Computer selected next to the viewer's own", async () => {
-    const fixture = setup(
-      [labView({ viewer_is_owner: false }), macView()],
-      [inventoryComputer(macView())],
-    );
+    const fixture = setup([sharedLabView(), macView()], [summaryOf(macView())]);
     renderPage(fixture, "?computer=computer-lab");
     await findModels();
 
@@ -648,7 +654,7 @@ describe("LocalModelsPage", () => {
     expect(card("Qwen3 Coder 30B")).toBeVisible();
     expect(
       screen.getByText(
-        "Only the person who connected lab-118 can download, load or remove its models.",
+        "Only Wei Hao, who connected lab-118, can download, load or remove its models.",
       ),
     ).toBeVisible();
   });
@@ -841,11 +847,11 @@ describe("LocalModelsPage", () => {
   });
 
   it("lets only the owner act and tells everyone else why", async () => {
-    renderPage(setup([labView({ viewer_is_owner: false })]));
+    renderPage(setup([sharedLabView()], []), "?computer=computer-lab");
     await findModels();
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Only the person who connected lab-118 can download, load or remove its models.",
+      "Only Wei Hao, who connected lab-118, can download, load or remove its models.",
     );
     expect(
       screen.getByRole("button", { name: "Unload Qwen3 Coder 30B" }),
@@ -1058,5 +1064,240 @@ describe("LocalModelsPage", () => {
     expect(statuses()).toContain(
       "GPT-OSS 20B: Downloading · 25% · 50 MB/s · 5m left",
     );
+  });
+});
+
+function desktopOn(computerId: string) {
+  (window as { lingerDesktop?: unknown }).lingerDesktop = {
+    computer: {
+      enroll: () => Promise.reject(new Error("not used")),
+      getStatus: () =>
+        Promise.resolve({
+          activeOperations: 0,
+          bridge: "connected",
+          computerId,
+          runtime: "ready",
+        }),
+      onStatus: () => () => undefined,
+    },
+  };
+}
+
+async function openPicker() {
+  fireEvent.click(await screen.findByRole("combobox", { name: "Computer" }));
+  return screen.findByRole("listbox", { name: "Your computers" });
+}
+
+function groupOptions(listbox: HTMLElement, name: string) {
+  return within(within(listbox).getByRole("group", { name }))
+    .getAllByRole("option")
+    .map((option) => option.getAttribute("aria-label"));
+}
+
+async function addressSearch(search: string) {
+  await waitFor(() =>
+    expect(screen.getByText(/Address search:/)).toHaveTextContent(
+      `Address search: ${search}`,
+    ),
+  );
+}
+
+describe("LocalModelsPage computer picker", () => {
+  const lab = summaryOf(labView());
+  const mac = summaryOf(macView());
+
+  it("groups this computer, the viewer's online ones and their offline ones behind a toggle", async () => {
+    desktopOn("computer-mac");
+    renderPage(
+      setup(
+        [labView(), macView()],
+        [
+          lab,
+          mac,
+          computerSummary({ computer_id: "ci-runner-3" }),
+          computerSummary({
+            computer_id: "old-box",
+            last_seen_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+            readiness: {
+              enable_command: false,
+              reason: "DAEMON_LEGACY",
+              state: "needs_reinstall",
+            },
+            status: "offline",
+          }),
+        ],
+      ),
+    );
+    await addressSearch("?computer=computer-mac");
+
+    const listbox = await openPicker();
+    expect(
+      screen.queryByRole("searchbox", { name: "Search computers" }),
+    ).not.toBeInTheDocument();
+    expect(groupOptions(listbox, "This computer")).toEqual(["Mac Studio"]);
+    expect(groupOptions(listbox, "Yours, online")).toEqual([
+      "lab-118",
+      "ci-runner-3",
+    ]);
+    expect(
+      within(listbox).queryByRole("group", { name: "Yours, offline" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(listbox).getByRole("option", { name: "lab-118" }),
+    ).toHaveAccessibleDescription("1 loaded");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 offline" }));
+    expect(groupOptions(listbox, "Yours, offline")).toEqual(["old-box"]);
+    // Focus stays in the popup, so Escape still closes it.
+    await waitFor(() =>
+      expect(
+        within(listbox).getByRole("option", { name: "old-box" }),
+      ).toHaveFocus(),
+    );
+    expect(
+      within(listbox).getByRole("option", { name: "old-box" }),
+    ).toHaveAccessibleDescription("Offline · 3h · Needs reinstall");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("listbox", { name: "Your computers" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("searches above six Computers, reaching offline ones too", async () => {
+    renderPage(
+      setup(
+        [labView()],
+        [
+          lab,
+          ...["alpha", "bravo", "charlie", "delta", "echo"].map((name) =>
+            computerSummary({ computer_id: name }),
+          ),
+          computerSummary({
+            computer_id: "studio",
+            platform: "darwin",
+            status: "offline",
+          }),
+        ],
+      ),
+      "?computer=computer-lab",
+    );
+
+    const listbox = await openPicker();
+    const search = screen.getByRole("searchbox", { name: "Search computers" });
+    await waitFor(() => expect(search).toHaveFocus());
+    fireEvent.change(search, { target: { value: "macOS" } });
+
+    expect(within(listbox).getAllByRole("option")).toHaveLength(1);
+    expect(groupOptions(listbox, "Yours, offline")).toEqual(["studio"]);
+    fireEvent.change(search, { target: { value: "zulu" } });
+    expect(screen.getByText("No computers match")).toBeVisible();
+  });
+
+  it("lists only the viewer's own Computers, asking for scope mine", async () => {
+    const fixture = setup(
+      [labView(), macView()],
+      [
+        lab,
+        mac,
+        computerSummary({
+          computer_id: "computer-wei",
+          display_name: "Wei's MacBook",
+          owner: { actor_id: "actor-wei", display_name: "Wei Hao" },
+          viewer_is_owner: false,
+        }),
+      ],
+    );
+    renderPage(fixture, "?computer=computer-lab");
+
+    const listbox = await openPicker();
+    expect(
+      within(listbox)
+        .getAllByRole("option")
+        .map((option) => option.getAttribute("aria-label")),
+    ).toEqual(["lab-118", "Mac Studio"]);
+    expect(fixture.summaryScopes).toEqual(["mine"]);
+  });
+
+  it("opens another member's linked Computer read-only, naming the owner, next to the viewer's picker", async () => {
+    renderPage(
+      setup([sharedLabView(), macView()], [mac]),
+      "?computer=computer-lab",
+    );
+    await findModels();
+
+    expect(
+      screen.getByText(
+        "Only Wei Hao, who connected lab-118, can download, load or remove its models.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("combobox", { name: "Computer" }),
+    ).toHaveTextContent("Your computers");
+    const listbox = await openPicker();
+    expect(within(listbox).getAllByRole("option")).toHaveLength(1);
+  });
+
+  it("opens the online Computer with the most models loaded by default and writes it to the address", async () => {
+    renderPage(
+      setup(
+        [labView(), macView()],
+        [
+          computerSummary({ computer_id: "idle" }),
+          { ...mac, counts: { loaded: 1, on_disk: 2, working: 0 } },
+          { ...lab, counts: { loaded: 2, on_disk: 2, working: 0 } },
+        ],
+      ),
+    );
+
+    await addressSearch("?computer=computer-lab");
+    await waitFor(() =>
+      expect(statuses()[0]).toBe("Qwen3 Coder 30B: Loaded · GPU 0 · 21.4 GB"),
+    );
+  });
+
+  it("opens the last Computer picked on this device, and remembers a new pick", async () => {
+    window.localStorage.setItem(
+      `local-models-last-computer.v1:${tenantId}`,
+      "computer-mac",
+    );
+    renderPage(setup());
+    await addressSearch("?computer=computer-mac");
+
+    const listbox = await openPicker();
+    fireEvent.click(within(listbox).getByRole("option", { name: "lab-118" }));
+    await addressSearch("?computer=computer-lab");
+    expect(
+      window.localStorage.getItem(`local-models-last-computer.v1:${tenantId}`),
+    ).toBe("computer-lab");
+  });
+
+  it("ignores a last pick that is no longer the viewer's", async () => {
+    window.localStorage.setItem(
+      `local-models-last-computer.v1:${tenantId}`,
+      "computer-gone",
+    );
+    renderPage(setup([labView(), macView()], [mac, lab]));
+    await addressSearch("?computer=computer-lab");
+  });
+
+  it("updates a chip when a snapshot hint arrives", async () => {
+    const fixture = setup();
+    renderPage(fixture, "?computer=computer-lab");
+    const trigger = await screen.findByRole("combobox", { name: "Computer" });
+    await waitFor(() => expect(trigger).toHaveTextContent("1 loaded"));
+
+    fixture.computers = [
+      {
+        ...lab,
+        counts: { loaded: 1, on_disk: 2, working: 1 },
+        readiness: { enable_command: false, state: "working" },
+      },
+      mac,
+    ];
+    publishSnapshot(fixture, labView());
+
+    await waitFor(() => expect(trigger).toHaveTextContent("Working"));
   });
 });
