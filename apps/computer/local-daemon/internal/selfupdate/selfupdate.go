@@ -84,6 +84,9 @@ type Options struct {
 	TransientBackoff []time.Duration
 	// Rand returns a value in [0, 1) for the backoff jitter; nil selects math/rand.
 	Rand func() float64
+	// OnStatusChange is called, on its own goroutine, whenever Status may
+	// have changed.
+	OnStatusChange func()
 }
 
 // transientBackoff is the retry schedule for network failures, before jitter.
@@ -140,6 +143,11 @@ type Manager struct {
 	wantTarget StageRequest
 	// transientFailures counts consecutive network failures for the backoff.
 	transientFailures int
+	// failure is the last attempt's failure until an attempt succeeds or the
+	// target is the running build; attemptAt is when the running attempt
+	// started.
+	failure   *Status
+	attemptAt time.Time
 }
 
 // New resolves the install layout and, when a previous upgrade is awaiting
@@ -271,6 +279,7 @@ func (m *Manager) loadFailed() {
 	}
 	m.failedSHA256 = record.AppSHA256
 	m.failedAt, _ = time.Parse(time.RFC3339, record.FailedAt)
+	m.recordFailureLocked(m.failedAt, &StageError{Stage: "activate", Err: errors.New("the upgraded Computer did not confirm and was rolled back")})
 }
 
 func (m *Manager) removeFailed() {
@@ -376,6 +385,7 @@ func (m *Manager) rollback(reason string) {
 	}
 	m.failedSHA256 = marker.TargetAppSHA256
 	m.failedAt = m.options.Now()
+	m.recordFailureLocked(m.failedAt, &StageError{Stage: "activate", Err: errors.New(reason)})
 	m.setHandoff(handoff)
 }
 
@@ -443,6 +453,9 @@ func (m *Manager) maybeUpgrade(ctx context.Context, release *protocol.TargetRele
 		m.mu.Lock()
 		m.wantTarget = StageRequest{}
 		m.stopBackoffLocked()
+		if request.ID == m.appSHA256 {
+			m.clearFailureLocked()
+		}
 		m.mu.Unlock()
 		return
 	}
@@ -475,6 +488,8 @@ func (m *Manager) maybeUpgrade(ctx context.Context, release *protocol.TargetRele
 		return
 	}
 	m.phase = phaseRunning
+	m.attemptAt = m.options.Now()
+	m.statusChanged()
 	go m.upgrade(ctx, delayStart)
 }
 
@@ -599,6 +614,7 @@ func (m *Manager) activated(ctx context.Context, target string) {
 	if m.failedSHA256 != "" {
 		m.removeFailed()
 	}
+	m.clearFailureLocked()
 	m.setHandoff(handoff)
 	m.mu.Unlock()
 	m.logger.Info("Computer upgrade staged; restarting into the new bundle", "target_app_sha256", target, "bundle", bundle)
@@ -735,6 +751,7 @@ func (m *Manager) fail(ctx context.Context, target string, err error, transient 
 		delay = m.options.RetryDelay
 	}
 	attributes = append(attributes, "transient", transient, "retry_in", delay.String())
+	m.recordFailureLocked(m.options.Now(), err)
 	m.logger.Warn("Computer upgrade failed; retrying after backoff", attributes...)
 	m.phase = phaseBackoff
 	m.retryTimer = time.AfterFunc(delay, func() { m.retry(ctx) })
@@ -788,6 +805,9 @@ func (m *Manager) askedTarget() *protocol.TargetRelease {
 func (m *Manager) setPhase(next phase) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.phase != next {
+		m.statusChanged()
+	}
 	m.phase = next
 }
 

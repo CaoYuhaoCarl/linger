@@ -115,29 +115,30 @@ func TestScriptStagerReportsDownloadStatus(t *testing.T) {
 // An archive that is not the welcome's, or not a usable one, is never run.
 func TestScriptStagerVerifiesArchiveBeforeRunningInstaller(t *testing.T) {
 	cases := []struct {
-		name string
+		name  string
+		stage string
 		// archive returns the archive the welcome names and the bytes served.
 		archive func(t *testing.T, ran string) (named, served []byte)
 		adjust  func(*StageRequest)
 	}{
-		{name: "sha256 mismatch", archive: func(t *testing.T, ran string) ([]byte, []byte) {
+		{name: "sha256 mismatch", stage: "verify", archive: func(t *testing.T, ran string) ([]byte, []byte) {
 			named := installerArchive(t, "exit 0\n")
 			served := installerArchive(t, "touch '"+ran+"'\n")
 			return named, served
 		}},
-		{name: "larger than the welcome size", archive: func(t *testing.T, ran string) ([]byte, []byte) {
+		{name: "larger than the welcome size", stage: "verify", archive: func(t *testing.T, ran string) ([]byte, []byte) {
 			archive := installerArchive(t, "touch '"+ran+"'\n")
 			return archive, archive
 		}, adjust: func(request *StageRequest) { request.App.Size-- }},
-		{name: "no installer template", archive: func(t *testing.T, _ string) ([]byte, []byte) {
+		{name: "no installer template", stage: "archive", archive: func(t *testing.T, _ string) ([]byte, []byte) {
 			archive := appArchive(t, archiveEntry{name: "daemon/linger-computer-daemon", typeflag: tar.TypeReg, content: "x"})
 			return archive, archive
 		}},
-		{name: "installer template is a symlink", archive: func(t *testing.T, _ string) ([]byte, []byte) {
+		{name: "installer template is a symlink", stage: "archive", archive: func(t *testing.T, _ string) ([]byte, []byte) {
 			archive := appArchive(t, archiveEntry{name: installerEntry, typeflag: tar.TypeSymlink, linkname: "/bin/sh"})
 			return archive, archive
 		}},
-		{name: "not a gzip archive", archive: func(*testing.T, string) ([]byte, []byte) {
+		{name: "not a gzip archive", stage: "archive", archive: func(*testing.T, string) ([]byte, []byte) {
 			return []byte("plain text"), []byte("plain text")
 		}},
 	}
@@ -152,7 +153,7 @@ func TestScriptStagerVerifiesArchiveBeforeRunningInstaller(t *testing.T) {
 			}
 
 			_, err := ScriptStager{}.Prepare(context.Background(), request)
-			expectStageError(t, err, "verify")
+			expectStageError(t, err, tc.stage)
 			if _, statErr := os.Stat(ran); !os.IsNotExist(statErr) {
 				t.Fatal("installer ran from an unverified archive")
 			}
