@@ -854,6 +854,7 @@ type LocalComputer struct {
 	OwnerTenantID         string             `json:"owner_tenant_id"`
 	OwnerActorID          string             `json:"owner_actor_id"`
 	ConnectedAt           pgtype.Timestamptz `json:"connected_at"`
+	UpdatePendingSince    pgtype.Timestamptz `json:"update_pending_since"`
 }
 
 type LocalComputerEnrollment struct {

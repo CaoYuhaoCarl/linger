@@ -51,6 +51,7 @@ func nvidiaGPU(memory int64) httpapi.LocalComputerAcceleratorGpu {
 func TestLocalModelsReadinessRules(t *testing.T) {
 	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
 	justConnected, longAgo := now.Add(-30*time.Second), now.Add(-time.Hour)
+	pendingAWhile, pendingTooLong := now.Add(-2*time.Hour), now.Add(-2*time.Hour-time.Second)
 	nvidiaHost := &readinessHost{"linux", "x86_64", 1}
 	macHost := &readinessHost{"darwin", "arm64", 0}
 	gpuLessHost := &readinessHost{"linux", "x86_64", 0}
@@ -82,6 +83,18 @@ func TestLocalModelsReadinessRules(t *testing.T) {
 			want{httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessDaemonLegacy, httpapi.LocalModelsSetupPathUnknown}},
 		{"2: 0.50.9 is Simplex era", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.50.9"},
 			want{httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessDaemonLegacy, httpapi.LocalModelsSetupPathUnknown}},
+		{"2 before 3: a stuck Simplex-era Daemon stays legacy", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.50.0", UpdatePendingSince: &pendingTooLong},
+			want{httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessDaemonLegacy, httpapi.LocalModelsSetupPathUnknown}},
+		{"3: 0.51.0 behind for more than 2 h", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.51.0", UpdatePendingSince: &pendingTooLong},
+			want{httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessUpdateFailed, httpapi.LocalModelsSetupPathUnknown}},
+		{"3: a snapshot does not hide a stuck update", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.52.0", UpdatePendingSince: &pendingTooLong, Summary: ready},
+			want{httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessUpdateFailed, httpapi.LocalModelsSetupPathNvidia}},
+		{"3 not yet: behind for exactly 2 h", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.51.0", UpdatePendingSince: &pendingAWhile},
+			want{httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessUpdatePending, httpapi.LocalModelsSetupPathUnknown}},
+		{"4: 0.52.0 without a snapshot behind the release", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.52.0", ConnectedAt: &longAgo, UpdatePendingSince: &justConnected},
+			want{httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessUpdatePending, httpapi.LocalModelsSetupPathUnknown}},
+		{"4 skipped: behind the release with a snapshot shows it", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.52.0", UpdatePendingSince: &justConnected, Summary: ready},
+			want{httpapi.LocalModelsReadinessReady, "", httpapi.LocalModelsSetupPathNvidia}},
 		{"4: 0.51.0 without a snapshot is updating", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.51.0", ConnectedAt: &justConnected},
 			want{httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessUpdatePending, httpapi.LocalModelsSetupPathUnknown}},
 		{"4 skipped: 0.51.0 with a snapshot shows it", LocalModelsReadinessFacts{Status: "online", Online: true, DaemonVersion: "0.51.0", Summary: ready},

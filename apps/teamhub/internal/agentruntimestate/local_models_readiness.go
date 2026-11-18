@@ -33,6 +33,11 @@ const (
 	nvidiaMinimumVRAMBytes                int64 = 8 << 30
 )
 
+// updateStuckAfter is how long a Computer may run behind this deployment's
+// Computer release before it needs a reinstall: two missed hourly update
+// offers.
+const updateStuckAfter = 2 * time.Hour
+
 // checkingWindow is how long a connected Computer without a snapshot reads
 // as checking: a release that reports local models sends its library right
 // after hello.
@@ -87,6 +92,9 @@ type LocalModelsReadinessFacts struct {
 	DaemonVersion string
 	Platform      string
 	ConnectedAt   *time.Time
+	// UpdatePendingSince is when the Computer was first seen behind this
+	// deployment's Computer release; nil while it runs it.
+	UpdatePendingSince *time.Time
 	// Summary is nil when the Computer never sent a snapshot.
 	Summary *LocalModelsSummary
 	// Accelerators is nil until the Computer reports a profile.
@@ -111,11 +119,14 @@ func LocalModelsReadiness(facts LocalModelsReadinessFacts, now time.Time) httpap
 		return readiness(httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessDaemonUnsupported)
 	case versionKnown && !computerVersionAtLeast(facts.DaemonVersion, firstLingerComputerVersion):
 		return readiness(httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessDaemonLegacy)
+	case facts.UpdatePendingSince != nil && now.Sub(*facts.UpdatePendingSince) > updateStuckAfter:
+		return readiness(httpapi.LocalModelsReadinessNeedsReinstall, httpapi.LocalModelsReadinessUpdateFailed)
 	}
 	summary := facts.Summary
 	if summary == nil {
 		switch {
-		case versionKnown && !computerVersionAtLeast(facts.DaemonVersion, firstServiceFeaturesComputerVersion):
+		case facts.UpdatePendingSince != nil,
+			versionKnown && !computerVersionAtLeast(facts.DaemonVersion, firstServiceFeaturesComputerVersion):
 			return readiness(httpapi.LocalModelsReadinessNeedsUpdate, httpapi.LocalModelsReadinessUpdatePending)
 		case facts.Online && facts.ConnectedAt != nil && now.Sub(*facts.ConnectedAt) < checkingWindow:
 			return readiness(httpapi.LocalModelsReadinessChecking, "")

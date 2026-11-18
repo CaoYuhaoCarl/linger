@@ -83,6 +83,9 @@ func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenant
 		if row.ConnectedAt.Valid {
 			facts.ConnectedAt = &row.ConnectedAt.Time
 		}
+		if row.UpdatePendingSince.Valid {
+			facts.UpdatePendingSince = &row.UpdatePendingSince.Time
+		}
 		readiness := agentruntimestate.LocalModelsReadiness(facts, now)
 		item.LocalModelsReadiness = &readiness
 		items = append(items, item)

@@ -44,12 +44,15 @@ type LocalModelsRecord struct {
 	Status           string
 	LastSeenAt       *time.Time
 	ConnectedAt      *time.Time
-	Platform         string
-	DaemonVersion    string
-	Snapshot         json.RawMessage
-	Host             json.RawMessage
-	Summary          *LocalModelsSummary
-	Users            []LocalModelUser
+	// UpdatePendingSince is nil unless the Computer runs behind this
+	// deployment's Computer release.
+	UpdatePendingSince *time.Time
+	Platform           string
+	DaemonVersion      string
+	Snapshot           json.RawMessage
+	Host               json.RawMessage
+	Summary            *LocalModelsSummary
+	Users              []LocalModelUser
 }
 
 // LocalModelsComputer is one row of the local-models Computer list: the
@@ -62,10 +65,13 @@ type LocalModelsComputer struct {
 	Status           string
 	LastSeenAt       *time.Time
 	ConnectedAt      *time.Time
-	Platform         string
-	DaemonVersion    string
-	Summary          *LocalModelsSummary
-	ObservedAt       *time.Time
+	// UpdatePendingSince is nil unless the Computer runs behind this
+	// deployment's Computer release.
+	UpdatePendingSince *time.Time
+	Platform           string
+	DaemonVersion      string
+	Summary            *LocalModelsSummary
+	ObservedAt         *time.Time
 }
 
 // RecordLocalModels replaces a Computer's stored model library and tells the
@@ -121,7 +127,8 @@ func (s *Service) LocalModels(ctx context.Context, tenantID, viewerActorID, comp
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName, Status: computer.Status,
 		Owner:            LocalComputerOwner{TenantID: computer.OwnerTenantID, OwnerActorID: computer.OwnerActorID},
 		OwnerDisplayName: ownerName, LastSeenAt: optionalTime(computer.LastSeenAt), ConnectedAt: optionalTime(computer.ConnectedAt),
-		Platform: computer.Platform.String, DaemonVersion: computer.DaemonVersion.String,
+		UpdatePendingSince: optionalTime(computer.UpdatePendingSince),
+		Platform:           computer.Platform.String, DaemonVersion: computer.DaemonVersion.String,
 	}
 	snapshot, err := queries.GetLocalComputerModelSnapshot(ctx, computerID)
 	if err != nil && !isNoRows(err) {
@@ -168,7 +175,8 @@ func (s *Service) LocalModelsComputers(ctx context.Context, tenantID, ownerActor
 			ComputerID: row.ComputerID, DisplayName: row.DisplayName,
 			OwnerActorID: row.OwnerActorID, OwnerDisplayName: row.OwnerDisplayName,
 			Status: row.Status, LastSeenAt: optionalTime(row.LastSeenAt), ConnectedAt: optionalTime(row.ConnectedAt),
-			Platform: row.Platform.String, DaemonVersion: row.DaemonVersion.String,
+			UpdatePendingSince: optionalTime(row.UpdatePendingSince),
+			Platform:           row.Platform.String, DaemonVersion: row.DaemonVersion.String,
 			Summary: summary, ObservedAt: optionalTime(row.ObservedAt),
 		}
 	}

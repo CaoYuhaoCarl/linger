@@ -92,7 +92,7 @@ func (s *Service) ConnectLocalComputer(ctx context.Context, input ConnectLocalCo
 			Platform: optionalText(input.Platform), Capacity: optionalInt4(input.Capacity),
 			RuntimeInventory: runtimes, RuntimeDiagnostics: diagnostics, WorkspaceGrants: grants,
 			DaemonVersion: optionalText(input.DaemonVersion), RecommendedVersion: optionalText(input.RecommendedVersion),
-			LastSeenAt: timestamptz(input.SeenAt), ComputerID: input.ComputerID,
+			ReleaseCurrent: optionalBool(input.ReleaseCurrent), LastSeenAt: timestamptz(input.SeenAt), ComputerID: input.ComputerID,
 		})
 		if err != nil {
 			return ConnectLocalComputerResult{}, nil, err
@@ -161,7 +161,7 @@ func (s *Service) TouchLocalComputer(ctx context.Context, input TouchLocalComput
 		row, err := queries.TouchAgentRuntimeLocalComputer(ctx, store.TouchAgentRuntimeLocalComputerParams{
 			Status: input.Status, RuntimeInventory: runtimes, RuntimeDiagnostics: diagnostics,
 			DaemonVersion: optionalText(input.DaemonVersion), RecommendedVersion: optionalText(input.RecommendedVersion),
-			ActiveOperations: optionalInt4(input.ActiveOperations), LastSeenAt: timestamptz(input.SeenAt),
+			ReleaseCurrent: optionalBool(input.ReleaseCurrent), ActiveOperations: optionalInt4(input.ActiveOperations), LastSeenAt: timestamptz(input.SeenAt),
 			ComputerID: input.ComputerID,
 		})
 		if isNoRows(err) {
@@ -186,7 +186,8 @@ func (s *Service) TouchLocalComputer(ctx context.Context, input TouchLocalComput
 }
 
 // localComputerChanged reports whether the Web's view of a Computer changed:
-// its connection state, Runtimes, workspaces, versions or load.
+// its connection state, Runtimes, workspaces, versions, a pending update or
+// load.
 func localComputerChanged(previous, current store.LocalComputer) (bool, error) {
 	for _, pair := range [][2][]byte{
 		{previous.RuntimeInventory, current.RuntimeInventory},
@@ -208,6 +209,7 @@ func localComputerChanged(previous, current store.LocalComputer) (bool, error) {
 	return previous.DisplayName != current.DisplayName || previous.Status != current.Status ||
 		previous.Capacity != current.Capacity || previous.Platform != current.Platform ||
 		previous.DaemonVersion != current.DaemonVersion || previous.RecommendedVersion != current.RecommendedVersion ||
+		!sameOptionalTime(previous.UpdatePendingSince, current.UpdatePendingSince) ||
 		previous.ActiveOperations != current.ActiveOperations, nil
 }
 
