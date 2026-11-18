@@ -2459,6 +2459,81 @@ func (e LocalModelsComputerStatus) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelsComputerMemoryKind.
+const (
+	LocalModelsComputerMemoryGpu     LocalModelsComputerMemoryKind = "gpu"
+	LocalModelsComputerMemoryUnified LocalModelsComputerMemoryKind = "unified"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelsComputerMemoryKind enum.
+func (e LocalModelsComputerMemoryKind) Valid() bool {
+	switch e {
+	case LocalModelsComputerMemoryGpu:
+		return true
+	case LocalModelsComputerMemoryUnified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelsComputerScope.
+const (
+	LocalModelsComputerScopeMine  LocalModelsComputerScope = "mine"
+	LocalModelsComputerScopeSpace LocalModelsComputerScope = "space"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelsComputerScope enum.
+func (e LocalModelsComputerScope) Valid() bool {
+	switch e {
+	case LocalModelsComputerScopeMine:
+		return true
+	case LocalModelsComputerScopeSpace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelsComputerSummaryPlatform.
+const (
+	LocalModelsComputerSummaryPlatformDarwin LocalModelsComputerSummaryPlatform = "darwin"
+	LocalModelsComputerSummaryPlatformLinux  LocalModelsComputerSummaryPlatform = "linux"
+	LocalModelsComputerSummaryPlatformWin32  LocalModelsComputerSummaryPlatform = "win32"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelsComputerSummaryPlatform enum.
+func (e LocalModelsComputerSummaryPlatform) Valid() bool {
+	switch e {
+	case LocalModelsComputerSummaryPlatformDarwin:
+		return true
+	case LocalModelsComputerSummaryPlatformLinux:
+		return true
+	case LocalModelsComputerSummaryPlatformWin32:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelsComputerSummaryStatus.
+const (
+	LocalModelsComputerSummaryOffline LocalModelsComputerSummaryStatus = "offline"
+	LocalModelsComputerSummaryOnline  LocalModelsComputerSummaryStatus = "online"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelsComputerSummaryStatus enum.
+func (e LocalModelsComputerSummaryStatus) Valid() bool {
+	switch e {
+	case LocalModelsComputerSummaryOffline:
+		return true
+	case LocalModelsComputerSummaryOnline:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelsErrorCode.
 const (
 	LocalModelsErrorCodeLOCALCOMPUTEROFFLINE          LocalModelsErrorCode = "LOCAL_COMPUTER_OFFLINE"
@@ -6726,9 +6801,9 @@ type LocalModelsComputer struct {
 
 	// ManagedBy The machine that serves this Computer's models when its local_models mode is remote. computer_id names a Linger Computer when the config does.
 	ManagedBy *LocalModelsManagedBy        `json:"managed_by,omitempty"`
-	Owner     *LocalModelsComputerOwner    `json:"owner,omitempty"`
+	Owner     LocalModelsComputerOwner     `json:"owner"`
 	Platform  *LocalModelsComputerPlatform `json:"platform,omitempty"`
-	Readiness *LocalModelsReadiness        `json:"readiness,omitempty"`
+	Readiness LocalModelsReadiness         `json:"readiness"`
 	Status    LocalModelsComputerStatus    `json:"status"`
 }
 
@@ -6738,11 +6813,78 @@ type LocalModelsComputerPlatform string
 // LocalModelsComputerStatus defines model for LocalModelsComputer.Status.
 type LocalModelsComputerStatus string
 
+// LocalModelsComputerCounts defines model for LocalModelsComputerCounts.
+type LocalModelsComputerCounts struct {
+	Loaded int `json:"loaded"`
+
+	// OnDisk Models on disk, loaded or not.
+	OnDisk int `json:"on_disk"`
+
+	// Working Models downloading or loading.
+	Working int `json:"working"`
+}
+
+// LocalModelsComputerMemory Memory in use across the Computer's pools, from its last snapshot.
+type LocalModelsComputerMemory struct {
+	Kind       LocalModelsComputerMemoryKind `json:"kind"`
+	TotalBytes int64                         `json:"total_bytes"`
+	UsedBytes  int64                         `json:"used_bytes"`
+}
+
+// LocalModelsComputerMemoryKind defines model for LocalModelsComputerMemory.Kind.
+type LocalModelsComputerMemoryKind string
+
 // LocalModelsComputerOwner defines model for LocalModelsComputerOwner.
 type LocalModelsComputerOwner struct {
 	// ActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	ActorId     Id     `json:"actor_id"`
 	DisplayName string `json:"display_name"`
+}
+
+// LocalModelsComputerScope mine: the viewer's own Computers. space: also other members' Computers, with the reduced row.
+type LocalModelsComputerScope string
+
+// LocalModelsComputerSummary One Computer in the local-models picker and overview. A row for another member's Computer carries only its name, owner, status and readiness; accelerators, counts, memory and versions are the owner's.
+type LocalModelsComputerSummary struct {
+	// Accelerators Hardware the Computer probed without the localmodels tool. probe failed means the lists say nothing about the hardware.
+	Accelerators *LocalComputerAccelerators `json:"accelerators,omitempty"`
+
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId    Id                         `json:"computer_id"`
+	Counts        *LocalModelsComputerCounts `json:"counts,omitempty"`
+	DaemonVersion *string                    `json:"daemon_version,omitempty"`
+	DisplayName   string                     `json:"display_name"`
+
+	// InstallKind How the Computer was installed: desktop (the desktop app runs it), cli (the installer on a host), or container (a container runtime).
+	InstallKind *LocalComputerInstallKind `json:"install_kind,omitempty"`
+
+	// LastSeenAt UTC timestamp in RFC 3339 format with an explicit offset.
+	LastSeenAt *Timestamp `json:"last_seen_at,omitempty"`
+
+	// ManagedBy The machine that serves this Computer's models when its local_models mode is remote. computer_id names a Linger Computer when the config does.
+	ManagedBy *LocalModelsManagedBy `json:"managed_by,omitempty"`
+
+	// Memory Memory in use across the Computer's pools, from its last snapshot.
+	Memory *LocalModelsComputerMemory `json:"memory,omitempty"`
+
+	// ObservedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	ObservedAt    *Timestamp                          `json:"observed_at,omitempty"`
+	Owner         LocalModelsComputerOwner            `json:"owner"`
+	Platform      *LocalModelsComputerSummaryPlatform `json:"platform,omitempty"`
+	Readiness     LocalModelsReadiness                `json:"readiness"`
+	Status        LocalModelsComputerSummaryStatus    `json:"status"`
+	ViewerIsOwner bool                                `json:"viewer_is_owner"`
+}
+
+// LocalModelsComputerSummaryPlatform defines model for LocalModelsComputerSummary.Platform.
+type LocalModelsComputerSummaryPlatform string
+
+// LocalModelsComputerSummaryStatus defines model for LocalModelsComputerSummary.Status.
+type LocalModelsComputerSummaryStatus string
+
+// LocalModelsComputerSummaryPage defines model for LocalModelsComputerSummaryPage.
+type LocalModelsComputerSummaryPage struct {
+	Items []LocalModelsComputerSummary `json:"items"`
 }
 
 // LocalModelsError The common error body with error.code narrowed to LocalModelsErrorCode.
@@ -6795,6 +6937,12 @@ type LocalModelsReadinessReason string
 
 // LocalModelsReadinessState One Computer's local-models readiness, computed by TeamHub; the first matching rule wins. Offline is not a state: an offline Computer keeps its last readiness and the client shows it muted. needs_reinstall: the Computer can't update itself. needs_update: it is updating itself and reports no library yet. managed_elsewhere: its models are served by another machine. checking: connected moments ago and no snapshot yet. not_reported: no snapshot ever. needs_attention: the tool failed. not_set_up: the tool is not installed. unsupported_hardware: no supported GPU path (an NVIDIA GPU with enough memory, or Apple silicon with enough unified memory); there is no CPU-only mode. working: a model is downloading or loading. loaded: one or more models are loaded. ready: the library is usable and nothing is loaded.
 type LocalModelsReadinessState string
+
+// LocalModelsRefreshAccepted defines model for LocalModelsRefreshAccepted.
+type LocalModelsRefreshAccepted struct {
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId Id `json:"computer_id"`
+}
 
 // LocalModelsSetupPath The guided setup that applies, from the Computer's accelerators and platform. apple_silicon runs models on unified memory through Metal; it is a GPU path, never a CPU one.
 type LocalModelsSetupPath string
@@ -9778,6 +9926,11 @@ type UploadAgentSkillPackageParams struct {
 type UploadTenantDocumentParams struct {
 	// IdempotencyKey Reusing the same key with the same canonical request returns the original result. Reusing it with different input returns 409 IDEMPOTENCY_KEY_REUSED.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// ListLocalModelsComputersParams defines parameters for ListLocalModelsComputers.
+type ListLocalModelsComputersParams struct {
+	Scope *LocalModelsComputerScope `form:"scope,omitempty" json:"scope,omitempty"`
 }
 
 // ListPocketNotesParams defines parameters for ListPocketNotes.

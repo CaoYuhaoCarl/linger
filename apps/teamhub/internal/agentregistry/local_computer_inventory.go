@@ -48,13 +48,24 @@ type storedWorkspaceGrant struct {
 }
 
 // listOwnedLocalComputers projects the owner's Computers from what the Runner
-// Gateway recorded at hello and heartbeat. An offline Computer keeps its last
-// reported Runtimes and models so an Agent can be placed on it. A Computer
-// without an owner-scoped workspace grant in this Tenant is not listed.
+// Gateway recorded at hello and heartbeat, with each one's local-models
+// readiness. An offline Computer keeps its last reported Runtimes and models
+// so an Agent can be placed on it. A Computer without an owner-scoped
+// workspace grant in this Tenant is not listed.
 func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenantID, ownerActorID string, now time.Time) ([]httpapi.LocalComputer, error) {
 	rows, err := queries.ListOwnedLocalComputers(ctx, store.ListOwnedLocalComputersParams{TenantID: tenantID, OwnerActorID: ownerActorID})
 	if err != nil {
 		return nil, err
+	}
+	summaryRows, err := queries.ListOwnedLocalModelsSummaries(ctx, store.ListOwnedLocalModelsSummariesParams{TenantID: tenantID, OwnerActorID: ownerActorID})
+	if err != nil {
+		return nil, err
+	}
+	summaries := make(map[string]*agentruntimestate.LocalModelsSummary, len(summaryRows))
+	for _, row := range summaryRows {
+		if summaries[row.ComputerID], err = agentruntimestate.ParseLocalModelsSummary(row.Summary); err != nil {
+			return nil, err
+		}
 	}
 	items := make([]httpapi.LocalComputer, 0, len(rows))
 	for _, row := range rows {
@@ -62,9 +73,19 @@ func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenant
 		if err != nil {
 			return nil, err
 		}
-		if listed {
-			items = append(items, item)
+		if !listed {
+			continue
 		}
+		facts := agentruntimestate.LocalModelsReadinessFacts{
+			Status: row.Status, Online: item.Status == httpapi.LocalComputerStatusOnline,
+			DaemonVersion: row.DaemonVersion.String, Platform: row.Platform.String, Summary: summaries[row.ComputerID],
+		}
+		if row.ConnectedAt.Valid {
+			facts.ConnectedAt = &row.ConnectedAt.Time
+		}
+		readiness := agentruntimestate.LocalModelsReadiness(facts, now)
+		item.LocalModelsReadiness = &readiness
+		items = append(items, item)
 	}
 	return items, nil
 }

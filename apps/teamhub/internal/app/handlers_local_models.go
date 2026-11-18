@@ -106,16 +106,29 @@ func (a *App) getLocalComputerModels(c *gin.Context) {
 }
 
 func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string, now time.Time) (httpapi.LocalModelsView, error) {
+	online := localComputerOnline(record.Status, record.LastSeenAt, now)
+	readiness := agentruntimestate.LocalModelsReadiness(agentruntimestate.LocalModelsReadinessFacts{
+		Status: record.Status, Online: online, DaemonVersion: record.DaemonVersion, Platform: record.Platform,
+		ConnectedAt: record.ConnectedAt, Summary: record.Summary,
+	}, now)
 	view := httpapi.LocalModelsView{
 		Computer: httpapi.LocalModelsComputer{
 			ComputerId: record.ComputerID, DisplayName: record.DisplayName,
 			Status: httpapi.LocalModelsComputerOffline, LastSeenAt: record.LastSeenAt,
+			Owner:     httpapi.LocalModelsComputerOwner{ActorId: record.Owner.OwnerActorID, DisplayName: record.OwnerDisplayName},
+			Readiness: readiness,
 		},
 		ViewerIsOwner: record.Owner.OwnerActorID == viewerID,
 		Pools:         []httpapi.LocalModelPool{}, Models: []httpapi.LocalModelView{},
 	}
-	if localComputerOnline(record.Status, record.LastSeenAt, now) {
+	if online {
 		view.Computer.Status = httpapi.LocalModelsComputerOnline
+	}
+	if platform := httpapi.LocalModelsComputerPlatform(record.Platform); platform.Valid() {
+		view.Computer.Platform = &platform
+	}
+	if record.DaemonVersion != "" {
+		view.Computer.DaemonVersion = &record.DaemonVersion
 	}
 	if len(record.Host) > 0 {
 		var host httpapi.LocalModelHost
@@ -159,6 +172,82 @@ func localComputerOnline(status string, lastSeenAt *time.Time, now time.Time) bo
 		now.Sub(*lastSeenAt) <= agentregistry.LocalComputerObservationFreshness
 }
 
+// listLocalModelsComputers lists the viewer's Computers with their
+// local-models readiness from stored summaries, in one query.
+func (a *App) listLocalModelsComputers(c *gin.Context) {
+	tenantID := c.Param("tenantId")
+	params := contractParams[httpapi.ListLocalModelsComputersParams](c)
+	// Other members' Computers are not listed yet.
+	if params.Scope != nil && *params.Scope != httpapi.LocalModelsComputerScopeMine {
+		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Only scope mine is supported")
+		return
+	}
+	viewerID, ok := a.spaceHuman(c, tenantID)
+	if !ok {
+		return
+	}
+	if a.agentRuntimeState == nil {
+		a.writeError(c, http.StatusNotFound, "LOCAL_COMPUTER_NOT_FOUND", "Local Computers are unavailable")
+		return
+	}
+	computers, err := a.agentRuntimeState.LocalModelsComputers(c.Request.Context(), tenantID, viewerID)
+	if err != nil {
+		a.internalError(c, "list Local Computers with local models", err)
+		return
+	}
+	now := time.Now()
+	page := httpapi.LocalModelsComputerSummaryPage{Items: make([]httpapi.LocalModelsComputerSummary, len(computers))}
+	for index, computer := range computers {
+		page.Items[index] = localModelsComputerSummary(computer, viewerID, now)
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, page)
+}
+
+func localModelsComputerSummary(computer agentruntimestate.LocalModelsComputer, viewerID string, now time.Time) httpapi.LocalModelsComputerSummary {
+	online := localComputerOnline(computer.Status, computer.LastSeenAt, now)
+	item := httpapi.LocalModelsComputerSummary{
+		ComputerId: computer.ComputerID, DisplayName: computer.DisplayName,
+		Owner:         httpapi.LocalModelsComputerOwner{ActorId: computer.OwnerActorID, DisplayName: computer.OwnerDisplayName},
+		ViewerIsOwner: computer.OwnerActorID == viewerID,
+		Status:        httpapi.LocalModelsComputerSummaryOffline, LastSeenAt: computer.LastSeenAt,
+		Readiness: agentruntimestate.LocalModelsReadiness(agentruntimestate.LocalModelsReadinessFacts{
+			Status: computer.Status, Online: online, DaemonVersion: computer.DaemonVersion, Platform: computer.Platform,
+			ConnectedAt: computer.ConnectedAt, Summary: computer.Summary,
+		}, now),
+		ObservedAt: computer.ObservedAt,
+	}
+	if online {
+		item.Status = httpapi.LocalModelsComputerSummaryOnline
+	}
+	if platform := httpapi.LocalModelsComputerSummaryPlatform(computer.Platform); platform.Valid() {
+		item.Platform = &platform
+	}
+	if computer.DaemonVersion != "" {
+		item.DaemonVersion = &computer.DaemonVersion
+	}
+	if summary := computer.Summary; summary != nil && summary.Available {
+		item.Counts = &httpapi.LocalModelsComputerCounts{
+			Loaded: summary.Counts.Loaded, OnDisk: summary.Counts.OnDisk, Working: summary.Counts.Working,
+		}
+		if memory := summary.Memory; memory != nil {
+			if kind := httpapi.LocalModelsComputerMemoryKind(memory.Kind); kind.Valid() {
+				item.Memory = &httpapi.LocalModelsComputerMemory{Kind: kind, UsedBytes: memory.UsedBytes, TotalBytes: memory.TotalBytes}
+			}
+		}
+	}
+	return item
+}
+
+// refreshLocalComputerModels asks the owner's connected Computer to reread
+// its model library; the new snapshot arrives with a local-models hint.
+func (a *App) refreshLocalComputerModels(c *gin.Context) {
+	tenantID, computerID := c.Param("tenantId"), c.Param("computerId")
+	if a.sendLocalModelAction(c, tenantID, computerID, roomagent.LocalModelActionRefresh, "", nil) {
+		c.JSON(http.StatusAccepted, httpapi.LocalModelsRefreshAccepted{ComputerId: computerID})
+	}
+}
+
 // actOnLocalComputerModel forwards the owner's action to their connected
 // Computer and answers with the Computer's immediate accept or refusal.
 func (a *App) actOnLocalComputerModel(c *gin.Context) {
@@ -169,46 +258,56 @@ func (a *App) actOnLocalComputerModel(c *gin.Context) {
 		return
 	}
 	tenantID, computerID := c.Param("tenantId"), c.Param("computerId")
+	var unloadFirst []string
+	if request.UnloadFirst != nil {
+		unloadFirst = *request.UnloadFirst
+	}
+	if a.sendLocalModelAction(c, tenantID, computerID, string(request.Action), modelID, unloadFirst) {
+		c.JSON(http.StatusAccepted, httpapi.LocalModelActionAccepted{
+			ComputerId: computerID, ModelId: modelID, Action: httpapi.LocalModelActionAcceptedAction(request.Action),
+		})
+	}
+}
+
+// sendLocalModelAction sends one action to the viewer's own connected
+// Computer. It reports true when the Computer started it; otherwise it has
+// written the error response.
+func (a *App) sendLocalModelAction(c *gin.Context, tenantID, computerID, action, modelID string, unloadFirst []string) bool {
 	viewerID, ok := a.spaceHuman(c, tenantID)
 	if !ok {
-		return
+		return false
 	}
 	if a.agentRuntimeState == nil || a.localComputers == nil {
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE)
-		return
+		return false
 	}
 	computer, err := a.agentRuntimeState.GetLocalComputer(c.Request.Context(), computerID)
 	switch {
 	case errors.Is(err, agentruntimestate.ErrNotFound), errors.Is(err, agentruntimestate.ErrInvalid),
 		err == nil && computer.Owner.TenantID != tenantID:
 		a.writeError(c, http.StatusNotFound, "LOCAL_COMPUTER_NOT_FOUND", "Local Computer was not found")
-		return
+		return false
 	case err != nil:
 		a.internalError(c, "read Local Computer for a model action", err)
-		return
+		return false
 	}
 	if computer.Owner.OwnerActorID != viewerID {
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELACTIONFORBIDDEN)
-		return
+		return false
 	}
 	if !localComputerOnline(computer.Status, computer.LastSeenAt, time.Now()) {
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALCOMPUTEROFFLINE)
-		return
+		return false
 	}
 	command := roomagent.LocalModelActionCommand{
 		TenantID: tenantID, OwnerActorID: viewerID, ComputerID: computerID,
-		RequestID: ids.New("local_model_action"), Action: string(request.Action), ModelID: modelID,
+		RequestID: ids.New("local_model_action"), Action: action, ModelID: modelID, UnloadFirst: unloadFirst,
 		ExpiresAt: time.Now().UTC().Add(localModelActionLifetime),
-	}
-	if request.UnloadFirst != nil {
-		command.UnloadFirst = *request.UnloadFirst
 	}
 	refusal, err := a.localComputers.ActOnLocalModels(c.Request.Context(), command)
 	switch {
 	case err == nil && refusal == nil:
-		c.JSON(http.StatusAccepted, httpapi.LocalModelActionAccepted{
-			ComputerId: computerID, ModelId: modelID, Action: httpapi.LocalModelActionAcceptedAction(request.Action),
-		})
+		return true
 	case err == nil:
 		code, known := localModelRefusalCodes[refusal.Code]
 		if !known {
@@ -229,6 +328,7 @@ func (a *App) actOnLocalComputerModel(c *gin.Context) {
 		a.logger.Error("local_models.action_failed", "computer_id", computerID, "action", command.Action, "error", err)
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE)
 	}
+	return false
 }
 
 func validLocalModelAction(modelID string, request httpapi.LocalModelActionRequest) bool {

@@ -129,6 +129,12 @@ export function labView(
         platform: "linux",
         ram_total_bytes: gb(128),
       },
+      owner: { actor_id: "actor-owner", display_name: "Ada Owner" },
+      readiness: {
+        enable_command: false,
+        setup_path: "nvidia",
+        state: "loaded",
+      },
       status: "online",
     },
     models: [
@@ -240,6 +246,12 @@ export function macView(
         os_label: "macOS 26",
         platform: "darwin",
         ram_total_bytes: gb(64),
+      },
+      owner: { actor_id: "actor-owner", display_name: "Ada Owner" },
+      readiness: {
+        enable_command: false,
+        setup_path: "apple_silicon",
+        state: "loaded",
       },
       status: "online",
     },
