@@ -104,10 +104,12 @@ type antigravityTurn struct {
 	// prompting is set once session/prompt is sent; updates before it are
 	// the history session/load replays and belong to earlier turns.
 	prompting bool
-	sessionID string
-	textID    string
-	output    strings.Builder
-	tools     map[string]bool
+	// replayedPrompts counts the user prompts session/load replayed.
+	replayedPrompts int
+	sessionID       string
+	textID          string
+	output          strings.Builder
+	tools           map[string]bool
 }
 
 func (t *antigravityTurn) emit(event Event) {
@@ -181,8 +183,21 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	if acpNeedsAuth(err) {
 		return failed("authentication_required", "Antigravity sign-in is required")
 	}
+	var refused *acpError
+	if spec.ResumeID != "" && errors.As(err, &refused) {
+		return t.resumeRefused(failed("session_not_found", "Antigravity could not load session "+spec.ResumeID+": "+err.Error()))
+	}
 	if err != nil {
 		return failed("", "Antigravity "+method+" failed: "+err.Error())
+	}
+	t.mu.Lock()
+	replayed := t.replayedPrompts
+	t.mu.Unlock()
+	// session/load accepts an id Antigravity never stored and only the
+	// prompt fails. A stored session holds at least the prompt of the turn
+	// that made it, so a load that replays no prompt found no session.
+	if spec.ResumeID != "" && replayed == 0 {
+		return t.resumeRefused(failed("session_not_found", "Antigravity has no stored session "+spec.ResumeID))
 	}
 	var session acpSession
 	if json.Unmarshal(raw, &session) != nil || session.SessionID == "" {
@@ -331,6 +346,13 @@ type acpUpdate struct {
 	} `json:"entries"`
 }
 
+// resumeRefused marks an outcome whose retained session Antigravity does
+// not hold; nothing was emitted, so the executor may start a fresh session.
+func (t *antigravityTurn) resumeRefused(outcome Outcome) Outcome {
+	outcome.ResumeRefused = true
+	return outcome
+}
+
 func (t *antigravityTurn) update(params json.RawMessage, observed time.Time) {
 	var envelope struct {
 		Update acpUpdate `json:"update"`
@@ -341,6 +363,9 @@ func (t *antigravityTurn) update(params json.RawMessage, observed time.Time) {
 	update := envelope.Update
 	t.mu.Lock()
 	prompting := t.prompting
+	if !prompting && update.SessionUpdate == "user_message_chunk" {
+		t.replayedPrompts++
+	}
 	t.mu.Unlock()
 	if !prompting {
 		return

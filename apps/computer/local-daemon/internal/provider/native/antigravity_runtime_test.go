@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
 )
 
 type agyHarness struct {
@@ -179,6 +181,70 @@ func TestAntigravityAnswersPermissionRequestsWithoutReview(t *testing.T) {
 	selected := answers[0]["result"].(map[string]any)["outcome"].(map[string]any)
 	if selected["outcome"] != "selected" || selected["optionId"] != "allow" {
 		t.Fatalf("selected=%v", selected)
+	}
+}
+
+// agyDenyingRequester answers every permission review with a denial.
+type agyDenyingRequester struct{ asked chan string }
+
+func (r agyDenyingRequester) Request(id string, _ map[string]any, respond func(json.RawMessage) error) error {
+	r.asked <- id
+	return respond(json.RawMessage(`{"decision":"deny","message":"not now"}`))
+}
+
+func (agyDenyingRequester) Forget(string) {}
+
+func TestAntigravityAnswersADeniedPermissionReview(t *testing.T) {
+	for _, c := range []struct{ mode, outcome, option string }{
+		{mode: "permission", outcome: "selected", option: "deny"},
+		{mode: "permission-no-reject", outcome: "cancelled"},
+	} {
+		t.Run(c.mode, func(t *testing.T) {
+			h := newAgyHarness(t, c.mode, map[string]string{agyFakeCommandEnv: "git push"})
+			requester := agyDenyingRequester{asked: make(chan string, 1)}
+			reviewer := &permission.Reviewer{Requester: requester, Timeout: time.Minute}
+			run, err := h.runtime.Start(t.Context(), "push it", RunSpec{Dir: h.dir, PermissionReviewer: reviewer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, outcome := drainAgy(t, run); outcome.Status != statusCompleted {
+				t.Fatalf("outcome=%+v", outcome)
+			}
+			if len(requester.asked) != 1 {
+				t.Fatal("the command was not reviewed")
+			}
+			answers := h.requests(t)[""]
+			if len(answers) != 1 {
+				t.Fatalf("answers=%v", answers)
+			}
+			selected := answers[0]["result"].(map[string]any)["outcome"].(map[string]any)
+			if selected["outcome"] != c.outcome || (c.option != "" && selected["optionId"] != c.option) {
+				t.Fatalf("selected=%v", selected)
+			}
+		})
+	}
+}
+
+func TestAntigravityReportsAnUnknownRetainedSessionAsNotFound(t *testing.T) {
+	for _, mode := range []string{"unknown-session", "load-error"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newAgyHarness(t, mode, nil)
+			run, err := h.runtime.Start(t.Context(), "again", RunSpec{Dir: h.dir, ResumeID: "moved-session", ExposeTurnStarted: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			events, outcome := drainAgy(t, run)
+			if outcome.Status != statusFailed || outcome.FailureCode != "session_not_found" || !outcome.ResumeRefused || outcome.SessionID != "" {
+				t.Fatalf("outcome=%+v", outcome)
+			}
+			// Nothing reached the Room, so the executor may start afresh.
+			if len(events) != 0 {
+				t.Fatalf("events=%+v", events)
+			}
+			if requests := h.requests(t); len(requests["session/prompt"]) != 0 {
+				t.Fatalf("requests=%v", requests)
+			}
+		})
 	}
 }
 

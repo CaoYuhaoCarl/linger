@@ -248,7 +248,12 @@ for a browser sign-in when signed out.
   session id as the checkpoint, like a Codex thread. Later Runs reopen it with
   `session/load` and drop the history it replays. An id Antigravity has not
   stored is not a usable session: `session/load` accepts it, but the prompt
-  then fails, so Linger never assigns one.
+  then fails, so Linger never assigns one. A stored session replays at least
+  the prompt that made it, so a load that replays no prompt, or that
+  Antigravity refuses, ends as `session_not_found` before anything is
+  emitted, and the Run continues once in a new session. A Run yields to the
+  scheduler only after native work, because its session holds no prompt
+  before that.
 - The Daemon's instructions go in `_meta.antigravity.systemPrompt.append`, and
   its MCP servers in the session's `mcpServers`.
 - `session/request_permission` goes to the Run's permission review when the

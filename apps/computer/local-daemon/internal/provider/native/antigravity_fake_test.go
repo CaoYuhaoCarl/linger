@@ -13,6 +13,8 @@ import (
 const (
 	agyFakeEnv       = "NATIVE_AGY_FAKE"
 	agyFakeRecordEnv = "AGY_FAKE_RECORD"
+	// agyFakeCommandEnv names the command a permission request asks for.
+	agyFakeCommandEnv = "AGY_FAKE_COMMAND"
 )
 
 func init() {
@@ -119,8 +121,16 @@ func (f *agyFakeProcess) handle(id json.RawMessage, method string, params map[st
 		sessionID := "fake-session"
 		if method == "session/load" {
 			sessionID, _ = params["sessionId"].(string)
-			// Loading replays the stored conversation before answering.
-			f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "earlier reply"}})
+			if f.mode == "load-error" {
+				f.fail(id, -32603, "session could not be loaded")
+				return
+			}
+			// Loading replays the stored conversation before answering; an
+			// id Antigravity never stored loads with nothing to replay.
+			if f.mode != "unknown-session" {
+				f.update(sessionID, map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "earlier prompt"}})
+				f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "earlier reply"}})
+			}
 		}
 		f.result(id, agyFakeSession(sessionID))
 	case "session/set_config_option":
@@ -145,14 +155,19 @@ func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID string) {
 		map[string]any{"content": "Report", "status": "pending", "priority": "low"},
 	}})
 	f.update(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call-1", "title": "ls", "kind": "execute", "status": "pending", "rawInput": map[string]any{"command": "ls"}})
-	if f.mode == "permission" {
+	if f.mode == "permission" || f.mode == "permission-no-reject" {
+		command := os.Getenv(agyFakeCommandEnv)
+		if command == "" {
+			command = "ls"
+		}
+		options := []any{map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"}}
+		if f.mode == "permission" {
+			options = append([]any{map[string]any{"optionId": "deny", "name": "Deny", "kind": "reject_once"}}, options...)
+		}
 		f.send(map[string]any{"jsonrpc": "2.0", "id": 900, "method": "session/request_permission", "params": map[string]any{
 			"sessionId": sessionID,
-			"toolCall":  map[string]any{"toolCallId": "call-1", "title": "ls", "kind": "execute", "rawInput": map[string]any{"command": "ls"}},
-			"options": []any{
-				map[string]any{"optionId": "deny", "name": "Deny", "kind": "reject_once"},
-				map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-			},
+			"toolCall":  map[string]any{"toolCallId": "call-1", "title": command, "kind": "execute", "rawInput": map[string]any{"command": command}},
+			"options":   options,
 		}})
 		<-f.answers
 	}
