@@ -13,6 +13,7 @@ import path from "node:path";
 import {
   installNativeRuntime,
   inspectRuntime,
+  prepareRuntime,
   runtimeEnvironmentFromDescriptors,
 } from "./managed-runtimes.js";
 const roots: string[] = [];
@@ -430,5 +431,116 @@ it.each(["RUNTIME_ACTION_FAILED", "RUNTIME_EXTENSIONS_FAILED"])(
       ),
     }).catch((error: Error & { code: string }) => error);
     expect(failure).toMatchObject({ code });
+  },
+);
+
+it("reuses the harness-status/v1 line emitted by harness apply without a redundant status call", async () => {
+  const options = await fixture();
+  const id = "b".repeat(64);
+  const localmodels = vi.fn(async (_home: string, args: string[]) => {
+    if (args[1] === "plan")
+      await writeFile(
+        args[args.indexOf("--out") + 1]!,
+        JSON.stringify({
+          schema: "localmodels.harness-plan/v1",
+          id,
+          runtime: "pi",
+        }),
+      );
+    return {
+      code: 0,
+      stdout:
+        args[1] === "apply"
+          ? [
+              JSON.stringify({
+                kind: "stage",
+                stage: "install",
+                state: "succeeded",
+              }),
+              JSON.stringify(status("pi", false)),
+            ].join("\n") + "\n"
+          : "",
+      stderr: "",
+    };
+  });
+  expect(
+    await installNativeRuntime("pi", options, { localmodels }),
+  ).toMatchObject({
+    code: 0,
+    state: "ready",
+    details: { executable: "/upstream/runtime" },
+  });
+  expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+    "plan",
+    "apply",
+  ]);
+});
+
+it("fails closed when harness apply emits installed: false in its final status line", async () => {
+  const options = await fixture();
+  const id = "c".repeat(64);
+  const uninstalled = status("pi", false);
+  uninstalled.runtimes[0]!.installed = false;
+  const localmodels = vi.fn(async (_home: string, args: string[]) => {
+    if (args[1] === "plan")
+      await writeFile(
+        args[args.indexOf("--out") + 1]!,
+        JSON.stringify({
+          schema: "localmodels.harness-plan/v1",
+          id,
+          runtime: "pi",
+        }),
+      );
+    return {
+      code: 0,
+      stdout: args[1] === "apply" ? JSON.stringify(uninstalled) : "",
+      stderr: "",
+    };
+  });
+  await expect(
+    installNativeRuntime("pi", options, { localmodels }),
+  ).rejects.toMatchObject({ code: "LOCALMODELS_RUNTIME_UNAVAILABLE" });
+  expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+    "plan",
+    "apply",
+  ]);
+});
+
+it.each([
+  [true, "ready", 0],
+  [false, "action_required", 4],
+] as const)(
+  "reuses the apply status descriptor in prepareRuntime (authenticated=%s) without calling harness status",
+  async (authenticated, expectedState, expectedCode) => {
+    const options = await fixture();
+    const id = "d".repeat(64);
+    const localmodels = vi.fn(async (_home: string, args: string[]) => {
+      if (args[1] === "plan")
+        await writeFile(
+          args[args.indexOf("--out") + 1]!,
+          JSON.stringify({
+            schema: "localmodels.harness-plan/v1",
+            id,
+            runtime: "pi",
+          }),
+        );
+      return {
+        code: 0,
+        stdout:
+          args[1] === "apply"
+            ? `${JSON.stringify({ kind: "stage", stage: "install", state: "succeeded" })}\n${JSON.stringify(status("pi", authenticated))}\n`
+            : "",
+        stderr: "",
+      };
+    });
+    const outcome = await prepareRuntime("pi", options, { localmodels });
+    expect(outcome).toMatchObject({
+      code: expectedCode,
+      state: expectedState,
+    });
+    expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+      "plan",
+      "apply",
+    ]);
   },
 );
