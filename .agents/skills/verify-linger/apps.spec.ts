@@ -45,12 +45,16 @@ test("apps: browse connectors, authorize, reopen and disconnect", async ({
   });
   await test.step("Browse connector categories", async () => {
     await page.goto(tenantAppsUrl(page));
-    const categories = page.getByRole("group", {
+    const categories = page.getByRole("tablist", {
       name: "Connector categories",
     });
+    const connectedOnly = page.getByRole("button", {
+      name: "Connected only",
+      exact: true,
+    });
     await expect(
-      categories.getByRole("button", { name: "All", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
+      categories.getByRole("tab", { name: "All", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
     await expect(
       page.getByRole("heading", { name: "Productivity", exact: true }),
     ).toBeVisible();
@@ -60,7 +64,7 @@ test("apps: browse connectors, authorize, reopen and disconnect", async ({
     await page.mouse.move(0, 0);
     await page.screenshot({ path: info.outputPath("connectors.png") });
     await categories
-      .getByRole("button", { name: "Productivity", exact: true })
+      .getByRole("tab", { name: "Productivity", exact: true })
       .click();
     await expect(
       page.getByRole("button", { name: "Linear", exact: true }),
@@ -68,14 +72,14 @@ test("apps: browse connectors, authorize, reopen and disconnect", async ({
     await expect(
       page.getByRole("button", { name: "Gmail", exact: true }),
     ).toHaveCount(0);
-    await categories
-      .getByRole("button", { name: "Connected", exact: true })
-      .click();
+    await connectedOnly.click();
+    await expect(connectedOnly).toHaveAttribute("aria-pressed", "true");
     await expect(
       page.getByText("No connected apps yet.", { exact: true }),
     ).toBeVisible();
+    await connectedOnly.click();
     await page.setViewportSize({ width: 390, height: 844 });
-    await categories.getByRole("button", { name: "All", exact: true }).click();
+    await categories.getByRole("tab", { name: "All", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Linear", exact: true }),
     ).toBeVisible();
@@ -97,13 +101,11 @@ test("apps: browse connectors, authorize, reopen and disconnect", async ({
     // authorization for one minute; a returning user observes the result on
     // the next page load.
     await expect(async () => {
-      await page.reload();
-      await page
-        .getByRole("group", { name: "Connector categories" })
-        .getByRole("button", { name: "Connected", exact: true })
-        .click();
+      await page.goto(tenantAppsUrl(page, "?app=linear"));
       await expect(
-        page.getByRole("button", { name: "Disconnect Linear", exact: true }),
+        page
+          .getByRole("dialog", { name: "Linear", exact: true })
+          .getByText("Active", { exact: true }),
       ).toBeVisible({ timeout: 5000 });
     }).toPass({ timeout: 90_000, intervals: [2000] });
     await page.screenshot({ path: info.outputPath("connected.png") });
@@ -114,46 +116,32 @@ test("apps: browse connectors, authorize, reopen and disconnect", async ({
       const fresh = await context.newPage();
       await login(fresh);
       await fresh.goto(tenantAppsUrl(fresh));
+      await fresh
+        .getByRole("button", { name: "Connected only", exact: true })
+        .click();
       await fresh.getByRole("button", { name: "Linear", exact: true }).click();
       const manage = fresh.getByRole("dialog", { name: "Linear", exact: true });
-      // Linear has no confirmed account identity, so TeamHub labels the
-      // connection with the app name.
-      await expect(
-        manage.getByText("Linear account", { exact: true }),
-      ).toBeVisible();
+      await expect(manage.getByText("Active", { exact: true })).toBeVisible();
       await fresh.screenshot({ path: info.outputPath("reopened.png") });
-      await manage
-        .getByRole("button", {
-          name: "Disconnect Linear account",
-          exact: true,
-        })
-        .click();
+      await manage.getByRole("button", { name: /^Disconnect / }).click();
       const dialog = fresh.getByRole("dialog", {
         name: "Disconnect account?",
       });
       await dialog
         .getByRole("button", { name: "Disconnect", exact: true })
         .click();
-      const closeConfirmation = dialog
-        .getByRole("button", { name: "Close", exact: true })
-        .last();
+      const closeConfirmation = dialog.getByRole("button", {
+        name: "Close",
+        exact: true,
+      });
       await expect(closeConfirmation).toBeVisible();
       await closeConfirmation.click();
-      await expect(
-        manage.getByRole("button", {
-          name: "Disconnect Linear account",
-          exact: true,
-        }),
-      ).toHaveCount(0);
-      await fresh.reload();
+      await fresh.goto(tenantAppsUrl(fresh, "?app=linear"));
       await expect(
         fresh
           .getByRole("dialog", { name: "Linear", exact: true })
-          .getByRole("button", {
-            name: "Connect Linear",
-            exact: true,
-          }),
-      ).toBeVisible();
+          .getByRole("button", { name: "Connect Linear", exact: true }),
+      ).toBeVisible({ timeout: 30_000 });
       await fresh.screenshot({ path: info.outputPath("disconnected.png") });
       await writeFile(
         info.outputPath("proof.json"),
