@@ -712,7 +712,9 @@ async function resolvePlacement(
 }
 
 /** Pi stays on Pi, even when it is unavailable. Codex and Claude retain
- * their same-Computer fallback. Invocations use the selected Runtime's default. */
+ * their same-Computer fallback. Antigravity has no model.invoke, so it uses
+ * Claude, falling back to Codex. Invocations use the selected Runtime's
+ * default. */
 function resolveTarget(
   gateway: RuntimeModelGateway,
   placement: ModelPlacement,
@@ -721,8 +723,6 @@ function resolveTarget(
   readonly offline: boolean;
   readonly model?: RuntimeModelInfo;
 } {
-  // Antigravity has no model.invoke, so its Agents call through Claude or
-  // Codex on the same Computer.
   const preferred =
     placement.runtimeType === "antigravity" ? "claude" : placement.runtimeType;
   const fallback = preferred === "claude" ? "codex" : "claude";
