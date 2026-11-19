@@ -45,6 +45,13 @@ Gateway and runs Agents. The daemon exits with the app.
   The callback restores the originating window and forwards the return to its
   signed-in SPA, which requests TeamHub verification.
 
+- The Web link preview panel frames other sites. The window drops their
+  framing refusals (`X-Frame-Options`, CSP `frame-ancestors`) for frames of
+  the app, except the panel's frame, named `linger-url-preview:<id>`. When
+  that frame's final response refuses framing, the window sends
+  `preview.frame-refused`, and the panel offers the system browser instead,
+  where the user's sign-ins work.
+
 - `src/main/modules.ts`: `Module` interface, typed bus and the host that starts
   modules in dependency layers and stops them in reverse.
 - `src/main/*.ts`: one file per module (Enrollment, WorkspaceGrants,

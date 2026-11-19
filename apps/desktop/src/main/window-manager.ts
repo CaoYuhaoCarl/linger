@@ -20,17 +20,20 @@ import {
   type ShellPlatform,
   type TitlebarState,
 } from "../shared/shell.js";
+import { IPC } from "../shared/api.js";
 import type { DiagnosticsModule } from "./diagnostics.js";
 import { diagnosticsDialogs } from "./diagnostics-dialogs.js";
 import { sendWithPrompts } from "./diagnostics-upload.js";
 import type { Module, ModuleContext } from "./modules.js";
 import {
   OFFLINE_ORIGIN,
+  PREVIEW_FRAME_PREFIX,
   SHELL_ORIGIN,
   framableHeaders,
   navigationDecision,
   parseServerUrl,
   permissionAllowed,
+  refusesFraming,
   sameOrigin,
   serverSwitch,
 } from "./navigation.js";
@@ -448,17 +451,28 @@ export class WindowManagerModule implements Module {
     target.webRequest.onHeadersReceived((details, done) => {
       const contents = this.#content?.webContents;
       const server = this.#serverUrl();
-      done(
-        details.resourceType === "subFrame" &&
-          details.responseHeaders &&
-          contents &&
-          !contents.isDestroyed() &&
-          details.webContentsId === contents.id &&
-          server &&
-          sameOrigin(contents.getURL(), server)
-          ? { responseHeaders: framableHeaders(details.responseHeaders) }
-          : {},
-      );
+      if (
+        details.resourceType !== "subFrame" ||
+        !details.responseHeaders ||
+        !contents ||
+        contents.isDestroyed() ||
+        details.webContentsId !== contents.id ||
+        !server ||
+        !sameOrigin(contents.getURL(), server)
+      ) {
+        done({});
+        return;
+      }
+      const name = details.frame?.name ?? "";
+      if (!name.startsWith(PREVIEW_FRAME_PREFIX)) {
+        done({ responseHeaders: framableHeaders(details.responseHeaders) });
+        return;
+      }
+      // Chromium applies framing rules to the final response only.
+      const redirect = details.statusCode >= 300 && details.statusCode < 400;
+      if (!redirect && refusesFraming(details.responseHeaders))
+        contents.send(IPC.previewFrameRefused, name, details.url);
+      done({});
     });
   }
 

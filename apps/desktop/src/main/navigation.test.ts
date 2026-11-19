@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   framableHeaders,
+  refusesFraming,
   navigationDecision,
   parseServerUrl,
   permissionAllowed,
@@ -132,5 +133,40 @@ describe("framableHeaders", () => {
       "Content-Security-Policy": ["default-src 'self'; img-src *"],
       "Content-Type": ["text/html"],
     });
+  });
+});
+
+describe("refusesFraming", () => {
+  it("reads X-Frame-Options and lets CSP frame-ancestors override it", () => {
+    expect(refusesFraming({ "X-Frame-Options": ["SAMEORIGIN"] })).toBe(true);
+    expect(refusesFraming({ "x-frame-options": ["deny"] })).toBe(true);
+    expect(refusesFraming({ "X-Frame-Options": ["ALLOWALL"] })).toBe(false);
+    expect(
+      refusesFraming({
+        "Content-Security-Policy": [
+          "default-src 'self'; frame-ancestors 'self'",
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      refusesFraming({
+        "X-Frame-Options": ["DENY"],
+        "Content-Security-Policy": ["frame-ancestors *"],
+      }),
+    ).toBe(false);
+    expect(
+      refusesFraming({
+        "Content-Security-Policy": [
+          "frame-ancestors *",
+          "frame-ancestors 'none'",
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      refusesFraming({
+        "Content-Security-Policy": ["default-src 'self'"],
+        "Content-Type": ["text/html"],
+      }),
+    ).toBe(false);
   });
 });

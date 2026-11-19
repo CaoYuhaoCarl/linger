@@ -115,6 +115,45 @@ export const parseServerUrl = (value: string): string | undefined => {
   }
 };
 
+// The Web link preview panel names its frame with this prefix. For such a
+// frame the window keeps the site's framing rules and, when they refuse the
+// frame, tells the page so it can offer the system browser instead; a site
+// that refuses frames usually needs a sign-in the frame does not have.
+// Frames without the name, from Web builds before it, keep framableHeaders.
+export const PREVIEW_FRAME_PREFIX = "linger-url-preview:";
+
+const frameAncestorSources = (policy: string): string[] | undefined => {
+  for (const directive of policy.split(";")) {
+    const [name, ...sources] = directive.trim().split(/\s+/);
+    if (name?.toLowerCase() === "frame-ancestors") return sources;
+  }
+  return undefined;
+};
+
+// Whether a response refuses to be framed by a page of another origin. CSP
+// frame-ancestors, when present, overrides X-Frame-Options, as in Chromium.
+// A source list other than * is taken as a refusal: a site never lists the
+// Linger server among its ancestors.
+export const refusesFraming = (headers: Record<string, string[]>): boolean => {
+  const values = (wanted: string): string[] =>
+    Object.entries(headers).flatMap(([name, value]) =>
+      name.toLowerCase() === wanted ? value : [],
+    );
+  const ancestors = values("content-security-policy").flatMap((policy) => {
+    const sources = frameAncestorSources(policy);
+    return sources ? [sources] : [];
+  });
+  if (ancestors.length)
+    return ancestors.some((sources) => !sources.includes("*"));
+  return values("x-frame-options").some((value) =>
+    value
+      .split(",")
+      .some((option) =>
+        ["deny", "sameorigin"].includes(option.trim().toLowerCase()),
+      ),
+  );
+};
+
 // A page opened in the app's preview panel is framed by the app. Many sites
 // refuse every frame (X-Frame-Options, CSP frame-ancestors) and the panel
 // stays blank, so the window drops those two rules for its own frames. The
