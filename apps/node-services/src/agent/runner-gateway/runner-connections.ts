@@ -778,7 +778,7 @@ export class RunnerConnections {
   /** Whether the Computer can compact a parked session of this Runtime now. */
   supportsSessionCompaction(
     runnerId: string,
-    runtimeType: "codex" | "claude" | "pi",
+    runtimeType: "codex" | "claude" | "pi" | "antigravity",
   ): boolean {
     const connection = this.#connections.get(runnerId);
     return (
@@ -809,7 +809,7 @@ export class RunnerConnections {
   /** Whether the Computer can run a model invocation on this Runtime now. */
   supportsModelInvoke(
     runnerId: string,
-    runtimeType: "codex" | "claude" | "pi",
+    runtimeType: "codex" | "claude" | "pi" | "antigravity",
   ): boolean {
     const connection = this.#connections.get(runnerId);
     return (

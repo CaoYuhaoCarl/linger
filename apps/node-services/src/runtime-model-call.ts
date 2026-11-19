@@ -32,7 +32,7 @@ export const modelCallEfforts: readonly ModelCallEffort[] = [
   "high",
 ];
 
-export type LocalRuntimeType = "codex" | "claude" | "pi";
+export type LocalRuntimeType = "codex" | "claude" | "pi" | "antigravity";
 
 export interface ModelOwner {
   readonly tenantId: string;
@@ -1302,6 +1302,7 @@ function isPlacementItem(item: unknown): item is AnotherMePlacement {
     typeof item.computer_id === "string" &&
     (item.local_runtime_type === "codex" ||
       item.local_runtime_type === "claude" ||
-      item.local_runtime_type === "pi")
+      item.local_runtime_type === "pi" ||
+      item.local_runtime_type === "antigravity")
   );
 }
