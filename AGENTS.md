@@ -49,6 +49,8 @@ Memory, and Voice services.
 - `packages/document-model`: shared Room Document schema inspection and deterministic state helpers.
 - `packages/service-kit`: shared isomorphic guards and helpers (`@linger/service-kit`) and the Node JSON logger and SHA-256 helper (`@linger/service-kit/node`).
 - `skills`: versioned built-in Skill assets embedded into TeamHub.
+- `.agents/skills/verify-linger`: acceptance recipes and an isolated
+  real-service proof for a coding Agent verifying user journeys.
 
 ## Important Conventions
 
