@@ -16,7 +16,10 @@ import {
   AgentAvatarStatusContext,
   type AgentAvatarStatus,
 } from "../members/agent-avatar-status-context";
-import { runtimeFailureMessage } from "../runtime-status/runtime-failure-message";
+import {
+  isRunInterruption,
+  runtimeFailureMessage,
+} from "../runtime-status/runtime-failure-message";
 import type { RuntimeExecutionFailure } from "../runtime-status/runtime-presentation-events";
 import { Fragment, type ReactNode, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
@@ -636,7 +639,9 @@ function resolveAgentRuntimeStatusSegment({
         : terminalOutcome === "canceled"
           ? "Canceled"
           : terminalOutcome === "failed"
-            ? "Failed"
+            ? isRunInterruption(failure)
+              ? "Canceled"
+              : "Failed"
             : activeActivity?.kind === "recovery"
               ? "Recovering"
               : activeActivity?.kind === "interaction"
