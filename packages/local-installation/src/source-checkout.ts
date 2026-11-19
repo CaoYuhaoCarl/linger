@@ -209,14 +209,17 @@ export async function prepareSourceConfiguration(
     // A port another program took since it was chosen moves to a free one
     // while the service that listens there is stopped; the services then
     // restart because their environment names the new port. The web port is
-    // the product origin, which the browser session, the desktop app and the
-    // Computer keep once the account exists, so it moves only before that;
-    // after it, the web service reports the program on its port. A database
-    // set aside from an older install marks the account to be made again, but
-    // that install's desktop still keeps the origin.
+    // the product origin. The desktop app follows it to a new port and keeps
+    // its Computer and session, so for the desktop it moves like the others.
+    // A Computer this installer enrolled keeps it once the owner account
+    // exists (or a database set aside from an older install marks the
+    // account to be made again): its self-update source and a pending
+    // enrollment credential name the origin. There the web service reports
+    // the program on its port instead.
     const keepsOrigin =
-      (await localAccountProvisioned(instance.root)) ||
-      (await latestLegacyBackup(instance.root)) !== undefined;
+      !options.externalComputer &&
+      ((await localAccountProvisioned(instance.root)) ||
+        (await latestLegacyBackup(instance.root)) !== undefined);
     const movable = Object.entries(portOwners).filter(
       ([name]) => !keepsOrigin || name !== "web",
     ) as [keyof typeof portOwners, NativeService][];
@@ -241,9 +244,24 @@ export async function prepareSourceConfiguration(
         instance.port = next;
         instance.origin = `http://localhost:${next}`;
       }
+      // Only the ports change on disk: a checkout this run rebinds to is
+      // saved once the services serve from it (saveSourceBinding).
+      const stored = (await loadInstance({
+        name: instance.name,
+        home: path.resolve(instance.root, "../.."),
+      }))!;
       await atomicPrivate(
         path.join(instance.root, "instance.json"),
-        JSON.stringify(instance, null, 2) + "\n",
+        JSON.stringify(
+          {
+            ...stored,
+            port: instance.port,
+            origin: instance.origin,
+            source: { ...stored.source!, ports: { ...instance.source.ports } },
+          },
+          null,
+          2,
+        ) + "\n",
       );
       warnings.push(
         `Port ${port} is in use by another program; Linger's ${owner} uses port ${next} instead.\n`,

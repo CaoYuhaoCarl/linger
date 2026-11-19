@@ -180,7 +180,15 @@ Gateway and runs Agents. The daemon exits with the app.
   file and renamed, so a power loss leaves the old record or none) and, while
   the window still uses that origin and the computer is enrolled, restarts the
   services on launch with `installer.js --resume`, which also restarts them
-  when the instance's `user.env` changed. A source folder removed since, or
+  when the instance's `user.env` changed. When another program took the web
+  port, the installer moves the services to a free one and reports the new
+  origin (`details.origin`, or the setup job's `origin`). The record, the
+  window's `serverUrl` and the `savedEnrollments` entry follow it together
+  (`setServer` with the previous origin emits `server.moved`, not
+  `server.changed`), so the Computer stays enrolled: it reaches TeamHub
+  through the gateway URL TeamHub gave it, and the session cookies are not
+  port-scoped. The record and `serverUrl` change only together, so a later
+  launch still resumes. A source folder removed since, or
   one the installer no longer accepts as a Linger checkout (such as one the
   earlier Simplex app unpacked, or this package's own folder with files
   missing since), is unpacked again from the app's package first and

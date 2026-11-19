@@ -145,7 +145,10 @@ if (args.includes("--resume")) {
   const source = fs.existsSync(servingFile) ? fs.readFileSync(servingFile, "utf8") : fs.existsSync(repo) ? fs.realpathSync(repo) : repo;
   // resume-fails may hold the failed outcome's message and details.
   const failure = code ? fs.readFileSync(path.join(home, "resume-fails"), "utf8").trim() : "";
-  const outcome = failure ? JSON.parse(failure) : { message: code ? "Native teamhub stopped" : "ok", details: { source } };
+  // resume-origin names the origin the installer moved the services to.
+  const originFile = path.join(home, "resume-origin");
+  const origin = fs.existsSync(originFile) ? fs.readFileSync(originFile, "utf8") : "http://localhost:3000";
+  const outcome = failure ? JSON.parse(failure) : { message: code ? "Native teamhub stopped" : "ok", details: { source, origin } };
   process.stdout.write("noise\n" + JSON.stringify({ code, ...outcome, ...(runtime ? { runtime } : {}) }) + "\n");
   process.exit(code);
 }
@@ -2080,6 +2083,30 @@ describe("LocalServerModule", () => {
     await f.host.stop("quit");
   });
 
+  it("follows an installation that moved to another origin as the same server", async () => {
+    const f = fixture(withCheckout, {}, (home) => {
+      checkout(home);
+      mkdirSync(path.join(home, "desktop"), { recursive: true });
+      writeFileSync(
+        path.join(home, "desktop", "local-server.json"),
+        JSON.stringify({
+          home,
+          repo: path.join(home, "src"),
+          origin: "http://localhost:2999",
+        }),
+      );
+    });
+    await f.host.start();
+    await f.module.begin();
+    expect(f.module.status().phase).toBe("ready");
+    expect(f.setServer).toHaveBeenCalledWith(
+      "http://localhost:3000",
+      "http://localhost:2999",
+    );
+    expect(f.unenroll).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
   it("saves provider keys in user.env before the installation runs again with them", async () => {
     const finishedJob = {
       id: "old",
@@ -2327,6 +2354,31 @@ describe("LocalServerModule after a restart", () => {
     );
     expect(args[args.indexOf("--instance") + 1]).toBe(LOCAL_INSTANCE);
     expect(f.signIn).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("follows the origin the installer moved the services to", async () => {
+    const f = fixture({}, enrolled, (home) => {
+      record(home);
+      writeFileSync(path.join(home, "resume-origin"), "http://localhost:3001");
+    });
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    // The same server at a new origin: the window follows it as a move,
+    // which keeps this computer's enrollment.
+    expect(f.setServer).toHaveBeenCalledWith(
+      "http://localhost:3001",
+      "http://localhost:3000",
+    );
+    expect(f.unenroll).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toMatchObject({ repo: "/source", origin: "http://localhost:3001" });
+    expect(f.module.status()).toMatchObject({
+      origin: "http://localhost:3001",
+    });
     await f.host.stop("quit");
   });
 

@@ -138,6 +138,7 @@ export class SetupWindowModule implements Module {
       ctx.bus.on("grants.changed", push),
       ctx.bus.on("local-server.changed", onLocal),
       ctx.bus.on("server.changed", onCookie),
+      ctx.bus.on("server.moved", onCookie),
       ctx.bus.on("setup.open", () => this.show()),
     );
     if (this.#options.show) this.show();

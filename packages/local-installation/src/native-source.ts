@@ -89,6 +89,7 @@ export async function prepareNativeConfiguration(
     home?: string;
     port?: number;
     computerName?: string;
+    externalComputer?: boolean;
     rebindSource?: boolean;
   } = {},
 ) {
