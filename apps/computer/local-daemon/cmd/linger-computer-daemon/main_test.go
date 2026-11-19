@@ -16,6 +16,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/assignment"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 // Extend the transient protocol failure regression through the real discovery
@@ -231,5 +232,101 @@ func TestProviderInstallationsKeepDiscoveredContextWindows(t *testing.T) {
 	installations, _ := providerInstallations(discovered, nil)
 	if windows := installations["codex"].ContextWindows; len(windows) != 1 || windows["local"] != 64896 {
 		t.Fatalf("context windows = %v", windows)
+	}
+}
+
+func TestRuntimeProviderEnvironmentAlignsPiCodingAgentDir(t *testing.T) {
+	home := t.TempDir()
+	wantDefault, err := localworkspace.PiSourceEnvironment(map[string]string{"HOME": home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotDefault := runtimeProviderEnvironment(map[string]string{"HOME": home, "PI_CODING_AGENT_DIR": ""}, "", "")
+	if gotDefault["PI_CODING_AGENT_DIR"] != wantDefault["PI_CODING_AGENT_DIR"] {
+		t.Fatalf("default PI_CODING_AGENT_DIR = %q, want %q", gotDefault["PI_CODING_AGENT_DIR"], wantDefault["PI_CODING_AGENT_DIR"])
+	}
+
+	custom := filepath.Join(t.TempDir(), "pi-agent")
+	if err := os.MkdirAll(custom, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	wantCustom, err := localworkspace.PiSourceEnvironment(map[string]string{"HOME": home, "PI_CODING_AGENT_DIR": custom + string(filepath.Separator) + "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotCustom := runtimeProviderEnvironment(map[string]string{"HOME": home, "PI_CODING_AGENT_DIR": custom + string(filepath.Separator) + "."}, "", "")
+	if gotCustom["PI_CODING_AGENT_DIR"] != wantCustom["PI_CODING_AGENT_DIR"] {
+		t.Fatalf("custom PI_CODING_AGENT_DIR = %q, want %q", gotCustom["PI_CODING_AGENT_DIR"], wantCustom["PI_CODING_AGENT_DIR"])
+	}
+}
+
+func TestWithManagedPiPathRespectsConfiguredPiAndClonesSafely(t *testing.T) {
+	if got := withManagedPiPath(nil, ""); got != nil {
+		t.Fatalf("empty managed path returned %v", got)
+	}
+	configured := map[string]string{"codex": "/bin/codex", "pi": "/custom/pi"}
+	if got := withManagedPiPath(configured, "/managed/pi"); got["pi"] != "/custom/pi" {
+		t.Fatalf("managed Pi overwrote configured path: %v", got)
+	}
+	original := map[string]string{"codex": "/bin/codex"}
+	merged := withManagedPiPath(original, "/managed/pi")
+	if merged["pi"] != "/managed/pi" || original["pi"] != "" {
+		t.Fatalf("merged=%v original=%v", merged, original)
+	}
+}
+
+func TestWithManagedPiEnvironmentPrependsBinDirectoryOnPATH(t *testing.T) {
+	root := t.TempDir()
+	bin1 := filepath.Join(root, "usr", "bin")
+	bin2 := filepath.Join(root, "bin")
+	base := map[string]string{"HOME": root, "PATH": bin1 + string(os.PathListSeparator) + bin2}
+	managed := filepath.Join(root, "state", "local-models", "harness", "tools", "pi", "1.3.0", "pi")
+	managedDir := filepath.Dir(managed)
+
+	if got := withManagedPiEnvironment(base, nil, ""); got["PATH"] != base["PATH"] {
+		t.Fatalf("empty managed path altered PATH: %v", got)
+	}
+	if got := withManagedPiEnvironment(base, map[string]string{"pi": filepath.Join(root, "custom", "pi")}, managed); got["PATH"] != base["PATH"] {
+		t.Fatalf("configured pi path was overridden: %v", got)
+	}
+
+	updated := withManagedPiEnvironment(base, nil, managed)
+	want := managedDir + string(os.PathListSeparator) + bin1 + string(os.PathListSeparator) + bin2
+	if updated["PATH"] != want {
+		t.Fatalf("updated PATH = %q, want %q", updated["PATH"], want)
+	}
+	if base["PATH"] != bin1+string(os.PathListSeparator)+bin2 {
+		t.Fatalf("caller environment mutated: %v", base)
+	}
+
+	deduped := withManagedPiEnvironment(map[string]string{"PATH": bin1 + string(os.PathListSeparator) + managedDir}, map[string]string{"pi": managed}, managed)
+	if deduped["PATH"] != managedDir+string(os.PathListSeparator)+bin1 {
+		t.Fatalf("deduped PATH = %q", deduped["PATH"])
+	}
+
+	emptyPath := withManagedPiEnvironment(nil, nil, managed)
+	if emptyPath["PATH"] != managedDir {
+		t.Fatalf("empty PATH = %q, want %q", emptyPath["PATH"], managedDir)
+	}
+}
+
+func TestShouldProvisionManagedPi(t *testing.T) {
+	noPi := provider.DiscoveryResult{Installations: map[string]provider.RuntimeDiagnostic{}}
+	externalPi := provider.DiscoveryResult{Installations: map[string]provider.RuntimeDiagnostic{"pi": {Type: "pi", ExecutablePath: "/usr/local/bin/pi"}}}
+
+	if shouldProvisionManagedPi([]string{"codex", "claude"}, nil, noPi, "") {
+		t.Fatal("provisioned Pi when disabled by enabled_runtimes")
+	}
+	if shouldProvisionManagedPi(nil, map[string]string{"pi": "/custom/pi"}, noPi, "") {
+		t.Fatal("provisioned Pi when runtime_paths.pi is configured")
+	}
+	if shouldProvisionManagedPi(nil, nil, externalPi, "") {
+		t.Fatal("provisioned Pi when external Pi was already discovered")
+	}
+	if !shouldProvisionManagedPi(nil, nil, noPi, "") {
+		t.Fatal("did not provision Pi when enabled and absent")
+	}
+	if !shouldProvisionManagedPi([]string{"pi"}, nil, externalPi, "/state/local-models/harness/tools/pi/1.3.0/pi") {
+		t.Fatal("did not keep harness directory when managed Pi was already discovered")
 	}
 }

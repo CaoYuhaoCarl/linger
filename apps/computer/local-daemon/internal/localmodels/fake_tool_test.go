@@ -43,13 +43,21 @@ type fakeLine struct {
 
 func runFakeTool(args []string) int {
 	state := os.Getenv("LOCALMODELS_STATE")
-	if len(args) < 6 || strings.Join(args[:5], " ") != "-P -s -m localmodels library" {
+	if len(args) < 6 || strings.Join(args[:4], " ") != "-P -s -m localmodels" {
+		fmt.Fprintln(os.Stderr, "unexpected invocation", args)
+		return 3
+	}
+	group := args[4]
+	if group == "harness" {
+		return runFakeHarness(state, args[5:])
+	}
+	if group != "library" {
 		fmt.Fprintln(os.Stderr, "unexpected invocation", args)
 		return 3
 	}
 	verb := args[5]
 	log, _ := os.OpenFile(filepath.Join(state, "calls.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	_, _ = fmt.Fprintf(log, "%s|PYTHONPATH=%s|cwd=%s\n", strings.Join(args[5:], " "), os.Getenv("PYTHONPATH"), workingDirectory())
+	_, _ = fmt.Fprintf(log, "%s|PYTHONPATH=%s|cwd=%s|PI_CODING_AGENT_DIR=%s\n", strings.Join(args[5:], " "), os.Getenv("PYTHONPATH"), workingDirectory(), os.Getenv("PI_CODING_AGENT_DIR"))
 	_ = log.Close()
 	if verb == "status" {
 		if code, err := os.ReadFile(filepath.Join(state, "status-exit")); err == nil {
@@ -93,6 +101,136 @@ func runFakeTool(args []string) int {
 func workingDirectory() string {
 	directory, _ := os.Getwd()
 	return directory
+}
+
+func runFakeHarness(state string, args []string) int {
+	if len(args) < 1 {
+		return 3
+	}
+	verb := args[0]
+	log, _ := os.OpenFile(filepath.Join(state, "calls.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	_, _ = fmt.Fprintf(log, "harness %s|PI_CODING_AGENT_DIR=%s\n", strings.Join(args, " "), os.Getenv("PI_CODING_AGENT_DIR"))
+	_ = log.Close()
+	argValue := func(flag string) string {
+		for index := 0; index+1 < len(args); index++ {
+			if args[index] == flag {
+				return args[index+1]
+			}
+		}
+		return ""
+	}
+	waitOnMarker := func(gateName, enteredName string) {
+		gate := filepath.Join(state, gateName)
+		if _, err := os.Stat(gate); err != nil {
+			return
+		}
+		_ = os.WriteFile(filepath.Join(state, enteredName), []byte("1"), 0o600)
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, statErr := os.Stat(gate); statErr != nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	root := argValue("--root")
+	installedPathForRoot := func(baseRoot string) string {
+		return filepath.Join(baseRoot, "tools", "pi", "1.3.0", "pi")
+	}
+	statusJSON := func(baseRoot string, installed bool, source string, argvPrefix []string) string {
+		if !installed {
+			return `{"schema":"localmodels.harness-status/v1","runtimes":[{"runtime":"pi","installed":false,"executable":null,"argvPrefix":[],"source":null}]}`
+		}
+		executable := installedPathForRoot(baseRoot)
+		if source == "host" {
+			executable = filepath.Join(filepath.Dir(baseRoot), "external", "pi")
+		}
+		prefixJSON, _ := json.Marshal(argvPrefix)
+		if argvPrefix == nil {
+			prefixJSON = []byte("[]")
+		}
+		if source == "" {
+			return fmt.Sprintf(`{"schema":"localmodels.harness-status/v1","runtimes":[{"runtime":"pi","installed":true,"executable":%q,"argvPrefix":%s}]}`, executable, prefixJSON)
+		}
+		return fmt.Sprintf(`{"schema":"localmodels.harness-status/v1","runtimes":[{"runtime":"pi","installed":true,"executable":%q,"argvPrefix":%s,"source":%q}]}`, executable, prefixJSON, source)
+	}
+	switch verb {
+	case "status":
+		if _, err := os.Stat(filepath.Join(state, "harness-status-fail")); err == nil {
+			if body, readErr := os.ReadFile(filepath.Join(state, "harness-status-error")); readErr == nil {
+				_, _ = os.Stdout.Write(body)
+			}
+			return 1
+		}
+		if _, err := os.Stat(filepath.Join(state, "harness-pi-host")); err == nil {
+			fmt.Println(statusJSON(root, true, "host", nil))
+			return 0
+		}
+		if _, err := os.Stat(filepath.Join(state, "harness-pi-bad-prefix")); err == nil {
+			fmt.Println(statusJSON(root, true, "managed", []string{"--extra"}))
+			return 0
+		}
+		_, err := os.Stat(filepath.Join(state, "harness-pi-installed"))
+		source := "managed"
+		if _, noSourceErr := os.Stat(filepath.Join(state, "harness-pi-omit-source")); noSourceErr == nil {
+			source = ""
+		}
+		fmt.Println(statusJSON(root, err == nil, source, nil))
+		return 0
+	case "plan":
+		waitOnMarker("harness-plan-wait", "harness-plan-entered")
+		if _, err := os.Stat(filepath.Join(state, "harness-plan-fail")); err == nil {
+			if body, readErr := os.ReadFile(filepath.Join(state, "harness-plan-error")); readErr == nil {
+				_, _ = os.Stdout.Write(body)
+			}
+			return 1
+		}
+		if argValue("--runtime") != "pi" || root == "" {
+			return 2
+		}
+		outPath := argValue("--out")
+		if outPath == "" {
+			return 2
+		}
+		plan := fmt.Sprintf(`{"schema":"localmodels.harness-plan/v1","id":%q,"runtime":"pi","root":%q}`, strings.Repeat("a", 64), root)
+		if body, readErr := os.ReadFile(filepath.Join(state, "harness-plan-body")); readErr == nil {
+			plan = string(body)
+		}
+		_ = os.WriteFile(outPath, []byte(plan), 0o600)
+		fmt.Println(plan)
+		return 0
+	case "apply":
+		waitOnMarker("harness-apply-wait", "harness-apply-entered")
+		if _, err := os.Stat(filepath.Join(state, "harness-apply-fail")); err == nil {
+			if body, readErr := os.ReadFile(filepath.Join(state, "harness-apply-error")); readErr == nil {
+				_, _ = os.Stdout.Write(body)
+			}
+			return 1
+		}
+		if len(args) < 2 {
+			return 2
+		}
+		planData, readErr := os.ReadFile(args[1])
+		if readErr != nil {
+			return 2
+		}
+		var plan struct {
+			ID   string `json:"id"`
+			Root string `json:"root"`
+		}
+		if json.Unmarshal(planData, &plan) != nil || argValue("--approve") != plan.ID || !hex64Pattern.MatchString(plan.ID) {
+			return 2
+		}
+		installedPath := installedPathForRoot(plan.Root)
+		_ = os.WriteFile(filepath.Join(state, "harness-pi-installed"), []byte(installedPath), 0o600)
+		fmt.Println(`{"kind":"stage","stage":"install","state":"running"}`)
+		if _, err := os.Stat(filepath.Join(state, "harness-apply-no-status")); err != nil {
+			fmt.Println(statusJSON(plan.Root, true, "managed", nil))
+		}
+		return 0
+	default:
+		return 3
+	}
 }
 
 // fakeTool lays out a Tool that runs the fake.
@@ -192,7 +330,11 @@ func model(id, state string) map[string]any {
 }
 
 func progressLine(id, phase string, done, total int) json.RawMessage {
-	return json.RawMessage(fmt.Sprintf(`{"schema":"localmodels.library-event/v1","event":"progress","model":%q,"phase":%q,"done":%d,"total":%d,"bytes_per_second":1048576}`, id, phase, done, total))
+	return progressLineExtra(id, phase, done, total, "")
+}
+
+func progressLineExtra(id, phase string, done, total int, extra string) json.RawMessage {
+	return json.RawMessage(fmt.Sprintf(`{"schema":"localmodels.library-event/v1","event":"progress","model":%q,"phase":%q,"done":%d,"total":%d,"bytes_per_second":1048576%s}`, id, phase, done, total, extra))
 }
 
 func resultLine(id string) json.RawMessage {

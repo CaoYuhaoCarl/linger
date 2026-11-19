@@ -36,9 +36,11 @@ var errorCodes = []string{
 }
 
 var (
-	families      = []string{"qwen", "gemma", "llama", "openai", "deepseek", "mistral", "phi", "glm", "kimi", "claude", "grok", "other"}
-	architectures = []string{"dense", "moe"}
-	capabilities  = []string{"vision", "tool_use", "reasoning", "coding", "multilingual"}
+	families        = []string{"qwen", "gemma", "llama", "openai", "deepseek", "mistral", "phi", "glm", "kimi", "claude", "grok", "other"}
+	architectures   = []string{"dense", "moe"}
+	capabilities    = []string{"vision", "tool_use", "reasoning", "coding", "multilingual"}
+	downloadSources = []string{"huggingface", "modelscope", "custom", "cache"}
+	loadSteps       = []string{"prepare", "start", "load", "warm"}
 )
 
 var (
@@ -149,6 +151,12 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		if model.State != "loaded" {
 			model.Endpoint = nil
 		}
+		if model.State != "downloading" {
+			model.Download = nil
+		}
+		if model.State != "loading" {
+			model.Load = nil
+		}
 		if model.Error != nil {
 			model.Error.Detail = clip(model.Error.Detail, 4000)
 		}
@@ -192,8 +200,24 @@ func checkModel(model wire.LocalModel) error {
 		!slices.Contains([]string{"MEMORY_INSUFFICIENT", "DISK_INSUFFICIENT", "PLATFORM_UNSUPPORTED"}, reason.Code) {
 		return invalid("availability reason", reason.Code)
 	}
-	if model.Download != nil && model.Download.Step != "download" && model.Download.Step != "verify" {
-		return invalid("download step", model.Download.Step)
+	if model.Download != nil {
+		if model.Download.Step != "download" && model.Download.Step != "verify" {
+			return invalid("download step", model.Download.Step)
+		}
+		if model.Download.Source != "" && !slices.Contains(downloadSources, model.Download.Source) {
+			return invalid("download source", model.Download.Source)
+		}
+		if model.Download.Connections != nil && *model.Download.Connections > 64 {
+			return invalid("download connections", strconv.FormatUint(*model.Download.Connections, 10))
+		}
+	}
+	if model.Load != nil {
+		if !slices.Contains(loadSteps, model.Load.Step) {
+			return invalid("load step", model.Load.Step)
+		}
+		if model.Load.TotalSteps < 1 || model.Load.TotalSteps > 100 || model.Load.DoneSteps > model.Load.TotalSteps {
+			return fmt.Errorf("model %s load progress %d/%d is outside the contract", model.ID, model.Load.DoneSteps, model.Load.TotalSteps)
+		}
 	}
 	if model.Error != nil && !slices.Contains(errorCodes, model.Error.Code) {
 		return invalid("error code", model.Error.Code)
@@ -239,6 +263,9 @@ type libraryEvent struct {
 	Done           float64         `json:"done"`
 	Total          float64         `json:"total"`
 	BytesPerSecond float64         `json:"bytes_per_second"`
+	Source         string          `json:"source"`
+	Connections    *int            `json:"connections"`
+	LoadStep       string          `json:"load_step"`
 	OK             bool            `json:"ok"`
 	Code           string          `json:"code"`
 	Detail         string          `json:"detail"`

@@ -183,6 +183,51 @@ func TestValidLocalModelsSnapshot(t *testing.T) {
 			p := float32(-1)
 			s.Models[0].PromptTokensPerSecond = &p
 		},
+		"invalid download step": func(s *teamhubinternal.LocalModelsSnapshot) {
+			s.Models[0].State = teamhubinternal.LocalModelStateDownloading
+			s.Models[0].Download = &teamhubinternal.LocalModelDownloadProgress{Step: "extract", DoneBytes: 0, TotalBytes: 10}
+		},
+		"invalid download source": func(s *teamhubinternal.LocalModelsSnapshot) {
+			src := teamhubinternal.LocalModelDownloadSource("s3")
+			s.Models[0].State = teamhubinternal.LocalModelStateDownloading
+			s.Models[0].Download = &teamhubinternal.LocalModelDownloadProgress{
+				Step: teamhubinternal.LocalModelDownloadStepDownload, Source: &src, DoneBytes: 0, TotalBytes: 10,
+			}
+		},
+		"negative download connections": func(s *teamhubinternal.LocalModelsSnapshot) {
+			conn := -1
+			s.Models[0].State = teamhubinternal.LocalModelStateDownloading
+			s.Models[0].Download = &teamhubinternal.LocalModelDownloadProgress{
+				Step: teamhubinternal.LocalModelDownloadStepDownload, Connections: &conn, DoneBytes: 0, TotalBytes: 10,
+			}
+		},
+		"download connections > 64": func(s *teamhubinternal.LocalModelsSnapshot) {
+			conn := 65
+			s.Models[0].State = teamhubinternal.LocalModelStateDownloading
+			s.Models[0].Download = &teamhubinternal.LocalModelDownloadProgress{
+				Step: teamhubinternal.LocalModelDownloadStepDownload, Connections: &conn, DoneBytes: 0, TotalBytes: 10,
+			}
+		},
+		"invalid load step": func(s *teamhubinternal.LocalModelsSnapshot) {
+			s.Models[0].State = teamhubinternal.LocalModelStateLoading
+			s.Models[0].Load = &teamhubinternal.LocalModelLoadProgress{Step: "boot", DoneSteps: 1, TotalSteps: 5}
+		},
+		"load total_steps < 1": func(s *teamhubinternal.LocalModelsSnapshot) {
+			s.Models[0].State = teamhubinternal.LocalModelStateLoading
+			s.Models[0].Load = &teamhubinternal.LocalModelLoadProgress{Step: teamhubinternal.LocalModelLoadStepPrepare, DoneSteps: 0, TotalSteps: 0}
+		},
+		"load total_steps > 100": func(s *teamhubinternal.LocalModelsSnapshot) {
+			s.Models[0].State = teamhubinternal.LocalModelStateLoading
+			s.Models[0].Load = &teamhubinternal.LocalModelLoadProgress{Step: teamhubinternal.LocalModelLoadStepLoad, DoneSteps: 5, TotalSteps: 101}
+		},
+		"negative load done_steps": func(s *teamhubinternal.LocalModelsSnapshot) {
+			s.Models[0].State = teamhubinternal.LocalModelStateLoading
+			s.Models[0].Load = &teamhubinternal.LocalModelLoadProgress{Step: teamhubinternal.LocalModelLoadStepPrepare, DoneSteps: -1, TotalSteps: 5}
+		},
+		"load done_steps > total_steps": func(s *teamhubinternal.LocalModelsSnapshot) {
+			s.Models[0].State = teamhubinternal.LocalModelStateLoading
+			s.Models[0].Load = &teamhubinternal.LocalModelLoadProgress{Step: teamhubinternal.LocalModelLoadStepWarm, DoneSteps: 8, TotalSteps: 7}
+		},
 	} {
 		var copied teamhubinternal.LocalModelsSnapshot
 		if err := json.Unmarshal([]byte(storedLocalModelsSnapshotJSON), &copied); err != nil {
@@ -192,5 +237,75 @@ func TestValidLocalModelsSnapshot(t *testing.T) {
 		if validLocalModelsSnapshot(copied) {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+
+	for name, mutate := range map[string]func(*teamhubinternal.LocalModelsSnapshot){
+		"download with source and zero connections": func(s *teamhubinternal.LocalModelsSnapshot) {
+			src := teamhubinternal.LocalModelDownloadSourceCache
+			conn := 0
+			s.Models[0].State = teamhubinternal.LocalModelStateDownloading
+			s.Models[0].Download = &teamhubinternal.LocalModelDownloadProgress{
+				Step: teamhubinternal.LocalModelDownloadStepDownload, Source: &src, Connections: &conn, DoneBytes: 10, TotalBytes: 10,
+			}
+		},
+		"download with modelscope and max connections": func(s *teamhubinternal.LocalModelsSnapshot) {
+			src := teamhubinternal.LocalModelDownloadSourceModelscope
+			conn := 64
+			s.Models[0].State = teamhubinternal.LocalModelStateDownloading
+			s.Models[0].Download = &teamhubinternal.LocalModelDownloadProgress{
+				Step: teamhubinternal.LocalModelDownloadStepDownload, Source: &src, Connections: &conn, DoneBytes: 5, TotalBytes: 10,
+			}
+		},
+		"load with valid steps": func(s *teamhubinternal.LocalModelsSnapshot) {
+			s.Models[0].State = teamhubinternal.LocalModelStateLoading
+			s.Models[0].Load = &teamhubinternal.LocalModelLoadProgress{
+				Step: teamhubinternal.LocalModelLoadStepWarm, DoneSteps: 7, TotalSteps: 7,
+			}
+		},
+	} {
+		var copied teamhubinternal.LocalModelsSnapshot
+		if err := json.Unmarshal([]byte(storedLocalModelsSnapshotJSON), &copied); err != nil {
+			t.Fatal(err)
+		}
+		mutate(&copied)
+		if !validLocalModelsSnapshot(copied) {
+			t.Errorf("%s: rejected", name)
+		}
+	}
+}
+
+func TestLocalModelsViewProjectsDownloadAndLoadProgress(t *testing.T) {
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	seen := now.Add(-10 * time.Second)
+	snapshotJSON := `{"available":true,"observed_at":"2026-11-18T11:59:50Z","tool_version":"2.1.0",
+"pools":[{"id":"gpu:0","kind":"gpu","gpu_index":0,"total_bytes":100,"used_bytes":40,"holders":[]}],
+"models":[
+ {"id":"dl:Q4","name":"DL","description":"","quant":"Q4","context_tokens":8192,"vision":false,
+  "download_bytes":10,"memory_bytes":40,"fit":"gpu","recommended":false,"availability":{"downloadable":true},
+  "pool":"gpu:0","state":"downloading",
+  "download":{"step":"download","done_bytes":5,"total_bytes":10,"bytes_per_second":2,"source":"modelscope","connections":16}},
+ {"id":"ld:Q4","name":"LD","description":"","quant":"Q4","context_tokens":8192,"vision":false,
+  "download_bytes":10,"memory_bytes":40,"fit":"gpu","recommended":false,"availability":{"downloadable":true},
+  "pool":"gpu:0","state":"loading",
+  "load":{"step":"warm","done_steps":6,"total_steps":7}}]}`
+	view, err := localModelsView(agentruntimestate.LocalModelsRecord{
+		ComputerID: "computer_1", DisplayName: "Studio", Status: "online", LastSeenAt: &seen,
+		Owner:    agentruntimestate.LocalComputerOwner{TenantID: "tenant_1", OwnerActorID: "actor_owner"},
+		Snapshot: json.RawMessage(snapshotJSON),
+	}, "actor_owner", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Models) != 2 {
+		t.Fatalf("len(models)=%d, want 2", len(view.Models))
+	}
+	dl := view.Models[0].Model.Download
+	if dl == nil || dl.Source == nil || *dl.Source != httpapi.LocalModelDownloadSourceModelscope ||
+		dl.Connections == nil || *dl.Connections != 16 {
+		t.Fatalf("download progress=%+v", dl)
+	}
+	ld := view.Models[1].Model.Load
+	if ld == nil || ld.Step != httpapi.LocalModelLoadStepWarm || ld.DoneSteps != 6 || ld.TotalSteps != 7 {
+		t.Fatalf("load progress=%+v", ld)
 	}
 }

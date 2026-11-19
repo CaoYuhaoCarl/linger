@@ -240,6 +240,17 @@ components:
           type: integer
           format: int64
           minimum: 0
+    LocalModelDownloadSource:
+      description: Mirror or local cache serving the weight download.
+      type: string
+      enum: [huggingface, modelscope, custom, cache]
+      x-enum-varnames:
+        [
+          LocalModelDownloadSourceHuggingface,
+          LocalModelDownloadSourceModelscope,
+          LocalModelDownloadSourceCustom,
+          LocalModelDownloadSourceCache,
+        ]
     LocalModelDownloadProgress:
       type: object
       additionalProperties: false
@@ -262,6 +273,38 @@ components:
           type: integer
           format: int64
           minimum: 0
+        source:
+          $ref: "#/components/schemas/LocalModelDownloadSource"
+        connections:
+          type: integer
+          minimum: 0
+          maximum: 64
+    LocalModelLoadStep:
+      description: Current phase while preparing, starting, loading, or warming a model.
+      type: string
+      enum: [prepare, start, load, warm]
+      x-enum-varnames:
+        [
+          LocalModelLoadStepPrepare,
+          LocalModelLoadStepStart,
+          LocalModelLoadStepLoad,
+          LocalModelLoadStepWarm,
+        ]
+    LocalModelLoadProgress:
+      type: object
+      additionalProperties: false
+      required: [step, done_steps, total_steps]
+      properties:
+        step:
+          $ref: "#/components/schemas/LocalModelLoadStep"
+        done_steps:
+          type: integer
+          minimum: 0
+          maximum: 100
+        total_steps:
+          type: integer
+          minimum: 1
+          maximum: 100
     LocalModelEndpoint:
       type: object
       additionalProperties: false
@@ -437,6 +480,9 @@ components:
         download:
           $ref: "#/components/schemas/LocalModelDownloadProgress"
           description: Present only while downloading.
+        load:
+          $ref: "#/components/schemas/LocalModelLoadProgress"
+          description: Present only while loading.
         endpoint:
           $ref: "#/components/schemas/LocalModelEndpoint"
           description: Present only while loaded.

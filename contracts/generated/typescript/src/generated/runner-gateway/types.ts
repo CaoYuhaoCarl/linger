@@ -301,6 +301,12 @@ export type LocalModelsUnavailableCode = "TOOL_NOT_INSTALLED" | "TOOL_FAILED";
  * A place a model can live: gpu:<index>, system (RAM beside GPUs) or unified (RAM of a GPU-less or Apple silicon host).
  */
 export type LocalModelPoolId = string;
+export type LocalModelDownloadSource =
+  | "huggingface"
+  | "modelscope"
+  | "custom"
+  | "cache";
+export type LocalModelLoadStep = "prepare" | "start" | "load" | "warm";
 /**
  * Closed localmodels library error set. Extend it only together with the localmodels library contract.
  */
@@ -1350,6 +1356,7 @@ export interface LocalModel {
   pool?: string;
   state: "absent" | "downloading" | "idle" | "loading" | "loaded" | "failed";
   download?: LocalModelDownloadProgress;
+  load?: LocalModelLoadProgress;
   endpoint?: LocalModelEndpoint;
   /**
    * The runtime_model an Agent on runtime pi stores for this model, <pi provider>/<pi model id>; present while the model is on the Computer.
@@ -1412,6 +1419,16 @@ export interface LocalModelDownloadProgress {
   done_bytes: NonNegativeInteger;
   total_bytes: NonNegativeInteger;
   bytes_per_second?: NonNegativeInteger;
+  source?: LocalModelDownloadSource;
+  connections?: number;
+}
+/**
+ * Present only while loading.
+ */
+export interface LocalModelLoadProgress {
+  step: LocalModelLoadStep;
+  done_steps: number;
+  total_steps: number;
 }
 /**
  * Present only while loaded.

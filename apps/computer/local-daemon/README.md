@@ -151,11 +151,26 @@ model.
   Daemon rereads the status, which carries what the phase reserved or freed
   (pool use, placement, models unloaded first), and applies the job's line on
   top; later lines of the phase update that snapshot without another read.
-- Pi. When the loaded models change, the Daemon asks the Runtime monitor for a
-  full discovery, so TeamHub sees Pi's new model list. Each model's
-  `pi_model` (`<provider>/<id>`, as an Agent's `runtime_model` stores it) is
-  passed through as `localmodels` reports it; the endpoint keeps only the
-  loaded engine's `base_url`.
+- Pi. The Daemon aligns `PI_CODING_AGENT_DIR` on `localmodels` tool calls with
+  `workspace.PiSourceEnvironment` (`~/.pi/agent` when unset) so loaded models
+  land in the same Pi profile that runtime discovery and execution read. When
+  a snapshot reports a loaded model (or a load completes) on a Computer where Pi
+  is enabled, unconfigured in `runtime_paths`, and not already discovered
+  externally, `internal/localmodels` installs the pinned Pi runtime
+  asynchronously in the background under `state/local-models/harness` (passing
+  the bundled Node binary via `--node` when available, validating the plan
+  contract, retrying with exponential backoff on transient failures, and
+  cancelling/waiting cleanly on `Close()`) before asking the Runtime monitor for
+  a full discovery with the managed Pi executable and binary directory on
+  `PATH`. Each model's `pi_model` (`<provider>/<id>`, as an Agent's
+  `runtime_model` stores it) is passed through as `localmodels` reports it; the
+  endpoint keeps only the loaded engine's `base_url`.
+- Shared weight cache. On multi-container Computer hosts, mount a shared cache
+  directory and pass `LINGER_LOCALMODELS_CACHE_DIR` or
+  `LINGER_LOCALMODELS_REUSE_DIRS` in the Daemon environment so `localmodels`
+  receives `LOCALMODELS_CACHE_DIR` and `LOCALMODELS_REUSE_DIRS` (when those
+  `LOCALMODELS_*` variables are not already set) and reuses SHA256-verified
+  GGUF weights without re-downloading.
 
 ## Codex models cache
 

@@ -1,3 +1,4 @@
+import type { TeamHubLocalComputerPage } from "@/features/teamhub/teamhub-types";
 import { formatBytes } from "@/lib/format-bytes";
 
 import { architectureCopy, capabilityCopy } from "./local-models-copy";
@@ -7,6 +8,9 @@ import type {
   LocalModelsView,
   LocalModelView,
 } from "./local-models-queries";
+
+type LocalComputer = TeamHubLocalComputerPage["items"][number];
+const piLibraryModelPrefix = "localmodels-library/";
 
 /**
  * Presentation rules of the Local models page. The Computer decides fit,
@@ -118,15 +122,200 @@ export function poolFreeBytes(pool: LocalModelPool) {
   return Math.max(0, pool.total_bytes - pool.used_bytes);
 }
 
+function summaryPools(view: LocalModelsView) {
+  const gpus = view.pools.filter((pool) => pool.kind === "gpu");
+  return gpus.length ? gpus : view.pools;
+}
+
 /** What the header adds up: GPU memory when the Computer has GPUs, else its memory. */
 export function memorySummary(view: LocalModelsView) {
   const gpus = view.pools.filter((pool) => pool.kind === "gpu");
-  const pools = gpus.length ? gpus : view.pools;
+  const pools = summaryPools(view);
   return {
     gpu: gpus.length > 0,
     totalBytes: pools.reduce((sum, pool) => sum + pool.total_bytes, 0),
     usedBytes: pools.reduce((sum, pool) => sum + pool.used_bytes, 0),
   };
+}
+
+export interface HeaderMemorySegment {
+  id: string;
+  kind: "model" | "component" | "other";
+  name: string;
+  bytes: number;
+  percent: number;
+  modelIndex?: number;
+}
+
+/**
+ * Aggregated memory segments across the header's summary pools so users can
+ * distinguish loaded models, foundation components, and other-app memory
+ * without opening Details.
+ */
+export function headerMemorySegments(
+  view: LocalModelsView,
+): HeaderMemorySegment[] {
+  const pools = summaryPools(view);
+  const totalBytes = pools.reduce((sum, pool) => sum + pool.total_bytes, 0);
+  if (totalBytes <= 0) return [];
+
+  const modelHolders = new Map<string, { name: string; bytes: number }>();
+  const componentHolders = new Map<string, { name: string; bytes: number }>();
+  let otherBytes = 0;
+
+  for (const pool of pools) {
+    let accounted = 0;
+    for (const holder of pool.holders) {
+      accounted += holder.bytes;
+      const target = holder.kind === "model" ? modelHolders : componentHolders;
+      const existing = target.get(holder.id);
+      if (existing) existing.bytes += holder.bytes;
+      else target.set(holder.id, { name: holder.name, bytes: holder.bytes });
+    }
+    otherBytes += Math.max(0, pool.used_bytes - accounted);
+  }
+
+  const rawSegments: Array<Omit<HeaderMemorySegment, "percent">> = [];
+  let modelIndex = 0;
+  for (const [id, holder] of modelHolders) {
+    if (holder.bytes > 0) {
+      rawSegments.push({
+        bytes: holder.bytes,
+        id,
+        kind: "model",
+        modelIndex,
+        name: holder.name,
+      });
+      modelIndex += 1;
+    }
+  }
+  for (const [id, holder] of componentHolders) {
+    if (holder.bytes > 0) {
+      rawSegments.push({
+        bytes: holder.bytes,
+        id,
+        kind: "component",
+        name: holder.name,
+      });
+    }
+  }
+  if (otherBytes > 0) {
+    rawSegments.push({
+      bytes: otherBytes,
+      id: "other-apps",
+      kind: "other",
+      name: "Other apps",
+    });
+  }
+
+  const accountedTotal = rawSegments.reduce((sum, seg) => sum + seg.bytes, 0);
+  const scaleBase = Math.max(totalBytes, accountedTotal);
+  return rawSegments.map((segment) => ({
+    ...segment,
+    percent: (segment.bytes / scaleBase) * 100,
+  }));
+}
+
+/** Whether a model holds usable files on the Computer (not absent or a partial download). */
+export function isModelOnComputer(model: LocalModel): boolean {
+  const status = modelStatus(model);
+  return (
+    status !== "available" &&
+    status !== "unavailable" &&
+    !downloadStopped(model)
+  );
+}
+
+export function localModelsComputerStorageKey(tenantId: string): string {
+  return `linger.local-models.computer:${tenantId}`;
+}
+
+export function readRememberedLocalModelsComputerId(
+  tenantId: string,
+): string | undefined {
+  try {
+    const value = globalThis.localStorage?.getItem(
+      localModelsComputerStorageKey(tenantId),
+    );
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function rememberLocalModelsComputerId(
+  tenantId: string,
+  computerId: string,
+): void {
+  try {
+    globalThis.localStorage?.setItem(
+      localModelsComputerStorageKey(tenantId),
+      computerId,
+    );
+  } catch {
+    // Ignore storage quota or private-mode access restrictions.
+  }
+}
+
+/** Counts library models exposed through the Computer's Pi runtime. */
+export function loadedLibraryModelCount(
+  computer: Pick<LocalComputer, "runtimes">,
+): number {
+  const piRuntime = computer.runtimes.find((runtime) => runtime.type === "pi");
+  if (!piRuntime) return 0;
+  return piRuntime.models.filter((model) =>
+    model.id.startsWith(piLibraryModelPrefix),
+  ).length;
+}
+
+export function computerPickerLabel(
+  computer: Pick<LocalComputer, "display_name" | "status" | "runtimes">,
+): string {
+  if (computer.status !== "online") {
+    return `${computer.display_name} · Offline`;
+  }
+  const loadedCount = loadedLibraryModelCount(computer);
+  return loadedCount > 0
+    ? `${computer.display_name} · ${loadedCount} loaded`
+    : computer.display_name;
+}
+
+/**
+ * Picks the initial owned Computer when `?computer=` is omitted: the desktop's
+ * own Computer, then the last remembered Computer, then an online Computer
+ * already running a library model, then any online Computer, else the first.
+ */
+export function selectDefaultLocalModelsComputer<
+  T extends Pick<LocalComputer, "computer_id" | "status" | "runtimes">,
+>(
+  computers: readonly T[],
+  {
+    desktopComputerId,
+    rememberedComputerId,
+  }: {
+    desktopComputerId?: string;
+    rememberedComputerId?: string;
+  } = {},
+): T | undefined {
+  if (desktopComputerId) {
+    const desktopComputer = computers.find(
+      (item) => item.computer_id === desktopComputerId,
+    );
+    if (desktopComputer) return desktopComputer;
+  }
+  if (rememberedComputerId) {
+    const remembered = computers.find(
+      (item) => item.computer_id === rememberedComputerId,
+    );
+    if (remembered) return remembered;
+  }
+  return (
+    computers.find(
+      (item) => item.status === "online" && loadedLibraryModelCount(item) > 0,
+    ) ??
+    computers.find((item) => item.status === "online") ??
+    computers[0]
+  );
 }
 
 export interface LoadCheck {
@@ -209,6 +398,83 @@ export function downloadPercent(model: LocalModel) {
   );
 }
 
+export type LocalModelDownloadSource = NonNullable<
+  NonNullable<LocalModel["download"]>["source"]
+>;
+
+const downloadSourceLabels: Record<LocalModelDownloadSource, string> = {
+  cache: "Local cache",
+  custom: "Custom source",
+  huggingface: "Hugging Face",
+  modelscope: "ModelScope mirror",
+};
+
+/** Human-readable name for the mirror or cache serving a model download. */
+export function downloadSourceLabel(
+  source?: LocalModelDownloadSource,
+): string | undefined {
+  return source ? downloadSourceLabels[source] : undefined;
+}
+
+/** Source, parallelism, and binary throughput unit details for a live download. */
+export function downloadTransferSummary(model: LocalModel): string | undefined {
+  const download = model.download;
+  if (!download || (!download.source && download.connections === undefined)) {
+    return undefined;
+  }
+  if (download.source === "cache") {
+    return "Reusing verified local cache";
+  }
+  const connections = download.connections;
+  const connectionLabel =
+    connections !== undefined && connections > 0
+      ? `${connections} ${connections === 1 ? "connection" : "connections"}`
+      : undefined;
+  return [
+    downloadSourceLabel(download.source),
+    connectionLabel,
+    "binary MB/s (MiB/s)",
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+}
+
+/** Whole-percent load progress across reported setup and weight-loading steps. */
+export function loadPercent(model: LocalModel): number | null {
+  const load = model.load;
+  if (!load || load.total_steps <= 0) return null;
+  return Math.max(
+    0,
+    Math.min(100, Math.round((load.done_steps / load.total_steps) * 100)),
+  );
+}
+
+/** Live loading step text, falling back to pool placement when step progress is absent. */
+export function loadStatusDetail(
+  model: LocalModel,
+  where?: string,
+): string | null {
+  const load = model.load;
+  if (!load) return where ?? null;
+  const pct = loadPercent(model);
+  switch (load.step) {
+    case "prepare":
+      return "Preparing server…";
+    case "start":
+      return "Starting server…";
+    case "load": {
+      const base = where ? `Loading weights to ${where}` : "Loading weights";
+      return pct !== null && pct > 0 ? `${base} · ${pct}%` : base;
+    }
+    case "warm":
+      return pct !== null ? `Warming up · ${pct}%` : "Warming up";
+    default: {
+      const _exhaustive: never = load.step;
+      return _exhaustive;
+    }
+  }
+}
+
 /** Context length in thousands of tokens, as model cards write it: 128K. */
 export function contextLabel(tokens: number) {
   return `${Math.round(tokens / 1024)}K tokens`;
@@ -253,24 +519,32 @@ export function parametersLabel(model: LocalModel) {
   return scale || arch;
 }
 
-/** Concise badges for the collapsed row: parameter scale (when distinct) and capabilities. */
-export function rowBadges(model: LocalModel): string[] {
+function allRowBadges(model: LocalModel): string[] {
   const badges: string[] = [];
   if (model.active_parameters) {
     badges.push(`${model.active_parameters} active`);
-  } else if (
-    model.parameters &&
-    !model.name.toLowerCase().includes(model.parameters.toLowerCase())
-  ) {
+  } else if (model.parameters) {
     badges.push(model.parameters);
   }
   for (const capability of modelCapabilities(model)) {
     badges.push(capabilityCopy(capability));
   }
+  return badges;
+}
+
+/** Concise badges for the collapsed row: structured scale and verified capabilities. */
+export function rowBadges(model: LocalModel): string[] {
+  const badges = allRowBadges(model);
   if (badges.length > 3) {
     return [...badges.slice(0, 3), `+${badges.length - 3}`];
   }
   return badges;
+}
+
+/** Full names of collapsed overflow badges for the `+N` pill tooltip. */
+export function rowBadgesOverflowTitle(model: LocalModel): string | undefined {
+  const badges = allRowBadges(model);
+  return badges.length > 3 ? badges.slice(3).join(", ") : undefined;
 }
 
 function formatRemainingTime(seconds: number) {
@@ -282,10 +556,13 @@ function formatRemainingTime(seconds: number) {
   return minutes > 0 ? `${hours}h ${minutes}m left` : `${hours}h left`;
 }
 
-/** Live download progress summary: "checking file", or "25% · 50 MB/s · 5m left". */
-export function downloadStatusDetail(model: LocalModel) {
+/** Live download progress summary: "checking file", "Reusing local cache…", or "25% · 50 MB/s · 5m left". */
+export function downloadStatusDetail(model: LocalModel): string | null {
   const download = model.download;
   if (download?.step === "verify") return "checking file";
+  if (download?.step === "download" && download.source === "cache") {
+    return "Reusing local cache…";
+  }
   const parts = [`${downloadPercent(model)}%`];
   if (download?.bytes_per_second && download.bytes_per_second > 0) {
     parts.push(`${formatBytes(download.bytes_per_second)}/s`);

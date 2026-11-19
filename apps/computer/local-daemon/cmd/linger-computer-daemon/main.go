@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -131,12 +132,32 @@ func run(args []string) (resultErr error) {
 		slog.Info("pruned abandoned Operation temp directories", "removed", removed, "bytes_freed", bytesFreed)
 	}
 	providerEnvironment := runtimeProviderEnvironment(environment, computer.GatewayToken, computer.CodexAuthFile)
+	var localModelsTool *localmodels.Tool
+	if tool := computer.LocalModels; tool != nil {
+		localModelsTool = &localmodels.Tool{
+			Python: tool.Python, ModuleDirectory: tool.ModuleDirectory,
+			StateDirectory: tool.StateDirectory, BaseDirectory: tool.BaseDirectory,
+		}
+	}
+	harnessDirectory := filepath.Join(computer.StateDirectory, "local-models", "harness")
+	piEnabled := piRuntimeEnabled(computer.EnabledRuntimes)
+	var managedPi string
+	if localModelsTool != nil && piEnabled && computer.RuntimePaths["pi"] == "" {
+		inspectCtx, cancelInspect := context.WithTimeout(context.Background(), 20*time.Second)
+		found, inspectErr := localModelsTool.InspectPi(inspectCtx, providerEnvironment, harnessDirectory)
+		cancelInspect()
+		if inspectErr != nil {
+			slog.Warn("local_models.pi_inspect_failed", "error", inspectErr)
+		} else {
+			managedPi = found
+		}
+	}
 	discovered, err := provider.Discover(context.Background(), provider.DiscoveryOptions{
-		ConfiguredPaths:  computer.RuntimePaths,
+		ConfiguredPaths:  withManagedPiPath(computer.RuntimePaths, managedPi),
 		Runtimes:         computer.EnabledRuntimes,
 		PreferredRuntime: computer.PreferredRuntime,
 		RuntimeHomeRoot:  filepath.Join(computer.StateDirectory, "runtime-homes"),
-		Environment:      providerEnvironment,
+		Environment:      withManagedPiEnvironment(providerEnvironment, computer.RuntimePaths, managedPi),
 	})
 	if err != nil {
 		return err
@@ -176,7 +197,7 @@ func run(args []string) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	providers, runtimes := providerInstallations(discovered, providerEnvironment)
+	providers, runtimes := providerInstallations(discovered, withManagedPiEnvironment(providerEnvironment, computer.RuntimePaths, managedPi))
 	providerCatalog := lingercontext.NewProviderCatalog(providers)
 	workspaceGrants := make(map[string]lingercontext.WorkspaceGrant)
 	wireGrants := make([]map[string]any, 0, len(computer.WorkspaceGrants))
@@ -285,16 +306,20 @@ func run(args []string) (resultErr error) {
 	// full Runtime discovery.
 	runtimeRefresh := make(chan struct{}, 1)
 	var localDaemon *daemon.Daemon
-	var localModelsTool *localmodels.Tool
-	if tool := computer.LocalModels; tool != nil {
-		localModelsTool = &localmodels.Tool{
-			Python: tool.Python, ModuleDirectory: tool.ModuleDirectory,
-			StateDirectory: tool.StateDirectory, BaseDirectory: tool.BaseDirectory,
-		}
+	libraryHarnessDir := ""
+	if shouldProvisionManagedPi(computer.EnabledRuntimes, computer.RuntimePaths, discovered, managedPi) {
+		libraryHarnessDir = harnessDirectory
+	}
+	var bundledNodePath string
+	if toolInstallation != nil {
+		bundledNodePath = toolInstallation.NodePath
 	}
 	localModels := localmodels.New(localmodels.Options{
 		Tool: localModelsTool, Environment: providerEnvironment,
-		JobDirectory: filepath.Join(computer.StateDirectory, "local-models", "jobs"),
+		JobDirectory:        filepath.Join(computer.StateDirectory, "local-models", "jobs"),
+		HarnessDirectory:    libraryHarnessDir,
+		InitialPiExecutable: managedPi,
+		NodePath:            bundledNodePath,
 		// The library publishes only from Act and Refresh, which the Daemon
 		// calls once it runs.
 		Publish: func(snapshot wire.LocalModelsSnapshot) { localDaemon.PublishLocalModels(snapshot) },
@@ -412,9 +437,15 @@ func run(args []string) (resultErr error) {
 				return localDaemon.ActiveOperationCount() > 0
 			},
 			Refresh: runtimeRefresh,
+			Discover: func(discoverCtx context.Context, discoverOptions provider.DiscoveryOptions) (provider.DiscoveryResult, error) {
+				managed := localModels.PiExecutable()
+				discoverOptions.Environment = withManagedPiEnvironment(discoverOptions.Environment, discoverOptions.ConfiguredPaths, managed)
+				discoverOptions.ConfiguredPaths = withManagedPiPath(discoverOptions.ConfiguredPaths, managed)
+				return provider.Discover(discoverCtx, discoverOptions)
+			},
 			OnChanged: func(next provider.DiscoveryResult) error {
 				logRuntimeDiagnostics(next.Diagnostics)
-				nextProviders, nextRuntimes := providerInstallations(next, providerEnvironment)
+				nextProviders, nextRuntimes := providerInstallations(next, withManagedPiEnvironment(providerEnvironment, computer.RuntimePaths, localModels.PiExecutable()))
 				providerCatalog.Replace(nextProviders)
 				controller.UpdateDiagnostics(next.Diagnostics)
 				return inventory.publish(ctx, nextRuntimes, next.Diagnostics)
@@ -710,10 +741,68 @@ func installedTeamHubCLIBinAt(executable string) string {
 	return directory
 }
 
+func piRuntimeEnabled(enabledRuntimes []string) bool {
+	return len(enabledRuntimes) == 0 || slices.Contains(enabledRuntimes, "pi")
+}
+
+func shouldProvisionManagedPi(enabledRuntimes []string, runtimePaths map[string]string, discovered provider.DiscoveryResult, managedPi string) bool {
+	if !piRuntimeEnabled(enabledRuntimes) || runtimePaths["pi"] != "" {
+		return false
+	}
+	_, hasPi := discovered.Installations["pi"]
+	return !hasPi || managedPi != ""
+}
+
+func withManagedPiPath(paths map[string]string, managed string) map[string]string {
+	if managed == "" || paths["pi"] != "" {
+		return paths
+	}
+	cloned := maps.Clone(paths)
+	if cloned == nil {
+		cloned = make(map[string]string, 1)
+	}
+	cloned["pi"] = managed
+	return cloned
+}
+
+func withManagedPiEnvironment(environment, configuredPaths map[string]string, managed string) map[string]string {
+	if managed == "" || (configuredPaths["pi"] != "" && configuredPaths["pi"] != managed) {
+		return environment
+	}
+	dir := filepath.Dir(managed)
+	if dir == "" || dir == "." {
+		return environment
+	}
+	cloned := maps.Clone(environment)
+	if cloned == nil {
+		cloned = make(map[string]string, 1)
+	}
+	existing := cloned["PATH"]
+	if existing == "" {
+		cloned["PATH"] = dir
+		return cloned
+	}
+	entries := filepath.SplitList(existing)
+	filtered := make([]string, 0, len(entries)+1)
+	filtered = append(filtered, dir)
+	cleanDir := filepath.Clean(dir)
+	for _, entry := range entries {
+		if entry == "" || filepath.Clean(entry) == cleanDir {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	cloned["PATH"] = strings.Join(filtered, string(os.PathListSeparator))
+	return cloned
+}
+
 func runtimeProviderEnvironment(source map[string]string, gatewayToken, codexAuthFile string) map[string]string {
 	result := computerconfig.RuntimeEnvironment(source, gatewayToken)
 	if codexAuthFile != "" {
 		result["CODEX_HOME"] = filepath.Dir(codexAuthFile)
+	}
+	if piEnv, err := localworkspace.PiSourceEnvironment(result); err == nil && piEnv["PI_CODING_AGENT_DIR"] != "" {
+		result["PI_CODING_AGENT_DIR"] = piEnv["PI_CODING_AGENT_DIR"]
 	}
 	return result
 }

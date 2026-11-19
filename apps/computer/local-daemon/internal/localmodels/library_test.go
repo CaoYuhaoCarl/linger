@@ -622,3 +622,226 @@ func TestRefreshMapsRichModelCardMetadataAndKeepsItAcrossProgress(t *testing.T) 
 		t.Fatalf("progress dropped model card fields: %+v", after)
 	}
 }
+
+func TestApplyProgressDownloadSourceConnectionsAndLoadSteps(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+	rawModel := json.RawMessage(`"` + testModel + `"`)
+	newSnapshot := func() wire.LocalModelsSnapshot {
+		return wire.LocalModelsSnapshot{
+			Available: true,
+			Models: []wire.LocalModel{{
+				ID: testModel, Name: "Qwen3 4B", Quant: "Q4_K_M", Fit: "gpu", Pool: "gpu:0", State: "absent",
+				Availability: wire.LocalModelAvailability{Downloadable: true},
+				Load:         &wire.LocalModelLoadProgress{Step: "prepare", DoneSteps: 1, TotalSteps: 7},
+			}},
+		}
+	}
+
+	t.Run("download sets source and connections and clears load", func(t *testing.T) {
+		snap := newSnapshot()
+		if !applyProgress(&snap, libraryEvent{
+			Event: "progress", Model: rawModel, Phase: "download",
+			Done: 100, Total: 1000, BytesPerSecond: 500,
+			Source: "modelscope", Connections: intPtr(16),
+		}) {
+			t.Fatal("applyProgress returned false")
+		}
+		got := modelState(snap, testModel)
+		if got.State != "downloading" || got.Load != nil || got.Download == nil ||
+			got.Download.Source != "modelscope" || got.Download.Connections == nil || *got.Download.Connections != 16 {
+			t.Fatalf("download model = %+v", got)
+		}
+
+		// Out-of-contract source or connections are omitted; verify omits source/connections.
+		if !applyProgress(&snap, libraryEvent{
+			Event: "progress", Model: rawModel, Phase: "download",
+			Done: 200, Total: 1000, Source: "unknown", Connections: intPtr(65),
+		}) {
+			t.Fatal("applyProgress returned false")
+		}
+		got = modelState(snap, testModel)
+		if got.Download.Source != "" || got.Download.Connections != nil {
+			t.Fatalf("out-of-contract download fields leaked: %+v", got.Download)
+		}
+		if !applyProgress(&snap, libraryEvent{
+			Event: "progress", Model: rawModel, Phase: "download",
+			Done: 300, Total: 1000, Source: "cache", Connections: intPtr(-1),
+		}) {
+			t.Fatal("applyProgress returned false")
+		}
+		got = modelState(snap, testModel)
+		if got.Download.Source != "cache" || got.Download.Connections != nil {
+			t.Fatalf("cache download = %+v", got.Download)
+		}
+
+		if !applyProgress(&snap, libraryEvent{
+			Event: "progress", Model: rawModel, Phase: "verify",
+			Done: 1000, Total: 1000, Source: "huggingface", Connections: intPtr(8),
+		}) {
+			t.Fatal("applyProgress returned false for verify")
+		}
+		got = modelState(snap, testModel)
+		if got.Download.Step != "verify" || got.Download.Source != "" || got.Download.Connections != nil || got.Download.BytesPerSecond != nil {
+			t.Fatalf("verify progress = %+v", got.Download)
+		}
+	})
+
+	t.Run("load phases infer or preserve load_step and clamp bounds", func(t *testing.T) {
+		snap := newSnapshot()
+		for _, tc := range []struct {
+			name      string
+			event     libraryEvent
+			wantStep  string
+			wantDone  uint64
+			wantTotal uint64
+		}{
+			{
+				name:      "load done < 3 infers prepare and defaults zero total",
+				event:     libraryEvent{Event: "progress", Model: rawModel, Phase: "load", Done: 2, Total: 0},
+				wantStep:  "prepare",
+				wantDone:  2,
+				wantTotal: 7,
+			},
+			{
+				name:      "load done == 3 infers start",
+				event:     libraryEvent{Event: "progress", Model: rawModel, Phase: "load", Done: 3, Total: 5},
+				wantStep:  "start",
+				wantDone:  3,
+				wantTotal: 7,
+			},
+			{
+				name:      "load done > 3 infers load",
+				event:     libraryEvent{Event: "progress", Model: rawModel, Phase: "load", Done: 4, Total: 5},
+				wantStep:  "load",
+				wantDone:  4,
+				wantTotal: 7,
+			},
+			{
+				name:      "explicit load_step overrides inference",
+				event:     libraryEvent{Event: "progress", Model: rawModel, Phase: "load", Done: 1, Total: 5, LoadStep: "start"},
+				wantStep:  "start",
+				wantDone:  1,
+				wantTotal: 7,
+			},
+			{
+				name:      "unknown load_step falls back to inference",
+				event:     libraryEvent{Event: "progress", Model: rawModel, Phase: "load", Done: 5, Total: 150, LoadStep: "invalid"},
+				wantStep:  "load",
+				wantDone:  5,
+				wantTotal: 100,
+			},
+			{
+				name:      "load done clamps to total",
+				event:     libraryEvent{Event: "progress", Model: rawModel, Phase: "load", Done: 20, Total: 4},
+				wantStep:  "load",
+				wantDone:  6,
+				wantTotal: 6,
+			},
+			{
+				name:      "warm phase maps to 5+done out of 7",
+				event:     libraryEvent{Event: "progress", Model: rawModel, Phase: "warm", Done: 1, Total: 2},
+				wantStep:  "warm",
+				wantDone:  6,
+				wantTotal: 7,
+			},
+			{
+				name:      "warm phase clamps done to 7",
+				event:     libraryEvent{Event: "progress", Model: rawModel, Phase: "warm", Done: 10, Total: 2},
+				wantStep:  "warm",
+				wantDone:  7,
+				wantTotal: 7,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if !applyProgress(&snap, tc.event) {
+					t.Fatal("applyProgress returned false")
+				}
+				got := modelState(snap, testModel)
+				if got.State != "loading" || got.Download != nil || got.Load == nil {
+					t.Fatalf("loading model = %+v", got)
+				}
+				if got.Load.Step != tc.wantStep || got.Load.DoneSteps != tc.wantDone || got.Load.TotalSteps != tc.wantTotal {
+					t.Fatalf("load progress = %+v, want step=%q %d/%d", got.Load, tc.wantStep, tc.wantDone, tc.wantTotal)
+				}
+			})
+		}
+	})
+}
+
+func TestDownloadAndLoadEventsReachPublishedSnapshots(t *testing.T) {
+	fake := newFakeTool(t)
+	fake.write("status.json", status(model(testModel, "absent")))
+	idleStatus, _ := json.Marshal(status(model(testModel, "idle")))
+	fake.script("download", fakeScript{
+		Lines: []fakeLine{
+			{Line: progressLineExtra(testModel, "download", 100, 1000, `,"source":"huggingface","connections":8`)},
+			{Line: progressLine(testModel, "verify", 1000, 1000), DelayMS: 150},
+			{Line: resultLine(testModel), DelayMS: 150},
+		},
+		StatusAfter: idleStatus,
+	})
+	record := &recorder{}
+	library := newLibrary(t, fake, record, 10*time.Millisecond)
+	library.Refresh(context.Background())
+
+	if refusal, answered := library.Act(context.Background(), Action{Name: ActionDownload, Model: testModel}, soon()); refusal != nil || !answered {
+		t.Fatalf("download refusal=%+v answered=%v", refusal, answered)
+	}
+	waitFor(t, "download finished", func() bool {
+		m := modelState(record.last(), testModel)
+		return m != nil && m.State == "idle"
+	})
+
+	record.mu.Lock()
+	var sawSourceAndConnections, sawVerify bool
+	for _, snap := range record.snapshots {
+		m := modelState(snap, testModel)
+		if m != nil && m.Download != nil {
+			if m.Download.Step == "download" && m.Download.Source == "huggingface" && m.Download.Connections != nil && *m.Download.Connections == 8 {
+				sawSourceAndConnections = true
+			}
+			if m.Download.Step == "verify" && m.Download.Source == "" && m.Download.Connections == nil {
+				sawVerify = true
+			}
+		}
+	}
+	record.mu.Unlock()
+	if !sawSourceAndConnections || !sawVerify {
+		t.Fatalf("missing expected download snapshots: sourceAndConnections=%v verify=%v", sawSourceAndConnections, sawVerify)
+	}
+
+	loadedStatus, _ := json.Marshal(status(model(testModel, "loaded")))
+	fake.script("load", fakeScript{
+		Lines: []fakeLine{
+			{Line: progressLineExtra(testModel, "load", 1, 5, `,"load_step":"prepare"`)},
+			{Line: progressLine(testModel, "warm", 1, 2), DelayMS: 150},
+			{Line: resultLine(testModel), DelayMS: 150},
+		},
+		StatusAfter: loadedStatus,
+	})
+	if refusal, answered := library.Act(context.Background(), Action{Name: ActionLoad, Model: testModel}, soon()); refusal != nil || !answered {
+		t.Fatalf("load refusal=%+v answered=%v", refusal, answered)
+	}
+	waitFor(t, "load finished", func() bool {
+		m := modelState(record.last(), testModel)
+		return m != nil && m.State == "loaded"
+	})
+
+	record.mu.Lock()
+	var sawPrepare, sawWarm bool
+	for _, snap := range record.snapshots {
+		m := modelState(snap, testModel)
+		if m != nil && m.Load != nil {
+			if m.Load.Step == "prepare" && m.Load.DoneSteps == 1 && m.Load.TotalSteps == 7 && m.Download == nil {
+				sawPrepare = true
+			}
+			if m.Load.Step == "warm" && m.Load.DoneSteps == 6 && m.Load.TotalSteps == 7 && m.Download == nil {
+				sawWarm = true
+			}
+		}
+	}
+	record.mu.Unlock()
+	if !sawPrepare || !sawWarm {
+		t.Fatalf("missing expected load snapshots: prepare=%v warm=%v", sawPrepare, sawWarm)
+	}
+}

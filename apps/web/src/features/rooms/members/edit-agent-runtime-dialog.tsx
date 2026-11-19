@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useId } from "react";
+import { Link, useInRouterContext } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { Select, SelectItem } from "@/components/ui/select";
+import { localComputersQueryKey } from "@/features/local-computer/local-computer-queries";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import type {
   TeamHubAgentReasoningEffort,
@@ -60,7 +62,7 @@ export function EditAgentRuntimeDialog({
   const formId = useId();
   const computers = useQuery({
     queryFn: () => client.listTenantLocalComputers(tenantId),
-    queryKey: ["teamhub", "local-computers", tenantId],
+    queryKey: localComputersQueryKey(tenantId),
     retry: false,
     refetchInterval: 5_000,
   });
@@ -74,6 +76,13 @@ export function EditAgentRuntimeDialog({
   const unavailable =
     computers.isError || (!loading && (!computer || (!moving && !grant)));
   const canSave = Boolean(modelIsAvailable && localReady && target);
+  const piComputer =
+    selection.runtimeType === "pi" && computer && !loading && !unavailable
+      ? computer
+      : undefined;
+  const localModelsHref = piComputer
+    ? `/t/${encodeURIComponent(tenantId)}/settings/local-models?computer=${encodeURIComponent(piComputer.computer_id)}`
+    : undefined;
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -149,27 +158,40 @@ export function EditAgentRuntimeDialog({
               ))}
             </Select>
           </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">Model</span>
-            <Select
-              aria-label="Agent model"
-              className="ui-field-control w-full"
-              disabled={field === "reasoning"}
-              onValueChange={selection.selectModel}
-              value={model}
-            >
-              {model && !modelIsAvailable ? (
-                <SelectItem value={model} disabled>
-                  {model} · Unavailable
-                </SelectItem>
-              ) : null}
-              {selection.modelOptions.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </Select>
-          </label>
+          <div>
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium">Model</span>
+              <Select
+                aria-label="Agent model"
+                className="ui-field-control w-full"
+                disabled={field === "reasoning"}
+                onValueChange={selection.selectModel}
+                value={model}
+              >
+                {model && !modelIsAvailable ? (
+                  <SelectItem value={model} disabled>
+                    {model} · Unavailable
+                  </SelectItem>
+                ) : null}
+                {selection.modelOptions.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </Select>
+            </label>
+            {localModelsHref && selection.modelOptions.length > 0 ? (
+              <p className="mt-1.5 text-xs text-app-muted">
+                <LocalModelsLink
+                  className="underline underline-offset-2 transition-colors hover:text-foreground focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  href={localModelsHref}
+                  onClick={onClose}
+                >
+                  Manage models in Local models
+                </LocalModelsLink>
+              </p>
+            ) : null}
+          </div>
           <ReasoningField
             allowed={selection.selectedModel?.allowed_reasoning_effort}
             onChange={selection.selectReasoningEffort}
@@ -205,17 +227,44 @@ export function EditAgentRuntimeDialog({
           !unavailable &&
           !modelIsAvailable &&
           runtime?.status === "ready" ? (
-            <p className="text-sm text-app-danger" role="alert">
-              {selection.modelOptions.length
-                ? "The current model is unavailable. Choose another model."
-                : "No models are available for this runtime."}
-            </p>
+            piComputer &&
+            localModelsHref &&
+            selection.modelOptions.length === 0 ? (
+              <p className="text-sm text-app-danger" role="alert">
+                No local models are loaded on {piComputer.display_name}. Load a
+                model in{" "}
+                <LocalModelsLink href={localModelsHref} onClick={onClose}>
+                  Local models
+                </LocalModelsLink>
+                .
+              </p>
+            ) : (
+              <p className="text-sm text-app-danger" role="alert">
+                {selection.modelOptions.length
+                  ? "The current model is unavailable. Choose another model."
+                  : "No models are available for this runtime."}
+              </p>
+            )
           ) : null}
           {!localReady && !loading && !unavailable && selection.runtimeType ? (
-            <p className="text-sm text-app-danger" role="alert">
-              {runtime?.message ??
-                "Install and sign in to this runtime on the computer, then wait for it to become ready."}
-            </p>
+            piComputer &&
+            localModelsHref &&
+            selection.modelOptions.length === 0 &&
+            (!runtime || runtime.status === "not_installed") ? (
+              <p className="text-sm text-app-danger" role="alert">
+                No local models are loaded on {piComputer.display_name}. Load a
+                model in{" "}
+                <LocalModelsLink href={localModelsHref} onClick={onClose}>
+                  Local models
+                </LocalModelsLink>
+                .
+              </p>
+            ) : (
+              <p className="text-sm text-app-danger" role="alert">
+                {runtime?.message ??
+                  "Install and sign in to this runtime on the computer, then wait for it to become ready."}
+              </p>
+            )
           ) : null}
           {unavailable ? (
             <p className="text-sm text-app-danger" role="alert">
@@ -237,6 +286,32 @@ export function EditAgentRuntimeDialog({
         </fieldset>
       </form>
     </ModalDialog>
+  );
+}
+
+function LocalModelsLink({
+  children,
+  className = "text-foreground underline underline-offset-2 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+  href,
+  onClick,
+}: {
+  children: string;
+  className?: string;
+  href: string;
+  onClick: () => void;
+}) {
+  const inRouter = useInRouterContext();
+  if (inRouter) {
+    return (
+      <Link className={className} onClick={onClick} to={href}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a className={className} href={href} onClick={onClick}>
+      {children}
+    </a>
   );
 }
 

@@ -324,6 +324,23 @@ func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool
 		if model.PromptTokensPerSecond != nil && *model.PromptTokensPerSecond < 0 {
 			return false
 		}
+		if model.Download != nil {
+			if !model.Download.Step.Valid() {
+				return false
+			}
+			if model.Download.Source != nil && !model.Download.Source.Valid() {
+				return false
+			}
+			if model.Download.Connections != nil && (*model.Download.Connections < 0 || *model.Download.Connections > 64) {
+				return false
+			}
+		}
+		if model.Load != nil {
+			if !model.Load.Step.Valid() || model.Load.TotalSteps < 1 || model.Load.TotalSteps > 100 ||
+				model.Load.DoneSteps < 0 || model.Load.DoneSteps > model.Load.TotalSteps {
+				return false
+			}
+		}
 		seen[model.Id] = true
 	}
 	return true

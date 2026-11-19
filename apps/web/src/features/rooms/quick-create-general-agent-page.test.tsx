@@ -23,7 +23,10 @@ import {
   TeamHubTestServer,
 } from "@/test/teamhub-test-server";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
-import type { TeamHubTenantAgentCreateInput } from "@/features/teamhub/teamhub-types";
+import type {
+  TeamHubLocalComputerPage,
+  TeamHubTenantAgentCreateInput,
+} from "@/features/teamhub/teamhub-types";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 
 import { browserRoomMessageOutbox } from "./chat/room-message-outbox";
@@ -33,7 +36,10 @@ import {
 } from "./quick-create-general-agent-page";
 import { localComputersQueryKey } from "@/features/local-computer/local-computer-queries";
 import { OFFLINE_COMPUTER_HINT } from "./members/agent-move-target";
-import { QuickCreateLocalAgentDialog } from "./quick-create-local-agent-dialog";
+import {
+  QuickCreateLocalAgentDialog,
+  type QuickCreateLocalAgentDialogProps,
+} from "./quick-create-local-agent-dialog";
 import {
   GENERAL_AGENT_DEFAULT_NAME,
   GENERAL_AGENT_INSTRUCTIONS,
@@ -955,6 +961,243 @@ describe("quick Local Agent creation", () => {
     const [first, retry] = await directRoomOpenings(runtime);
     expect(retry).toEqual(first);
   });
+
+  it("pre-fills Computer, Pi runtime, and Model when initial props are provided", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const firstComputer = inventory.items[0]!;
+    const labComputer: TeamHubLocalComputerPage["items"][number] = {
+      ...firstComputer,
+      computer_id: "computer-lab",
+      display_name: "Lab Mac",
+      runtimes: [
+        firstComputer.runtimes[0]!,
+        {
+          type: "pi",
+          status: "ready",
+          models: [
+            {
+              id: "localmodels-library/gemma3-27b",
+              label: "Gemma 3 27B",
+            },
+            {
+              id: "localmodels-library/qwen3-coder-30b",
+              label: "Qwen3 Coder 30B",
+              allowed_reasoning_effort: ["low", "high"],
+              default_reasoning_effort: "high",
+            },
+          ],
+        },
+      ],
+      workspace_grants: [
+        {
+          grant_id: "grant-lab-workspace",
+          label: "Lab Workspace",
+          mode: "workspace-write",
+        },
+      ],
+    };
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [firstComputer, labComputer],
+    });
+    const create = agentCreations(runtime);
+    renderCreation(runtime, "local", {
+      initialComputerId: "computer-lab",
+      initialRuntimeType: "pi",
+      initialModelId: "localmodels-library/qwen3-coder-30b",
+    });
+
+    expect(
+      await screen.findByRole("combobox", { name: "Local Computer" }),
+    ).toHaveTextContent("Lab Mac");
+    expect(screen.getByRole("combobox", { name: "Runtime" })).toHaveTextContent(
+      "Pi",
+    );
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
+      "Qwen3 Coder 30B",
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Thinking effort" }),
+    ).toHaveTextContent("High");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByText("Agent chat ready");
+    expect(await create.call(0)).toEqual({
+      tenantId: "tenant-northstar",
+      body: expect.objectContaining({
+        runtime: {
+          model: "localmodels-library/qwen3-coder-30b",
+          placement: {
+            computer_id: "computer-lab",
+            runtime_type: "pi",
+            type: "local",
+            workspace_grant_id: "grant-lab-workspace",
+          },
+          reasoning_effort: "high",
+        },
+      }),
+    });
+  });
+
+  it("keeps pre-filled Computer in desktop mode and resets only when switching computers", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const firstComputer = inventory.items[0]!;
+    const labComputer = {
+      ...firstComputer,
+      computer_id: "computer-lab",
+      display_name: "Lab Mac",
+      runtimes: [
+        {
+          type: "pi" as const,
+          status: "ready" as const,
+          models: [
+            {
+              id: "localmodels-library/qwen3-coder-30b",
+              label: "Qwen3 Coder 30B",
+            },
+          ],
+        },
+      ],
+    };
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [firstComputer, labComputer],
+    });
+    (window as { lingerDesktop?: unknown }).lingerDesktop = {
+      computer: {
+        getStatus: async () => ({
+          activeOperations: 0,
+          bridge: "online",
+          computerId: "computer-unlisted",
+          runtime: "ready",
+        }),
+        onStatus: () => () => {},
+        enroll: vi.fn(),
+      },
+    };
+    try {
+      renderCreation(runtime, "local", {
+        initialComputerId: "computer-lab",
+        initialRuntimeType: "pi",
+        initialModelId: "localmodels-library/qwen3-coder-30b",
+      });
+
+      const computerSelect = await screen.findByRole("combobox", {
+        name: "Local Computer",
+      });
+      expect(computerSelect).toHaveTextContent("Lab Mac");
+      expect(
+        screen.getByRole("combobox", { name: "Runtime" }),
+      ).toHaveTextContent("Pi");
+
+      fireEvent.click(computerSelect);
+      fireEvent.click(await screen.findByRole("option", { name: "Lab Mac" }));
+      expect(
+        screen.getByRole("combobox", { name: "Runtime" }),
+      ).toHaveTextContent("Pi");
+      expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
+        "Qwen3 Coder 30B",
+      );
+
+      fireEvent.click(computerSelect);
+      fireEvent.click(
+        await screen.findByRole("option", { name: "Jenny's Mac" }),
+      );
+      expect(
+        screen.getByRole("combobox", { name: "Runtime" }),
+      ).toHaveTextContent("Codex");
+      expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
+        "GPT-5.4",
+      );
+    } finally {
+      delete (window as { lingerDesktop?: unknown }).lingerDesktop;
+    }
+  });
+
+  it("links to Local models when Pi has no loaded models and closes dialog on click", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const computer = inventory.items[0]!;
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [
+        {
+          ...computer,
+          runtimes: [{ type: "pi", status: "ready", models: [] }],
+        },
+      ],
+    });
+    const onClose = vi.fn();
+    const { router } = renderCreation(runtime, "local", {
+      initialComputerId: computer.computer_id,
+      initialRuntimeType: "pi",
+      onClose,
+    });
+    expect(
+      await screen.findByText(/No local models are loaded on Jenny's Mac\./),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(/No models are available on this Runtime/),
+    ).toBeNull();
+    const link = screen.getByRole("link", {
+      name: "Load a model in Local models",
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/local-models?computer=computer-jenny-mac",
+    );
+    fireEvent.click(link);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Local models page")).toBeVisible();
+    expect(
+      `${router.state.location.pathname}${router.state.location.search}`,
+    ).toBe(
+      "/t/tenant-northstar/settings/local-models?computer=computer-jenny-mac",
+    );
+  });
+
+  it("links to Local models when Pi is not installed and renders without a router", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const computer = inventory.items[0]!;
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [
+        {
+          ...computer,
+          runtimes: [{ type: "pi", status: "not_installed", models: [] }],
+        },
+      ],
+    });
+    const onClose = vi.fn();
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <TeamHubRuntimeProvider runtime={runtime}>
+          <QuickCreateLocalAgentDialog
+            initialComputerId={computer.computer_id}
+            initialRuntimeType="pi"
+            onClose={onClose}
+            tenantId="tenant-northstar"
+          />
+        </TeamHubRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    const link = await screen.findByRole("link", {
+      name: "Load a model in Local models",
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/local-models?computer=computer-jenny-mac",
+    );
+    expect(screen.getByText(/Install a Runtime on Jenny's Mac/)).toBeVisible();
+    fireEvent.click(link);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
 
 async function chooseLocalRuntime(name = "Jenny's Mac") {
@@ -1010,6 +1253,7 @@ async function stalledRuntime() {
 function renderCreation(
   runtime: Awaited<ReturnType<typeof testRuntime>>,
   mode = "direct",
+  dialogProps: Partial<QuickCreateLocalAgentDialogProps> = {},
 ) {
   const router = createMemoryRouter(
     [
@@ -1019,6 +1263,7 @@ function renderCreation(
             <QuickCreateLocalAgentDialog
               tenantId="tenant-northstar"
               onClose={() => {}}
+              {...dialogProps}
             />
           ) : (
             <QuickCreateGeneralAgent
@@ -1031,6 +1276,10 @@ function renderCreation(
       {
         element: <p>Agent chat ready</p>,
         path: "/t/:tenantId/rooms/:roomId/chat",
+      },
+      {
+        element: <p>Local models page</p>,
+        path: "/t/:tenantId/settings/local-models",
       },
     ],
     { initialEntries: ["/create-agent"] },

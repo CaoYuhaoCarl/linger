@@ -1113,6 +1113,8 @@ type LocalModelDownloadProgress struct {
 	DoneBytes      uint64  `json:"done_bytes"`
 	TotalBytes     uint64  `json:"total_bytes"`
 	BytesPerSecond *uint64 `json:"bytes_per_second,omitempty"`
+	Source         string  `json:"source,omitempty"`
+	Connections    *uint64 `json:"connections,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelDownloadProgress.
@@ -1121,6 +1123,21 @@ func (LocalModelDownloadProgress) FixedFields() map[string]string { return nil }
 // RequiredFields lists the keys a LocalModelDownloadProgress must carry.
 func (LocalModelDownloadProgress) RequiredFields() []string {
 	return []string{"step", "done_bytes", "total_bytes"}
+}
+
+// LocalModelLoadProgress mirrors the LocalModelLoadProgress schema shape.
+type LocalModelLoadProgress struct {
+	Step       string `json:"step"`
+	DoneSteps  uint64 `json:"done_steps"`
+	TotalSteps uint64 `json:"total_steps"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelLoadProgress.
+func (LocalModelLoadProgress) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelLoadProgress must carry.
+func (LocalModelLoadProgress) RequiredFields() []string {
+	return []string{"step", "done_steps", "total_steps"}
 }
 
 // LocalModelEndpoint mirrors the LocalModelEndpoint schema shape.
@@ -1173,6 +1190,7 @@ type LocalModel struct {
 	Pool                  string                      `json:"pool,omitempty"`
 	State                 string                      `json:"state"`
 	Download              *LocalModelDownloadProgress `json:"download,omitempty"`
+	Load                  *LocalModelLoadProgress     `json:"load,omitempty"`
 	Endpoint              *LocalModelEndpoint         `json:"endpoint,omitempty"`
 	PiModel               string                      `json:"pi_model,omitempty"`
 	TokensPerSecond       *float64                    `json:"tokens_per_second,omitempty"`

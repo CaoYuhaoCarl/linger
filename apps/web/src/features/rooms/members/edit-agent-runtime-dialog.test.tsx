@@ -1,12 +1,18 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createMemoryRouter, MemoryRouter } from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { describe, expect, it, vi } from "vitest";
 
+import { labView } from "@/features/local-models/local-models-test-support";
+import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type {
   TeamHubLocalComputerPage,
   TeamHubTenantAgent,
 } from "@/features/teamhub/teamhub-types";
+import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
 
+import { AgentProfileContent } from "./actor-profile";
 import { OFFLINE_COMPUTER_HINT } from "./agent-move-target";
 import {
   agentMoveHint,
@@ -414,15 +420,191 @@ describe("EditAgentRuntimeDialog", () => {
     expect(screen.getByRole("button", { name: "Move Agent" })).toBeDisabled();
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it("links to Local models when Pi is ready with no loaded models and closes on click", async () => {
+    const onClose = vi.fn();
+    const computer = localComputer("computer-old", "Old Mac", "online", {
+      runtimes: [{ type: "pi", status: "ready", models: [] }],
+    });
+    const registration = localPiAgent();
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onClose,
+      onSave: vi.fn(),
+      registration,
+    });
+    expect(
+      await screen.findByText(/No local models are loaded on Old Mac\./),
+    ).toBeVisible();
+    const link = screen.getByRole("link", { name: "Local models" });
+    expect(link).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/local-models?computer=computer-old",
+    );
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+    fireEvent.click(link);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("links to Local models when Pi is not installed and navigates inside a Router", async () => {
+    const onClose = vi.fn();
+    const computer = localComputer("computer/lab 1", "Lab Mac", "online", {
+      runtimes: [{ type: "pi", status: "not_installed", models: [] }],
+    });
+    const registration = localPiAgent("computer/lab 1");
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/",
+          element: (
+            <EditAgentRuntimeDialog
+              client={{
+                listTenantLocalComputers: vi
+                  .fn()
+                  .mockResolvedValue({ items: [computer] }),
+              }}
+              isPending={false}
+              onClose={onClose}
+              onSave={vi.fn()}
+              registration={registration}
+              tenantId="tenant/north"
+            />
+          ),
+        },
+        {
+          path: "/t/:tenantId/settings/local-models",
+          element: <p>Local models page</p>,
+        },
+      ],
+      { initialEntries: ["/"] },
+    );
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    expect(
+      await screen.findByText(/No local models are loaded on Lab Mac\./),
+    ).toBeVisible();
+    const link = screen.getByRole("link", { name: "Local models" });
+    expect(link).toHaveAttribute(
+      "href",
+      "/t/tenant%2Fnorth/settings/local-models?computer=computer%2Flab%201",
+    );
+    fireEvent.click(link);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Local models page")).toBeVisible();
+  });
+
+  it("shows Manage models in Local models below Model when Pi has models, and omits it for Codex", async () => {
+    const onClose = vi.fn();
+    const computer = localComputer("computer-old", "Old Mac", "online");
+    computer.runtimes.push({
+      type: "pi",
+      status: "ready",
+      models: [
+        {
+          id: "localmodels-library/qwen3-coder-30b",
+          label: "Qwen3 Coder 30B",
+        },
+      ],
+    });
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onClose,
+      onSave: vi.fn(),
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Agent runtime" }),
+      ).toHaveTextContent("Codex"),
+    );
+    expect(
+      screen.queryByRole("link", { name: "Manage models in Local models" }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Agent runtime" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Pi" }));
+    const manageLink = await screen.findByRole("link", {
+      name: "Manage models in Local models",
+    });
+    expect(manageLink).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/local-models?computer=computer-old",
+    );
+    fireEvent.click(manageLink);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ActorProfile local model label resolution", () => {
+  it("resolves human-readable local model name in hidden runtimeDetails", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const agent = {
+      ...runtime.seed.tenantAgents[0]!,
+      runtime: {
+        model: "localmodels-library/qwen3-coder-30b",
+        placement: {
+          type: "local" as const,
+          computer_id: "computer-jenny-mac",
+          runtime_type: "pi" as const,
+          workspace_grant_id: "grant-linger-workspace",
+        },
+      },
+    };
+    runtime.seed.tenantAgents[0] = agent;
+    runtime.seed.localComputers[0] = {
+      ...runtime.seed.localComputers[0]!,
+      runtimes: [{ type: "pi", status: "ready", models: [] }],
+    };
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models",
+      () => labView(),
+    );
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <TeamHubRuntimeProvider runtime={runtime}>
+          <MemoryRouter>
+            <AgentProfileContent
+              actor={agent.actor}
+              tenantId="tenant-northstar"
+            />
+          </MemoryRouter>
+        </TeamHubRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole("tab", { name: "Connectors" }));
+    await waitFor(() => {
+      const hiddenContainer = document.querySelector(
+        '[aria-label="Runtime configuration"]',
+      )?.parentElement;
+      expect(hiddenContainer).toHaveAttribute("hidden");
+      expect(hiddenContainer).toHaveTextContent("Qwen3 Coder 30B");
+      expect(hiddenContainer).not.toHaveTextContent(
+        "localmodels-library/qwen3-coder-30b",
+      );
+    });
+  });
 });
 
 function renderDialog({
   field = "runtime",
+  onClose = vi.fn(),
   onSave,
   registration = localCodexAgent(),
   computersOverride,
 }: {
   field?: AgentRuntimeField;
+  onClose?: () => void;
   onSave: (input: AgentRuntimeUpdateInput) => void;
   registration?: TeamHubTenantAgent;
   computersOverride?: TeamHubLocalComputerPage;
@@ -447,13 +629,29 @@ function renderDialog({
         field={field}
         client={client}
         isPending={false}
-        onClose={vi.fn()}
+        onClose={onClose}
         onSave={onSave}
         registration={registration}
         tenantId="tenant-northstar"
       />
     </QueryClientProvider>,
   );
+}
+
+function localPiAgent(computerId = "computer-old"): TeamHubTenantAgent {
+  const base = localCodexAgent();
+  return {
+    ...base,
+    runtime: {
+      model: "localmodels-library/qwen3-coder-30b",
+      placement: {
+        computer_id: computerId,
+        runtime_type: "pi",
+        type: "local",
+        workspace_grant_id: "grant-workspace",
+      },
+    },
+  };
 }
 
 function localComputer(

@@ -1,6 +1,7 @@
 import { Add01Icon, ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { Link, useInRouterContext } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -44,17 +45,27 @@ const effortLabels: Record<TeamHubAgentReasoningEffort, string> = {
   ultra: "Ultra",
 };
 
+export interface QuickCreateLocalAgentDialogProps {
+  tenantId: string;
+  onClose: () => void;
+  initialComputerId?: string;
+  initialRuntimeType?: TeamHubLocalRuntimeType;
+  initialModelId?: string;
+}
+
 export function QuickCreateLocalAgentDialog({
   tenantId,
   onClose,
-}: {
-  tenantId: string;
-  onClose: () => void;
-}) {
+  initialComputerId,
+  initialRuntimeType,
+  initialModelId,
+}: QuickCreateLocalAgentDialogProps) {
   const { client } = useTeamHubRuntime();
-  const [computerId, setComputerId] = useState("");
-  const [runtimeType, setRuntimeType] = useState<TeamHubLocalRuntimeType>();
-  const [modelId, setModelId] = useState("");
+  const [computerId, setComputerId] = useState(initialComputerId ?? "");
+  const [runtimeType, setRuntimeType] = useState<
+    TeamHubLocalRuntimeType | undefined
+  >(initialRuntimeType);
+  const [modelId, setModelId] = useState(initialModelId ?? "");
   const [effort, setEffort] = useState<TeamHubAgentReasoningEffort>();
   const [target, setTarget] = useState<LocalAgentTarget>();
   const desktop = useDesktopComputer();
@@ -135,7 +146,11 @@ export function QuickCreateLocalAgentDialog({
   // The desktop app connects its own computer, so it never shows the CLI
   // setup until the user asks to connect another one.
   const desktopSetupOpen =
-    !computers.error && !connection && Boolean(desktop) && !desktopComputer;
+    !computers.error &&
+    !connection &&
+    Boolean(desktop) &&
+    !desktopComputer &&
+    !selectedComputer;
   const setupOpen =
     !computers.error &&
     (Boolean(connection) || desktopSetupOpen || !selectableComputers.length);
@@ -164,11 +179,17 @@ export function QuickCreateLocalAgentDialog({
       : undefined;
 
   function selectComputer(value: string) {
+    if (value === selectedComputerId) return;
     setComputerId(value);
     setRuntimeType(undefined);
     setModelId("");
     setEffort(undefined);
   }
+
+  const piLocalModelsHref =
+    selectedRuntime?.type === "pi" && selectedComputer
+      ? `/t/${encodeURIComponent(tenantId)}/settings/local-models?computer=${encodeURIComponent(selectedComputer.computer_id)}`
+      : undefined;
 
   if (target)
     return (
@@ -407,13 +428,36 @@ export function QuickCreateLocalAgentDialog({
                 {!selectedModel && !loginRuntime ? (
                   selectedComputer &&
                   selectedRuntime?.status === "not_installed" ? (
-                    <div role="status">
+                    <div className="space-y-2" role="status">
                       <LocalRuntimeInstallGuidance
                         computerName={selectedComputer.display_name}
                         platform={selectedComputer.platform}
                         runtimeTypes={[selectedRuntime.type]}
                       />
+                      {piLocalModelsHref ? (
+                        <p className="text-xs text-app-muted">
+                          <LocalModelsLink
+                            href={piLocalModelsHref}
+                            onClick={onClose}
+                          >
+                            Load a model in Local models
+                          </LocalModelsLink>
+                        </p>
+                      ) : null}
                     </div>
+                  ) : selectedComputer && piLocalModelsHref ? (
+                    <p className="text-xs text-app-muted" role="status">
+                      {selectedComputer.workspace_grants.length === 0
+                        ? "Authorize workspace access on this computer, or "
+                        : `No local models are loaded on ${selectedComputer.display_name}. `}
+                      <LocalModelsLink
+                        href={piLocalModelsHref}
+                        onClick={onClose}
+                      >
+                        Load a model in Local models
+                      </LocalModelsLink>
+                      .
+                    </p>
                   ) : (
                     <p className="text-xs text-app-muted" role="status">
                       No models are available on this Runtime. Check its status
@@ -435,6 +479,32 @@ export function QuickCreateLocalAgentDialog({
         ) : null}
       </div>
     </ModalDialog>
+  );
+}
+
+function LocalModelsLink({
+  children,
+  href,
+  onClick,
+}: {
+  children: string;
+  href: string;
+  onClick: () => void;
+}) {
+  const inRouter = useInRouterContext();
+  const className =
+    "text-foreground underline underline-offset-2 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  if (inRouter) {
+    return (
+      <Link className={className} onClick={onClick} to={href}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a className={className} href={href} onClick={onClick}>
+      {children}
+    </a>
   );
 }
 

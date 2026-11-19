@@ -6,6 +6,10 @@ import { ModalDialog } from "@/components/ui/modal-dialog";
 import { sourceCheckClassName } from "@/features/settings/provider-selection-picker";
 import { cn } from "@/lib/cn";
 
+import {
+  isAgentUsingModel,
+  type LocalModelAssignableAgent,
+} from "./local-model-agents";
 import type { LocalModelsView } from "./local-models-queries";
 import {
   agentNames,
@@ -39,27 +43,58 @@ function AffectedAgents({
 
 /** Loading would overfill the pool: offer to unload loaded models first. */
 export function MakeRoomDialog({
+  assignableAgents = [],
   check,
   disabled,
   entry,
   onClose,
   onConfirm,
+  primaryAgent,
   view,
 }: {
+  assignableAgents?: readonly LocalModelAssignableAgent[];
   check: LoadCheck;
   /** The model can no longer be loaded, or its Computer took no actions. */
   disabled: boolean;
   entry: ModelEntry;
   onClose: () => void;
-  onConfirm: (unloadIds: string[]) => void;
+  onConfirm: (unloadIds: string[], switchAgentIds: string[]) => void;
+  primaryAgent?: LocalModelAssignableAgent;
   view: LocalModelsView;
 }) {
   const [selected, setSelected] = useState(() => makeRoomSelection(check));
+  const [switchOverride, setSwitchOverride] = useState<boolean | null>(null);
   const chosen = new Set(selected);
   const enough = makesRoom(check, chosen);
-  const affected = check.loaded.flatMap((item) =>
-    chosen.has(item.model.id) ? item.used_by.map((user) => user.name) : [],
+  const computerId = view.computer.computer_id;
+  const chosenLoaded = check.loaded.filter((item) => chosen.has(item.model.id));
+  const affectedAssignable = assignableAgents.filter(
+    (agent) =>
+      !agent.busy &&
+      chosenLoaded.some(
+        (item) =>
+          isAgentUsingModel(agent, computerId, item.model.pi_model) ||
+          item.used_by.some((user) => user.agent_id === agent.actorId),
+      ),
   );
+  const affected = [
+    ...new Set([
+      ...chosenLoaded.flatMap((item) => item.used_by.map((user) => user.name)),
+      ...affectedAssignable.map((agent) => agent.name),
+    ]),
+  ];
+  const switchTargets = affectedAssignable.length
+    ? affectedAssignable
+    : primaryAgent &&
+        !primaryAgent.busy &&
+        !isAgentUsingModel(primaryAgent, computerId, entry.model.pi_model)
+      ? [primaryAgent]
+      : [];
+  const defaultSwitch = affectedAssignable.length > 0;
+  const showSwitchOption =
+    check.loaded.length > 0 && selected.length > 0 && switchTargets.length > 0;
+  const switchChecked = switchOverride ?? defaultSwitch;
+  const switchLabel = switchTargets.map((agent) => agent.name).join(", ");
 
   return (
     <ModalDialog
@@ -69,7 +104,14 @@ export function MakeRoomDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             disabled={disabled || !enough}
-            onClick={() => onConfirm(selected)}
+            onClick={() =>
+              onConfirm(
+                selected,
+                showSwitchOption && switchChecked
+                  ? switchTargets.map((agent) => agent.actorId)
+                  : [],
+              )
+            }
             tone="primary"
           >
             {selected.length ? "Unload and load" : "Load"}
@@ -133,6 +175,19 @@ export function MakeRoomDialog({
             {affected.join(", ")} can&apos;t answer until their model is loaded
             again.
           </FormFeedback>
+        ) : null}
+        {showSwitchOption ? (
+          <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground transition-colors duration-150 hover:bg-muted/70 motion-reduce:transition-none">
+            <input
+              checked={switchChecked}
+              className={sourceCheckClassName}
+              onChange={(event) => setSwitchOverride(event.target.checked)}
+              type="checkbox"
+            />
+            <span>
+              Switch {switchLabel} to {entry.model.name} once loaded
+            </span>
+          </label>
         ) : null}
       </div>
     </ModalDialog>

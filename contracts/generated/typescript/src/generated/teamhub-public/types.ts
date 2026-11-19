@@ -4580,6 +4580,11 @@ export interface components {
       | "loading"
       | "loaded"
       | "failed";
+    /**
+     * @description Mirror or local cache serving the weight download.
+     * @enum {string}
+     */
+    LocalModelDownloadSource: "huggingface" | "modelscope" | "custom" | "cache";
     LocalModelDownloadProgress: {
       /** @enum {string} */
       step: "download" | "verify";
@@ -4589,6 +4594,18 @@ export interface components {
       total_bytes: number;
       /** Format: int64 */
       bytes_per_second?: number;
+      source?: components["schemas"]["LocalModelDownloadSource"];
+      connections?: number;
+    };
+    /**
+     * @description Current phase while preparing, starting, loading, or warming a model.
+     * @enum {string}
+     */
+    LocalModelLoadStep: "prepare" | "start" | "load" | "warm";
+    LocalModelLoadProgress: {
+      step: components["schemas"]["LocalModelLoadStep"];
+      done_steps: number;
+      total_steps: number;
     };
     LocalModelEndpoint: {
       base_url: string;
@@ -4680,6 +4697,8 @@ export interface components {
       state: components["schemas"]["LocalModelState"];
       /** @description Present only while downloading. */
       download?: components["schemas"]["LocalModelDownloadProgress"];
+      /** @description Present only while loading. */
+      load?: components["schemas"]["LocalModelLoadProgress"];
       /** @description Present only while loaded. */
       endpoint?: components["schemas"]["LocalModelEndpoint"];
       /** @description The runtime_model an Agent on runtime pi stores for this model, <pi provider>/<pi model id>; present while the model is on the Computer. */

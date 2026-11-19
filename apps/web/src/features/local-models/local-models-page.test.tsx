@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,12 +10,13 @@ import {
 } from "@testing-library/react";
 import { Suspense } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TeamHubEventSync } from "@/features/rooms/event-sync";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubLocalComputerPage } from "@/features/teamhub/teamhub-types";
 import {
+  acceptTenantAgentUpdates,
   createTestTeamHubRuntime,
   type TestTeamHubRuntime,
 } from "@/test/teamhub-test-runtime";
@@ -22,6 +24,7 @@ import { teamHubErrorResponse } from "@/test/teamhub-test-server";
 
 import { LocalModelsPage } from "./local-models-page";
 import type { LocalModelsView } from "./local-models-queries";
+import { localModelsComputerStorageKey } from "./local-models-rules";
 import {
   gb,
   gpuPool,
@@ -103,6 +106,15 @@ function CurrentSearch() {
   return <p>Address search: {useLocation().search}</p>;
 }
 
+function ChatDestination() {
+  const location = useLocation();
+  return (
+    <p>
+      Chat route: {location.pathname}|{JSON.stringify(location.state ?? null)}
+    </p>
+  );
+}
+
 function renderPage(fixture: Fixture, search = "") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -128,6 +140,10 @@ function renderPage(fixture: Fixture, search = "") {
               <Route
                 element={<p>Computers page</p>}
                 path="/t/:tenantId/settings/computers"
+              />
+              <Route
+                element={<ChatDestination />}
+                path="/t/:tenantId/rooms/:roomId/chat"
               />
             </Routes>
           </Suspense>
@@ -219,7 +235,14 @@ function withModel(
   };
 }
 
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
 afterEach(() => {
+  window.localStorage.clear();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   delete (window as { lingerDesktop?: unknown }).lingerDesktop;
 });
 
@@ -1176,5 +1199,508 @@ describe("LocalModelsPage", () => {
     expect(statuses()).toContain(
       "GPT-OSS 20B: Downloading · 25% · 50 MB/s · 5m left",
     );
+  });
+
+  it("renders card skeletons while loading and a segmented GPU memory bar once loaded", async () => {
+    const fixture = setup();
+    let releaseView: ((view: LocalModelsView) => void) | undefined;
+    fixture.runtime.server.on(
+      "GET",
+      viewPath,
+      () =>
+        new Promise((resolve) => {
+          releaseView = resolve;
+        }),
+    );
+    renderPage(fixture);
+
+    const loadingStatus = await screen.findByRole("status", {
+      name: "Loading models",
+    });
+    expect(loadingStatus).toHaveAttribute("aria-busy", "true");
+    expect(within(loadingStatus).getByText("Loading models")).toBeVisible();
+
+    releaseView?.(labView());
+    await findModels();
+
+    expect(
+      screen.getByText("22.5 GB of 48 GB GPU memory in use"),
+    ).toBeVisible();
+    expect(screen.getByText(/25\.5 GB free/)).toBeVisible();
+    expect(
+      screen.getByRole("img", {
+        name: "GPU memory breakdown: 22.5 GB of 48 GB in use",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText("Qwen3 Coder 30B · 21.4 GB")).toBeVisible();
+    expect(screen.getByText("Qwen3 Embedding · 1.1 GB")).toBeVisible();
+  });
+
+  it("persists chosen Computer, defaults to loaded online Pi Computer, and preserves computer param on offline link", async () => {
+    const lab = labView({
+      computer: { ...labView().computer, status: "offline" },
+    });
+    const mac = macView();
+    const labItem = {
+      ...inventoryComputer(lab),
+      status: "offline" as const,
+    };
+    const macItem = {
+      ...inventoryComputer(mac),
+      runtimes: [
+        {
+          models: [
+            {
+              id: "localmodels-library/gpt-oss-20b",
+              label: "GPT-OSS 20B",
+            },
+          ],
+          status: "ready" as const,
+          type: "pi" as const,
+        },
+      ],
+      status: "online" as const,
+    };
+    const fixture = setup([lab, mac], [labItem, macItem]);
+    renderPage(fixture);
+    await findModels();
+
+    const picker = screen.getByRole("combobox", { name: "Computer" });
+    expect(picker).toHaveTextContent("Mac Studio · 1 loaded");
+    fireEvent.click(picker);
+    expect(
+      await screen.findByRole("option", { name: "lab-118 · Offline" }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("option", { name: "lab-118 · Offline" }));
+
+    await waitFor(() =>
+      expect(
+        window.localStorage.getItem(localModelsComputerStorageKey(tenantId)),
+      ).toBe("computer-lab"),
+    );
+    expect(
+      await screen.findByRole("link", { name: "Computers" }),
+    ).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/computers?computer=computer-lab",
+    );
+
+    cleanup();
+    renderPage(fixture);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Computer" }),
+      ).toHaveTextContent("lab-118 · Offline"),
+    );
+  });
+
+  it("switches Another Me with Use with CTA, shows confirmation banner, and navigates to chat", async () => {
+    const fixture = setup();
+    acceptTenantAgentUpdates(fixture.runtime);
+    renderPage(fixture);
+    await findModels();
+
+    const coderCard = card("Qwen3 Coder 30B");
+    expect(
+      within(coderCard).getByText("Used by Research agent, Code reviewer"),
+    ).toBeVisible();
+    fireEvent.click(
+      await within(coderCard).findByRole("button", {
+        name: "Use with Jenny's Delegate",
+      }),
+    );
+
+    expect(
+      await screen.findByText("Jenny's Delegate now uses Qwen3 Coder 30B."),
+    ).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    const delegate = fixture.runtime.seed.tenantAgents.find(
+      (agent) => agent.actor.id === "actor-delegate",
+    )!;
+    expect(delegate.runtime).toEqual({
+      model: "localmodels-library/qwen3-coder-30b",
+      placement: {
+        computer_id: "computer-lab",
+        runtime_type: "pi",
+        type: "local",
+        workspace_grant_id: "grant-linger-workspace",
+      },
+    });
+
+    await waitFor(() =>
+      expect(
+        within(card("Qwen3 Coder 30B")).getByRole("link", {
+          name: "Open chat",
+        }),
+      ).toBeVisible(),
+    );
+    fireEvent.click(
+      within(card("Qwen3 Coder 30B")).getByRole("link", { name: "Open chat" }),
+    );
+    expect(
+      await screen.findByText(
+        'Chat route: /t/tenant-northstar/rooms/room-another-me/chat|{"focusComposer":true}',
+      ),
+    ).toBeVisible();
+  });
+
+  it("queues Use when ready on loading models, auto-switches on load, and clears on cancel or failure", async () => {
+    const fixture = setup([
+      withModel(labView(), "gemma3-27b:Q4_K_M", {
+        state: "loading",
+      }),
+      withModel(macView(), "llama3.3-70b:Q4_K_M", {
+        pi_model: "localmodels-library/llama3.3-70b",
+        state: "downloading",
+      }),
+    ]);
+    acceptTenantAgentUpdates(fixture.runtime);
+    renderPage(fixture);
+    await findModels();
+
+    const gemmaCard = card("Gemma 3 27B");
+    const queueBtn = await within(gemmaCard).findByRole("button", {
+      name: "Use when ready",
+    });
+    expect(queueBtn).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(queueBtn);
+    expect(
+      within(gemmaCard).getByRole("button", {
+        name: "Queued for Jenny's Delegate",
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    publishSnapshot(
+      fixture,
+      withModel(labView(), "gemma3-27b:Q4_K_M", {
+        state: "loaded",
+      }),
+    );
+    expect(
+      await screen.findByText("Jenny's Delegate now uses Gemma 3 27B."),
+    ).toBeVisible();
+
+    cleanup();
+    renderPage(fixture, "?computer=computer-mac");
+    await findModels();
+    const llamaCard = card("Llama 3.3 70B");
+    fireEvent.click(
+      await within(llamaCard).findByRole("button", { name: "Use when ready" }),
+    );
+    expect(
+      within(llamaCard).getByRole("button", {
+        name: "Queued for Jenny's Delegate",
+      }),
+    ).toBeVisible();
+    fireEvent.click(
+      within(llamaCard).getByRole("button", { name: "Cancel Llama 3.3 70B" }),
+    );
+    await waitFor(() =>
+      expect(fixture.actions.at(-1)?.body).toEqual({ action: "cancel" }),
+    );
+    publishSnapshot(
+      fixture,
+      withModel(macView(), "llama3.3-70b:Q4_K_M", {
+        pi_model: "localmodels-library/llama3.3-70b",
+        state: "loaded",
+      }),
+    );
+    await waitFor(() => expect(statusOf("Llama 3.3 70B")).toMatch(/^Loaded/));
+    expect(
+      screen.queryByText("Jenny's Delegate now uses Llama 3.3 70B."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("pre-checks MakeRoom handoff when unloading a model used by an assignable Agent and keeps it opt-in otherwise", async () => {
+    const fixture = setup();
+    acceptTenantAgentUpdates(fixture.runtime);
+    renderPage(fixture, "?computer=computer-mac");
+    await findModels();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry Llama 3.3 70B" }),
+    );
+    const optInDialog = screen.getByRole("dialog", {
+      name: "Make room to load",
+    });
+    const optInCheckbox = within(optInDialog).getByRole("checkbox", {
+      name: "Switch Jenny's Delegate to Llama 3.3 70B once loaded",
+    });
+    expect(optInCheckbox).not.toBeChecked();
+    fireEvent.click(
+      within(optInDialog).getByRole("button", { name: "Cancel" }),
+    );
+
+    const delegate = fixture.runtime.seed.tenantAgents.find(
+      (agent) => agent.actor.id === "actor-delegate",
+    )!;
+    delegate.runtime = {
+      model: "localmodels-library/gpt-oss-20b",
+      placement: {
+        computer_id: "computer-mac",
+        runtime_type: "pi",
+        type: "local",
+        workspace_grant_id: "grant-linger-workspace",
+      },
+    };
+    cleanup();
+    renderPage(fixture, "?computer=computer-mac");
+    await findModels();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry Llama 3.3 70B" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Make room to load" });
+    const handoff = await within(dialog).findByRole("checkbox", {
+      name: "Switch Jenny's Delegate to Llama 3.3 70B once loaded",
+    });
+    expect(handoff).toBeChecked();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Unload and load" }),
+    );
+    await waitFor(() => expect(fixture.actions).toHaveLength(1));
+
+    publishSnapshot(
+      fixture,
+      withModel(macView(), "llama3.3-70b:Q4_K_M", {
+        error: undefined,
+        pi_model: "localmodels-library/llama3.3-70b",
+        state: "loaded",
+      }),
+    );
+    expect(
+      await screen.findByText("Jenny's Delegate now uses Llama 3.3 70B."),
+    ).toBeVisible();
+  });
+
+  it("shows Gateway readiness, Switch Agent select with busy guard, lazy New Agent dialog, and CopyEndpoint auto-reset", async () => {
+    const view = labView();
+    const fixture = setup([view]);
+    acceptTenantAgentUpdates(fixture.runtime);
+    const labInventory = fixture.runtime.seed.localComputers[0]!;
+    labInventory.runtimes = [
+      {
+        models: [
+          {
+            id: "localmodels-library/qwen3-coder-30b",
+            label: "Qwen3 Coder 30B",
+          },
+        ],
+        status: "ready",
+        type: "pi",
+      },
+    ];
+    const codexAgent = fixture.runtime.seed.tenantAgents.find(
+      (agent) => agent.actor.id === "actor-codex",
+    )!;
+    codexAgent.availability.active_task_count = 1;
+
+    renderPage(fixture);
+    await findModels();
+
+    fireEvent.click(screen.getByRole("button", { name: "Qwen3 Coder 30B" }));
+    const details = screen.getByRole("region", {
+      name: "Qwen3 Coder 30B details",
+    });
+    expect(details).toHaveTextContent("GatewayReady · Bifrost (Pi)");
+
+    fireEvent.click(
+      await within(details).findByRole("combobox", { name: "Switch Agent" }),
+    );
+    expect(
+      await screen.findByRole("option", { name: "Codex · Working" }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("option", { name: "Jenny's Delegate" }));
+    expect(
+      await screen.findByText("Jenny's Delegate now uses Qwen3 Coder 30B."),
+    ).toBeVisible();
+
+    fireEvent.click(within(details).getByRole("button", { name: "New Agent" }));
+    const createDialog = await screen.findByRole("dialog", {
+      name: "Create local agent",
+    });
+    expect(createDialog).toBeVisible();
+    expect(
+      await within(createDialog).findByRole("combobox", {
+        name: "Local Computer",
+      }),
+    ).toHaveTextContent("lab-118");
+    expect(
+      within(createDialog).getByRole("combobox", { name: "Runtime" }),
+    ).toHaveTextContent("Pi");
+    expect(
+      within(createDialog).getByRole("combobox", { name: "Model" }),
+    ).toHaveTextContent("Qwen3 Coder 30B");
+    fireEvent.click(
+      await within(createDialog).findByRole("button", { name: "Cancel" }),
+    );
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.useFakeTimers();
+    const copyButton = within(details).getByRole("button", {
+      name: "Copy Qwen3 Coder 30B endpoint",
+    });
+    fireEvent.click(copyButton);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:18100/v1");
+    expect(copyButton).toHaveAttribute("title", "Copied");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(copyButton).toHaveAttribute("title", "Copy endpoint");
+  });
+
+  it("elevates the Recommended Download button to primary when no model is loaded or active", async () => {
+    const view = withModel(labView(), "qwen3-coder-30b:Q4_K_M", {
+      endpoint: undefined,
+      state: "idle",
+    });
+    renderPage(setup([view]));
+    await findModels();
+
+    expect(
+      screen.getByRole("button", { name: "Download GPT-OSS 20B" }),
+    ).toHaveClass("bg-primary");
+  });
+
+  it("shows download transfer tooltip and Transfer fact row for mirror and cache downloads", async () => {
+    const mb = 1024 * 1024;
+    const fixture = setup([
+      withModel(labView(), "gpt-oss-20b:Q4_K_M", {
+        download: {
+          bytes_per_second: 50 * mb,
+          connections: 4,
+          done_bytes: 5_000 * mb,
+          source: "modelscope",
+          step: "download",
+          total_bytes: 20_000 * mb,
+        },
+        state: "downloading",
+      }),
+    ]);
+    renderPage(fixture);
+    await findModels();
+
+    expect(statusOf("GPT-OSS 20B")).toBe(
+      "Downloading · 25% · 50 MB/s · 5m left",
+    );
+    const downloadingCard = card("GPT-OSS 20B");
+    expect(
+      within(downloadingCard).getByTitle(
+        "ModelScope mirror · 4 connections · binary MB/s (MiB/s)",
+      ),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "GPT-OSS 20B" }));
+    const details = screen.getByRole("region", {
+      name: "GPT-OSS 20B details",
+    });
+    expect(details).toHaveTextContent(
+      "TransferModelScope mirror · 4 connections · binary MB/s (MiB/s)",
+    );
+
+    publishSnapshot(
+      fixture,
+      withModel(labView(), "gpt-oss-20b:Q4_K_M", {
+        download: {
+          connections: 0,
+          done_bytes: 0,
+          source: "cache",
+          step: "download",
+          total_bytes: 20_000 * mb,
+        },
+        state: "downloading",
+      }),
+    );
+    await waitFor(() =>
+      expect(statusOf("GPT-OSS 20B")).toBe(
+        "Downloading · Reusing local cache…",
+      ),
+    );
+    expect(
+      within(card("GPT-OSS 20B")).getByTitle("Reusing verified local cache"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "GPT-OSS 20B details" }),
+    ).toHaveTextContent("TransferReusing verified local cache");
+  });
+
+  it("shows granular loading step text and determinate progress bar while loading", async () => {
+    const fixture = setup([
+      withModel(labView(), "gemma3-27b:Q4_K_M", {
+        state: "loading",
+      }),
+    ]);
+    renderPage(fixture);
+    await findModels();
+
+    expect(statusOf("Gemma 3 27B")).toBe("Loading · GPU 1");
+    expect(
+      screen.queryByRole("progressbar", { name: "Gemma 3 27B load progress" }),
+    ).not.toBeInTheDocument();
+
+    publishSnapshot(
+      fixture,
+      withModel(labView(), "gemma3-27b:Q4_K_M", {
+        load: { done_steps: 0, step: "prepare", total_steps: 7 },
+        pool: "gpu:0",
+        state: "loading",
+      }),
+    );
+    await waitFor(() =>
+      expect(statusOf("Gemma 3 27B")).toBe("Loading · Preparing server…"),
+    );
+    const bar = screen.getByRole("progressbar", {
+      name: "Gemma 3 27B load progress",
+    });
+    expect(bar).toHaveAttribute("aria-valuenow", "0");
+
+    publishSnapshot(
+      fixture,
+      withModel(labView(), "gemma3-27b:Q4_K_M", {
+        load: { done_steps: 1, step: "start", total_steps: 7 },
+        pool: "gpu:0",
+        state: "loading",
+      }),
+    );
+    await waitFor(() =>
+      expect(statusOf("Gemma 3 27B")).toBe("Loading · Starting server…"),
+    );
+    expect(bar).toHaveAttribute("aria-valuenow", "14");
+
+    publishSnapshot(
+      fixture,
+      withModel(labView(), "gemma3-27b:Q4_K_M", {
+        load: { done_steps: 4, step: "load", total_steps: 7 },
+        pool: "gpu:0",
+        state: "loading",
+      }),
+    );
+    await waitFor(() =>
+      expect(statusOf("Gemma 3 27B")).toBe(
+        "Loading · Loading weights to GPU 0 · 57%",
+      ),
+    );
+    expect(bar).toHaveAttribute("aria-valuenow", "57");
+
+    publishSnapshot(
+      fixture,
+      withModel(labView(), "gemma3-27b:Q4_K_M", {
+        load: { done_steps: 7, step: "warm", total_steps: 7 },
+        pool: "gpu:0",
+        state: "loading",
+      }),
+    );
+    await waitFor(() =>
+      expect(statusOf("Gemma 3 27B")).toBe("Loading · Warming up · 100%"),
+    );
+    expect(bar).toHaveAttribute("aria-valuenow", "100");
   });
 });

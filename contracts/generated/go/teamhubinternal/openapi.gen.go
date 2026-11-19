@@ -836,6 +836,30 @@ func (e LocalModelDownloadProgressStep) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelDownloadSource.
+const (
+	LocalModelDownloadSourceCache       LocalModelDownloadSource = "cache"
+	LocalModelDownloadSourceCustom      LocalModelDownloadSource = "custom"
+	LocalModelDownloadSourceHuggingface LocalModelDownloadSource = "huggingface"
+	LocalModelDownloadSourceModelscope  LocalModelDownloadSource = "modelscope"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelDownloadSource enum.
+func (e LocalModelDownloadSource) Valid() bool {
+	switch e {
+	case LocalModelDownloadSourceCache:
+		return true
+	case LocalModelDownloadSourceCustom:
+		return true
+	case LocalModelDownloadSourceHuggingface:
+		return true
+	case LocalModelDownloadSourceModelscope:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelErrorCode.
 const (
 	CANCELLED                 LocalModelErrorCode = "CANCELLED"
@@ -1001,6 +1025,30 @@ func (e LocalModelHostPlatform) Valid() bool {
 	case LocalModelHostPlatformLinux:
 		return true
 	case LocalModelHostPlatformWindows:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelLoadStep.
+const (
+	LocalModelLoadStepLoad    LocalModelLoadStep = "load"
+	LocalModelLoadStepPrepare LocalModelLoadStep = "prepare"
+	LocalModelLoadStepStart   LocalModelLoadStep = "start"
+	LocalModelLoadStepWarm    LocalModelLoadStep = "warm"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelLoadStep enum.
+func (e LocalModelLoadStep) Valid() bool {
+	switch e {
+	case LocalModelLoadStepLoad:
+		return true
+	case LocalModelLoadStepPrepare:
+		return true
+	case LocalModelLoadStepStart:
+		return true
+	case LocalModelLoadStepWarm:
 		return true
 	default:
 		return false
@@ -3148,7 +3196,8 @@ type LocalModel struct {
 	Id LocalModelId `json:"id"`
 
 	// License SPDX identifier or license name, such as Apache-2.0 or Gemma Terms of Use.
-	License *string `json:"license,omitempty"`
+	License *string                 `json:"license,omitempty"`
+	Load    *LocalModelLoadProgress `json:"load,omitempty"`
 
 	// MemoryBytes Footprint when loaded at its context policy, from the localmodels estimator.
 	MemoryBytes int64           `json:"memory_bytes"`
@@ -3209,14 +3258,21 @@ type LocalModelCapability string
 
 // LocalModelDownloadProgress defines model for LocalModelDownloadProgress.
 type LocalModelDownloadProgress struct {
-	BytesPerSecond *int64                         `json:"bytes_per_second,omitempty"`
-	DoneBytes      int64                          `json:"done_bytes"`
-	Step           LocalModelDownloadProgressStep `json:"step"`
-	TotalBytes     int64                          `json:"total_bytes"`
+	BytesPerSecond *int64 `json:"bytes_per_second,omitempty"`
+	Connections    *int   `json:"connections,omitempty"`
+	DoneBytes      int64  `json:"done_bytes"`
+
+	// Source Mirror or local cache serving the weight download.
+	Source     *LocalModelDownloadSource      `json:"source,omitempty"`
+	Step       LocalModelDownloadProgressStep `json:"step"`
+	TotalBytes int64                          `json:"total_bytes"`
 }
 
 // LocalModelDownloadProgressStep defines model for LocalModelDownloadProgress.Step.
 type LocalModelDownloadProgressStep string
+
+// LocalModelDownloadSource Mirror or local cache serving the weight download.
+type LocalModelDownloadSource string
 
 // LocalModelEndpoint defines model for LocalModelEndpoint.
 type LocalModelEndpoint struct {
@@ -3273,6 +3329,18 @@ type LocalModelHostPlatform string
 
 // LocalModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
 type LocalModelId = string
+
+// LocalModelLoadProgress defines model for LocalModelLoadProgress.
+type LocalModelLoadProgress struct {
+	DoneSteps int `json:"done_steps"`
+
+	// Step Current phase while preparing, starting, loading, or warming a model.
+	Step       LocalModelLoadStep `json:"step"`
+	TotalSteps int                `json:"total_steps"`
+}
+
+// LocalModelLoadStep Current phase while preparing, starting, loading, or warming a model.
+type LocalModelLoadStep string
 
 // LocalModelNote defines model for LocalModelNote.
 type LocalModelNote struct {

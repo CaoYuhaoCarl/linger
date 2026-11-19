@@ -50,6 +50,7 @@ import { AgentInfoContent } from "./agent-info-content";
 import { DeleteAgentDialog } from "./delete-agent-dialog";
 import { canDeleteTenantAgent } from "./agent-permissions";
 import { useAgentDeletion } from "./use-agent-deletion";
+import { useResolvedAgentModelLabel } from "./use-agent-model-selection";
 // Opened on demand; its avatar editor and palette stay off the initial graph.
 const EditAgentProfileDialog = lazy(async () => ({
   default: (await import("./edit-agent-profile-dialog")).EditAgentProfileDialog,
@@ -263,6 +264,11 @@ export function AgentProfileContent({
   const agentRegistration = tenantAgents.items.find(
     (registration) => registration.actor.id === actor.id,
   );
+  const modelLabel = useResolvedAgentModelLabel({
+    client,
+    registration: agentRegistration,
+    tenantId,
+  });
   const agentSnapshot = tenantAgentAvailability.items.find(
     (snapshot) => snapshot.actor_id === actor.id,
   );
@@ -343,7 +349,7 @@ export function AgentProfileContent({
         <PanelAgentRuntimeDetails
           localRuntime={agentSnapshot?.local_runtime_status}
           placement={agentRegistration?.runtime.placement}
-          modelLabel={agentRegistration?.runtime.model}
+          modelLabel={modelLabel}
           reasoning={agentRegistration?.runtime.reasoning_effort}
           canEdit={canEditRuntime}
           busy={agentBusy}

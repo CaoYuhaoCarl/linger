@@ -60,6 +60,15 @@ import { ComputerRow, ProgressChip, RowMark, StatusDot } from "./computer-row";
 import { isUpgradeRecommended } from "./computer-version";
 
 type LocalComputer = TeamHubLocalComputerPage["items"][number];
+const LOCAL_MODELS_LIBRARY_PREFIX = "localmodels-library/";
+
+function loadedLocalModels(computer: LocalComputer) {
+  const piRuntime = computer.runtimes.find((runtime) => runtime.type === "pi");
+  return (piRuntime?.models ?? []).filter((model) =>
+    model.id.startsWith(LOCAL_MODELS_LIBRARY_PREFIX),
+  );
+}
+
 interface AppSetup {
   app: TeamHubLocalRuntimeType;
   choosable: boolean;
@@ -115,6 +124,7 @@ export function ComputerDetail({
   const [setup, setSetup] = useState<AppSetup | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const online = displayStatus === "online";
+  const localModels = loadedLocalModels(computer);
   const openSetup = (app: TeamHubLocalRuntimeType, choosable = false) =>
     setSetup({ app, choosable });
 
@@ -159,7 +169,7 @@ export function ComputerDetail({
         ))}
       </Group>
       {localModelsHref ? (
-        <Group title="Local models">
+        <Group count={localModels.length || undefined} title="Local models">
           <Link
             className="flex min-h-14 w-full items-center gap-3 rounded-lg py-2 pr-2.5 pl-2 transition-colors duration-150 hover:bg-sidebar-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
             to={localModelsHref}
@@ -172,7 +182,9 @@ export function ComputerDetail({
                 Manage local models
               </span>
               <span className="block truncate text-sm text-muted-foreground">
-                Download and load models that run on this computer
+                {localModels.length > 0
+                  ? `${localModels.length} loaded · ${localModels.map((model) => model.label).join(", ")}`
+                  : "Download and load models that run on this computer"}
               </span>
             </span>
             <Icon

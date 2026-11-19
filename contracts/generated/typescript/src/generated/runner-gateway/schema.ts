@@ -2092,6 +2092,10 @@ export const runnerGatewayEnvelopeSchema = {
         },
       },
     },
+    LocalModelDownloadSource: {
+      type: "string",
+      enum: ["huggingface", "modelscope", "custom", "cache"],
+    },
     LocalModelDownloadProgress: {
       type: "object",
       additionalProperties: false,
@@ -2108,6 +2112,38 @@ export const runnerGatewayEnvelopeSchema = {
         },
         bytes_per_second: {
           $ref: "#/$defs/NonNegativeInteger",
+        },
+        source: {
+          $ref: "#/$defs/LocalModelDownloadSource",
+        },
+        connections: {
+          type: "integer",
+          minimum: 0,
+          maximum: 64,
+        },
+      },
+    },
+    LocalModelLoadStep: {
+      type: "string",
+      enum: ["prepare", "start", "load", "warm"],
+    },
+    LocalModelLoadProgress: {
+      type: "object",
+      additionalProperties: false,
+      required: ["step", "done_steps", "total_steps"],
+      properties: {
+        step: {
+          $ref: "#/$defs/LocalModelLoadStep",
+        },
+        done_steps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 100,
+        },
+        total_steps: {
+          type: "integer",
+          minimum: 1,
+          maximum: 100,
         },
       },
     },
@@ -2259,6 +2295,10 @@ export const runnerGatewayEnvelopeSchema = {
         download: {
           description: "Present only while downloading.",
           $ref: "#/$defs/LocalModelDownloadProgress",
+        },
+        load: {
+          description: "Present only while loading.",
+          $ref: "#/$defs/LocalModelLoadProgress",
         },
         endpoint: {
           description: "Present only while loaded.",

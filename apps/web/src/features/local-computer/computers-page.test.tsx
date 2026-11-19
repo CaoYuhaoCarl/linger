@@ -76,6 +76,76 @@ describe("ComputersPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows loaded local model summaries from computer runtimes without fetching Local models", async () => {
+    const runtime = await authenticatedFixture();
+    runtime.seed.localComputers[0]!.runtimes.push({
+      models: [
+        { id: "pi-default", label: "Pi Default" },
+        {
+          id: "localmodels-library/qwen3.6-35b-a3b",
+          label: "Qwen3.6 35B-A3B",
+        },
+      ],
+      status: "ready",
+      type: "pi",
+    });
+    runtime.seed.localComputers[1]!.runtimes.push({
+      models: [
+        {
+          id: "localmodels-library/qwen3-coder-30b",
+          label: "Qwen3 Coder 30B",
+        },
+        {
+          id: "localmodels-library/gemma3-27b",
+          label: "Gemma 3 27B",
+        },
+      ],
+      status: "ready",
+      type: "pi",
+    });
+    const queryClient = renderPage(runtime);
+
+    const directory = await screen.findByRole("list", {
+      name: "Local computers directory",
+    });
+    const jennyRow = within(directory).getByRole("button", {
+      name: /Jenny's Mac/,
+    });
+    expect(within(jennyRow).getByText("1 local model")).toBeVisible();
+    const offlineRow = within(directory).getByRole("button", {
+      name: /Offline Lab Mac/,
+    });
+    const offlineBadge = within(offlineRow).getByText("2 local models");
+    expect(offlineBadge).toBeVisible();
+    expect(offlineBadge).toHaveClass("opacity-45");
+
+    fireEvent.click(jennyRow);
+    const detail = await screen.findByRole("region", {
+      name: "Jenny's Mac details",
+    });
+    const localModelsGroup = within(detail).getByRole("region", {
+      name: "Local models",
+    });
+    expect(within(localModelsGroup).getByText("1")).toBeVisible();
+    expect(
+      within(localModelsGroup).getByRole("link", {
+        name: /Manage local models/,
+      }),
+    ).toHaveTextContent("1 loaded · Qwen3.6 35B-A3B");
+
+    expect(
+      runtime.server.requestsTo(
+        "GET",
+        "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models",
+      ),
+    ).toHaveLength(0);
+    expect(
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey: tenantLocalModelsQueryKey("tenant-northstar") }),
+    ).toHaveLength(0);
+  });
+
   it("lists several Computers by readiness and opens each one's detail", async () => {
     const runtime = await authenticatedFixture();
     renderPage(runtime);

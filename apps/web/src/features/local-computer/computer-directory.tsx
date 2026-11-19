@@ -20,6 +20,14 @@ import {
 } from "./computer-readiness";
 
 type LocalComputer = TeamHubLocalComputerPage["items"][number];
+const LOCAL_MODELS_LIBRARY_PREFIX = "localmodels-library/";
+
+function loadedLocalModels(computer: LocalComputer) {
+  const piRuntime = computer.runtimes.find((runtime) => runtime.type === "pi");
+  return (piRuntime?.models ?? []).filter((model) =>
+    model.id.startsWith(LOCAL_MODELS_LIBRARY_PREFIX),
+  );
+}
 
 /** Every Computer as one Chats-list style row; a row opens its detail. */
 export function ComputerDirectory({
@@ -91,10 +99,23 @@ function DirectoryRow({
   const apps = appOrder.filter(
     (app) => appStatus(computer, app) !== "not_installed",
   );
+  const localModels = loadedLocalModels(computer);
   return (
     <ComputerRow
       action={
         <span className="flex items-center gap-3">
+          {localModels.length > 0 ? (
+            <span
+              className={cn(
+                "shrink-0 whitespace-nowrap rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground tabular-nums",
+                offline && "opacity-45",
+              )}
+              title={localModels.map((model) => model.label).join(", ")}
+            >
+              {localModels.length} local{" "}
+              {localModels.length === 1 ? "model" : "models"}
+            </span>
+          ) : null}
           <span className={cn("flex gap-1", offline && "opacity-45")}>
             {apps.map((app) => (
               <span

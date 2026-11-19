@@ -27,16 +27,25 @@ build:assets` to check the initial JS budget.
   one Computer's model library as TeamHub last stored it. The Computer decides
   fit, availability, placement, the recommendation and memory; the page only
   orders and labels them, picks the Make room default, renders family icons,
-  capability/parameter badges, download speed/ETA and model-card facts from
-  structured `LocalModel` fields in `local-models-rules.ts`, and maps every
-  code and enum label to English in `local-models-copy.ts`. Without `?computer=`
-  the desktop app opens
-  its own Computer. Only the Computer's owner can act; actions return at once
-  and progress arrives as `local-models` invalidation hints. From the click
-  until a snapshot with another status or observation time, or a refusal, the
-  row shows a requested load or download as started and spins the button of
-  any other action, with the row's actions off. A Computer's
-  detail on the Computers page links here and reads no model state itself.
+  capability/parameter badges, header pool breakdown, download speed/ETA,
+  download transfer source/connections, load step progress, and model-card facts
+  from structured `LocalModel` fields in `local-models-rules.ts`, and maps every
+  code and enum label to English in `local-models-copy.ts`. Without `?computer=`,
+  the desktop app opens its own Computer; otherwise the page falls back through
+  the Tenant's remembered Computer in `localStorage`, the first online Computer
+  with a `localmodels-library/` Pi model, the first online Computer, and the
+  first inventory entry. `local-model-agents.ts` connects loaded models to
+  sponsored Agents (personal delegate Agent first) and Bifrost/Pi gateway
+  readiness: rows offer immediate `Use with <Agent>` / `Open chat` actions,
+  `Use when ready` auto-switching on downloading/loading rows, Make room handoff
+  checkboxes, and expanded-row `Switch Agent…` / `New Agent` controls (lazily
+  loading `QuickCreateLocalAgentDialog`). Only the Computer's owner can act;
+  actions return at once and progress arrives as `local-models` invalidation
+  hints. From the click until a snapshot with another status or observation time,
+  or a refusal, the row shows a requested load or download as started and spins
+  the button of any other action, with the row's actions off. A Computer's
+  detail on the Computers page links here (showing only a compact runtime-based
+  summary) and reads no `/local-models` API state itself.
 - `src/test`: unit-test support, including the in-process TeamHub test server.
 - `e2e`: Playwright product workflows; every spec runs on the real TeamHub and
   Document Runtime stack (`make check-e2e-room-document`).

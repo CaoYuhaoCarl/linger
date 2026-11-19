@@ -1,11 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  computerPickerLabel,
   downloadPercent,
+  downloadSourceLabel,
   downloadStatusDetail,
   downloadStopped,
+  downloadTransferSummary,
   formatGigabytes,
+  headerMemorySegments,
+  isModelOnComputer,
   loadCheck,
+  loadPercent,
+  loadStatusDetail,
+  loadedLibraryModelCount,
+  localModelsComputerStorageKey,
   makeRoomSelection,
   makesRoom,
   memorySummary,
@@ -15,8 +24,12 @@ import {
   parametersLabel,
   placeName,
   poolLabel,
+  readRememberedLocalModelsComputerId,
+  rememberLocalModelsComputerId,
   rowBadges,
+  rowBadgesOverflowTitle,
   safeModelSourceUrl,
+  selectDefaultLocalModelsComputer,
   speedLabel,
 } from "./local-models-rules";
 import {
@@ -183,6 +196,7 @@ describe("local models rules", () => {
     });
     expect(parametersLabel(moe)).toBe("30B · 3B active (MoE)");
     expect(rowBadges(moe)).toEqual(["3B active", "Vision", "Tool use", "+2"]);
+    expect(rowBadgesOverflowTitle(moe)).toBe("Reasoning, Coding");
 
     const dense = localModel({
       architecture: "dense",
@@ -192,8 +206,8 @@ describe("local models rules", () => {
       parameters: "4B",
     });
     expect(parametersLabel(dense)).toBe("4B (Dense)");
-    // Avoid repeating "4B" next to a model whose title already includes it.
-    expect(rowBadges(dense)).toEqual(["Tool use"]);
+    expect(rowBadges(dense)).toEqual(["4B", "Tool use"]);
+    expect(rowBadgesOverflowTitle(dense)).toBeUndefined();
 
     expect(
       rowBadges(
@@ -248,6 +262,226 @@ describe("local models rules", () => {
     expect(safe).toBe("https://huggingface.co/Qwen/Qwen3-4B/");
     expect(modelSourceLabel(safe!)).toBe("huggingface.co/Qwen/Qwen3-4B");
   });
+
+  it("formats download sources, transfer summaries, and cache reuse details", () => {
+    const mb = 1024 * 1024;
+    expect(downloadSourceLabel("modelscope")).toBe("ModelScope mirror");
+    expect(downloadSourceLabel("huggingface")).toBe("Hugging Face");
+    expect(downloadSourceLabel("cache")).toBe("Local cache");
+    expect(downloadSourceLabel("custom")).toBe("Custom source");
+    expect(downloadSourceLabel(undefined)).toBeUndefined();
+
+    expect(
+      downloadTransferSummary(localModel({ id: "m", name: "m" })),
+    ).toBeUndefined();
+    expect(
+      downloadTransferSummary(
+        localModel({
+          download: { done_bytes: 10, step: "download", total_bytes: 100 },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      downloadTransferSummary(
+        localModel({
+          download: {
+            connections: 4,
+            done_bytes: 10,
+            source: "modelscope",
+            step: "download",
+            total_bytes: 100,
+          },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("ModelScope mirror · 4 connections · binary MB/s (MiB/s)");
+    expect(
+      downloadTransferSummary(
+        localModel({
+          download: {
+            connections: 1,
+            done_bytes: 10,
+            source: "huggingface",
+            step: "download",
+            total_bytes: 100,
+          },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("Hugging Face · 1 connection · binary MB/s (MiB/s)");
+    expect(
+      downloadTransferSummary(
+        localModel({
+          download: {
+            connections: 0,
+            done_bytes: 10,
+            source: "custom",
+            step: "download",
+            total_bytes: 100,
+          },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("Custom source · binary MB/s (MiB/s)");
+    expect(
+      downloadTransferSummary(
+        localModel({
+          download: {
+            connections: 4,
+            done_bytes: 10,
+            step: "download",
+            total_bytes: 100,
+          },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("4 connections · binary MB/s (MiB/s)");
+    expect(
+      downloadTransferSummary(
+        localModel({
+          download: {
+            connections: 0,
+            done_bytes: 100,
+            source: "cache",
+            step: "download",
+            total_bytes: 100,
+          },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("Reusing verified local cache");
+
+    expect(
+      downloadStatusDetail(
+        localModel({
+          download: {
+            done_bytes: 0,
+            source: "cache",
+            step: "download",
+            total_bytes: 100 * mb,
+          },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("Reusing local cache…");
+    expect(
+      downloadStatusDetail(
+        localModel({
+          download: {
+            done_bytes: 100 * mb,
+            source: "cache",
+            step: "verify",
+            total_bytes: 100 * mb,
+          },
+          id: "m",
+          name: "m",
+          state: "downloading",
+        }),
+      ),
+    ).toBe("checking file");
+  });
+
+  it("computes load percentages and step text with placement fallback", () => {
+    const base = localModel({ id: "m", name: "m", state: "loading" });
+    expect(loadPercent(base)).toBeNull();
+    expect(loadStatusDetail(base, "GPU 0")).toBe("GPU 0");
+    expect(loadStatusDetail(base)).toBeNull();
+
+    expect(
+      loadPercent({
+        ...base,
+        load: { done_steps: 0, step: "prepare", total_steps: 0 },
+      }),
+    ).toBeNull();
+    expect(
+      loadPercent({
+        ...base,
+        load: { done_steps: 4, step: "load", total_steps: 7 },
+      }),
+    ).toBe(57);
+    expect(
+      loadPercent({
+        ...base,
+        load: { done_steps: 12, step: "warm", total_steps: 10 },
+      }),
+    ).toBe(100);
+
+    expect(
+      loadStatusDetail(
+        {
+          ...base,
+          load: { done_steps: 0, step: "prepare", total_steps: 7 },
+        },
+        "GPU 0",
+      ),
+    ).toBe("Preparing server…");
+    expect(
+      loadStatusDetail(
+        {
+          ...base,
+          load: { done_steps: 1, step: "start", total_steps: 7 },
+        },
+        "GPU 0",
+      ),
+    ).toBe("Starting server…");
+    expect(
+      loadStatusDetail(
+        {
+          ...base,
+          load: { done_steps: 0, step: "load", total_steps: 7 },
+        },
+        "GPU 0",
+      ),
+    ).toBe("Loading weights to GPU 0");
+    expect(
+      loadStatusDetail(
+        {
+          ...base,
+          load: { done_steps: 4, step: "load", total_steps: 7 },
+        },
+        "GPU 0",
+      ),
+    ).toBe("Loading weights to GPU 0 · 57%");
+    expect(
+      loadStatusDetail({
+        ...base,
+        load: { done_steps: 4, step: "load", total_steps: 7 },
+      }),
+    ).toBe("Loading weights · 57%");
+    expect(
+      loadStatusDetail({
+        ...base,
+        load: { done_steps: 0, step: "load", total_steps: 7 },
+      }),
+    ).toBe("Loading weights");
+    expect(
+      loadStatusDetail({
+        ...base,
+        load: { done_steps: 7, step: "warm", total_steps: 7 },
+      }),
+    ).toBe("Warming up · 100%");
+    expect(
+      loadStatusDetail({
+        ...base,
+        load: { done_steps: 0, step: "warm", total_steps: 0 },
+      }),
+    ).toBe("Warming up");
+  });
 });
 
 describe("downloadStopped", () => {
@@ -279,5 +513,208 @@ describe("downloadStopped", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("headerMemorySegments and model presence", () => {
+  it("reports whether a model holds usable files on the Computer", () => {
+    expect(
+      isModelOnComputer(localModel({ id: "m", name: "M", state: "loaded" })),
+    ).toBe(true);
+    expect(
+      isModelOnComputer(localModel({ id: "m", name: "M", state: "idle" })),
+    ).toBe(true);
+    expect(
+      isModelOnComputer(
+        localModel({
+          error: { code: "ENGINE_START_FAILED" },
+          id: "m",
+          name: "M",
+          state: "failed",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isModelOnComputer(
+        localModel({
+          error: { code: "DOWNLOAD_FAILED" },
+          id: "m",
+          name: "M",
+          state: "failed",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isModelOnComputer(
+        localModel({
+          availability: { downloadable: true },
+          id: "m",
+          name: "M",
+          state: "absent",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isModelOnComputer(
+        localModel({
+          availability: { downloadable: false },
+          id: "m",
+          name: "M",
+          state: "absent",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("aggregates GPU pool segments including models, components, and other apps", () => {
+    const view = labView({
+      pools: [
+        {
+          ...gpuPool(0, 24, [{ gb: 12, id: "coder", name: "Coder" }]),
+          used_bytes: gb(16),
+        },
+        gpuPool(1, 24, [
+          { component: true, gb: 2, id: "embedding", name: "Embedding" },
+        ]),
+      ],
+    });
+    const segments = headerMemorySegments(view);
+    expect(segments).toEqual([
+      {
+        bytes: gb(12),
+        id: "coder",
+        kind: "model",
+        modelIndex: 0,
+        name: "Coder",
+        percent: 25,
+      },
+      {
+        bytes: gb(2),
+        id: "embedding",
+        kind: "component",
+        name: "Embedding",
+        percent: (gb(2) / gb(48)) * 100,
+      },
+      {
+        bytes: gb(4),
+        id: "other-apps",
+        kind: "other",
+        name: "Other apps",
+        percent: (gb(4) / gb(48)) * 100,
+      },
+    ]);
+  });
+});
+
+describe("computer selection and storage persistence", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function computer(
+    id: string,
+    displayName: string,
+    status: "online" | "offline",
+    piModelIds: string[] = [],
+  ) {
+    return {
+      computer_id: id,
+      display_name: displayName,
+      runtimes: [
+        {
+          models: piModelIds.map((modelId) => ({
+            id: modelId,
+            label: modelId,
+          })),
+          status: "ready" as const,
+          type: "pi" as const,
+        },
+      ],
+      status,
+    };
+  }
+
+  it("counts localmodels-library Pi models and formats picker labels", () => {
+    const idleBox = computer("c1", "lab-118", "online", ["pi-default"]);
+    const loadedBox = computer("c2", "Workstation", "online", [
+      "pi-default",
+      "localmodels-library/qwen3",
+      "localmodels-library/gemma3",
+    ]);
+    const offlineBox = computer("c3", "Mac Studio", "offline", [
+      "localmodels-library/gpt-oss",
+    ]);
+
+    expect(loadedLibraryModelCount(idleBox)).toBe(0);
+    expect(loadedLibraryModelCount(loadedBox)).toBe(2);
+    expect(computerPickerLabel(idleBox)).toBe("lab-118");
+    expect(computerPickerLabel(loadedBox)).toBe("Workstation · 2 loaded");
+    expect(computerPickerLabel(offlineBox)).toBe("Mac Studio · Offline");
+  });
+
+  it("follows desktop, remembered, online with library model, online, then first", () => {
+    const offline = computer("c-off", "Offline", "offline", [
+      "localmodels-library/m1",
+    ]);
+    const onlineEmpty = computer("c-empty", "Empty", "online");
+    const onlineLoaded = computer("c-loaded", "Loaded", "online", [
+      "localmodels-library/m2",
+    ]);
+    const list = [offline, onlineEmpty, onlineLoaded];
+
+    expect(
+      selectDefaultLocalModelsComputer(list, {
+        desktopComputerId: "c-empty",
+        rememberedComputerId: "c-off",
+      })?.computer_id,
+    ).toBe("c-empty");
+
+    expect(
+      selectDefaultLocalModelsComputer(list, {
+        rememberedComputerId: "c-off",
+      })?.computer_id,
+    ).toBe("c-off");
+
+    expect(
+      selectDefaultLocalModelsComputer(list, {
+        rememberedComputerId: "c-missing",
+      })?.computer_id,
+    ).toBe("c-loaded");
+
+    expect(
+      selectDefaultLocalModelsComputer([offline, onlineEmpty])?.computer_id,
+    ).toBe("c-empty");
+
+    expect(selectDefaultLocalModelsComputer([offline])?.computer_id).toBe(
+      "c-off",
+    );
+  });
+
+  it("reads and writes per-tenant computer preference safely", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+    });
+    rememberLocalModelsComputerId("tenant-1", "computer-mac");
+    expect(store.get(localModelsComputerStorageKey("tenant-1"))).toBe(
+      "computer-mac",
+    );
+    expect(readRememberedLocalModelsComputerId("tenant-1")).toBe(
+      "computer-mac",
+    );
+
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    expect(() => rememberLocalModelsComputerId("tenant-1", "c")).not.toThrow();
+    expect(readRememberedLocalModelsComputerId("tenant-1")).toBeUndefined();
   });
 });
