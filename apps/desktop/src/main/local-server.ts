@@ -57,6 +57,7 @@ import {
   installTeamhubBinaries,
   TEAMHUB_BINARY_DIRECTORY,
 } from "@linger/local-installation/teamhub-binaries";
+import { redact } from "@linger/local-installation/redaction";
 import { adoptUserEnvironment } from "@linger/local-installation/user-environment";
 
 import {
@@ -66,7 +67,11 @@ import {
 } from "../../../../scripts/local-computer-node-distributions.mjs";
 import type { Logger } from "./log.js";
 import type { Module, ModuleContext, StopReason } from "./modules.js";
-import { parseServerUrl, sameOrigin } from "./navigation.js";
+import {
+  type WindowLoadReason,
+  parseServerUrl,
+  sameOrigin,
+} from "./navigation.js";
 import { humanTenant, type EnrollmentModule } from "./enrollment.js";
 import { compareVersions } from "./update-manifest.js";
 import type { WindowManagerModule } from "./window-manager.js";
@@ -419,6 +424,7 @@ export class LocalServerModule implements Module {
   // Counts installations started, so the setup page restarts its timers.
   #attempt = 0;
   #origin: string | undefined;
+  #resuming = false;
   #running: Promise<void> | undefined;
   #check: LocalModelsCheck = { state: "unchecked" };
   // Read once from the bundled installer's distribution.
@@ -575,6 +581,16 @@ export class LocalServerModule implements Module {
     } finally {
       closeSync(output);
     }
+  }
+
+  resuming(): boolean {
+    return this.#resuming;
+  }
+
+  async resumable(serverUrl: string): Promise<boolean> {
+    if (this.#resuming) return true;
+    const record = await this.#readRecord();
+    return record !== undefined && sameOrigin(record.origin, serverUrl);
   }
 
   status(): LocalServerStatus {
@@ -2180,11 +2196,15 @@ export class LocalServerModule implements Module {
   }
 
   // `previous` is the origin this installation answered at before.
-  #ready(origin: string, previous?: string): void {
+  #ready(
+    origin: string,
+    previous?: string,
+    reason: WindowLoadReason = "local_ready",
+  ): void {
     this.#origin = origin;
     this.#ctx
       ?.get<WindowManagerModule>("WindowManager")
-      ?.setServer(origin, previous);
+      ?.setServer(origin, previous, { reason });
   }
 
   // The server sets up the Another Me once this computer offers a signed-in
@@ -2311,6 +2331,10 @@ export class LocalServerModule implements Module {
   // version, and the older services would serve the older interface.
   async #resume(record: LocalRecord, signal: AbortSignal): Promise<void> {
     this.#origin = record.origin;
+    this.#resuming = true;
+    const startedAt = Date.now();
+    let stage = "fast_ready_check";
+    this.#ctx?.log.info("local_server.resume_started");
     const windows = this.#ctx?.get<WindowManagerModule>("WindowManager");
     try {
       const update = this.#sourceUpdate(record);
@@ -2321,7 +2345,13 @@ export class LocalServerModule implements Module {
       } else {
         this.#set("preparing", "Starting Linger on this computer…");
         // The window would show the server as unreachable until it is back.
-        if (!(await this.#reachable(record.origin))) windows?.showStarting();
+        const checkStartedAt = Date.now();
+        const reachable = await this.#reachable(record.origin);
+        this.#ctx?.log.info("local_server.resume_stage", {
+          stage: "fast_ready_check",
+          ms: Date.now() - checkStartedAt,
+        });
+        if (!reachable) windows?.showStarting();
       }
       // A source folder the installer no longer runs is unpacked again from
       // this app's package: one removed since (by hand, or a cleanup that an
@@ -2336,7 +2366,9 @@ export class LocalServerModule implements Module {
           )))
           ? await this.#ensureSource(record.home, signal)
           : record.repo;
-      const serving = await this.#runResume(record, repo, signal);
+      const serving = await this.#runResume(record, repo, signal, (next) => {
+        stage = next;
+      });
       // The installer moves the web port off one another program took. The
       // record and the window follow the origin together (a launch resumes
       // only while they agree), and so does this computer's enrollment: it
@@ -2366,14 +2398,23 @@ export class LocalServerModule implements Module {
           source: path.basename(repo),
           from: record.version,
         });
-      this.#ready(origin, record.origin);
+      this.#ready(origin, record.origin, "resume_ready");
       this.#set("ready", "Linger is running on this computer.");
+      this.#ctx?.log.info("local_server.resume_succeeded", {
+        total_ms: Date.now() - startedAt,
+      });
     } catch (error) {
       if (signal.aborted) return;
       const message = error instanceof Error ? error.message : String(error);
-      this.#ctx?.log.warn("local_server.resume_failed", { error: message });
+      this.#ctx?.log.warn("local_server.resume_failed", {
+        stage,
+        total_ms: Date.now() - startedAt,
+        error: this.#formatResumeError(message),
+      });
       this.#set("failed", message);
       windows?.showStartFailed(message);
+    } finally {
+      this.#resuming = false;
     }
   }
 
@@ -2443,9 +2484,18 @@ export class LocalServerModule implements Module {
     record: LocalRecord,
     repo: string,
     signal: AbortSignal,
+    onStage?: (stage: string) => void,
   ): Promise<{ source?: string; origin?: string }> {
     await this.#adoptSourceKeys(record.home);
+    onStage?.("ensure_node");
+    const nodeStartedAt = Date.now();
     const node = await this.#ensureNode(signal);
+    this.#ctx?.log.info("local_server.resume_stage", {
+      stage: "ensure_node",
+      ms: Date.now() - nodeStartedAt,
+    });
+    onStage?.("installer_resume");
+    const resumeStartedAt = Date.now();
     const outcome = await new Promise<ResumeOutcome>((resolve, reject) => {
       const child = spawn(
         node,
@@ -2483,6 +2533,10 @@ export class LocalServerModule implements Module {
         }
       });
     });
+    this.#ctx?.log.info("local_server.resume_stage", {
+      stage: "installer_resume",
+      ms: Date.now() - resumeStartedAt,
+    });
     if (outcome.code !== 0) {
       const { code, reasons } = outcome.details ?? {};
       const action =
@@ -2514,6 +2568,14 @@ export class LocalServerModule implements Module {
         ? { origin }
         : {}),
     };
+  }
+
+  #formatResumeError(message: string): string {
+    const stripped = message
+      .replace(/(https?:\/\/[^\s?#]+)\?[^\s#]*/g, "$1")
+      .replace(/(https?:\/\/[^\s#]+)#[^\s#]*/g, "$1");
+    const redacted = redact(stripped);
+    return redacted.length > 500 ? `${redacted.slice(0, 497)}...` : redacted;
   }
 
   // Every resume reports the runtime and localmodels tool paths, so an
