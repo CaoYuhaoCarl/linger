@@ -35,7 +35,13 @@ installed without extension support included) gets its approved plan applied
 again when the saved plan inputs still match the current choices; only a
 plan the person approved is ever applied, and a stack still not ready ends
 `LOCAL_MODELS_RECOVERY_REQUIRED` with the binding's reason codes in
-`details.reasons`. A failed job's `errorCode` is the runtime's cause when it
+`details.reasons`. When the services already run, a local-models setup
+whose Computer still uses the local model source (`model-source.json` says
+`local` or does not exist yet) has its stack checked once
+(`restoreLocalModels`), since a quit stops the models but not the services: a
+stack that is not ready gets the same restore, then becomes the model source
+again. A source switched to a subscription or BYOK leaves the stack stopped.
+A failed job's `errorCode` is the runtime's cause when it
 has one (`RUNTIME_PLAN_REFUSED`, a harness plan refused before anything
 changed, such as an unusable `SIMPLEX_PI_PATH` or a Windows runtime root too
 long for Pi without long paths; `RUNTIME_ACTION_FAILED`;

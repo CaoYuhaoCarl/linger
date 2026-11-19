@@ -110,7 +110,11 @@ Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the
 stack is, and a subscription after its Runtime installs, signed in or not.
 The installer reads `model-source.json` (`readByokEnvironment`) but never
-writes it.
+writes it. `restoreLocalModels` (`local-models.ts`) brings back a
+local-models setup's stack while its services keep running, such as after
+the desktop's quit stopped it, but only while that source is `local` or not
+saved yet: a ready stack costs one `setup binding` check, a stopped one gets
+its approved plan applied again and the local source set again.
 
 Each native service runs under a detached supervisor
 (`native-process-worker.mjs`) whose record holds its PID, birth and an

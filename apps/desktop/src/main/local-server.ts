@@ -524,7 +524,8 @@ export class LocalServerModule implements Module {
   // stops the stack with the gateway the localmodels tool started, which
   // would otherwise keep their memory and ports until the next reboot. The
   // services and the model controller keep running, as after every quit;
-  // the next launch brings the approved stack up again. The stop runs on
+  // the next launch's resume brings the approved stack up again while the
+  // model source is still local. The stop runs on
   // after the app is gone, its output in the installer's folder. An update
   // or an uninstall stops the models with the services instead.
   async #stopLocalModels(): Promise<void> {

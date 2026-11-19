@@ -10,6 +10,7 @@ import {
   type Instance,
 } from "./instance.js";
 import type { InstallOutcome, InstallerEvent } from "./events.js";
+import { applyNativeSource, readByokEnvironment } from "./byok-source.js";
 import { localmodelsFailure } from "./localmodels-failure.js";
 import { runLocalmodels } from "./localmodels-tool.js";
 import {
@@ -219,18 +220,43 @@ export async function localModelsEnvironment(
     LINGER_LOCAL_MODELS_REVISION: b.pi.configFingerprint,
   };
 }
-export async function hasSavedLocalModelsPlan(home: string): Promise<boolean> {
+// The saved plan's ID, or undefined when no plan was saved.
+async function savedPlanID(home: string): Promise<string | undefined> {
   const raw = await readPrivate(
     path.join(home, "runtime/localmodels/plan.json"),
   );
-  if (!raw) return false;
+  if (!raw) return undefined;
   const saved = JSON.parse(raw) as { schema?: string; plan_id?: string };
   if (
     saved.schema !== "localmodels.stack-plan/v1" ||
     !/^[a-f0-9]{64}$/.test(saved.plan_id ?? "")
   )
     throw new Error("Invalid saved upstream plan.");
-  return true;
+  return saved.plan_id;
+}
+export async function hasSavedLocalModelsPlan(home: string): Promise<boolean> {
+  return (await savedPlanID(home)) !== undefined;
+}
+// What localmodels reports about the plan's deployed stack and its Pi, or
+// null when it could not tell.
+async function observeBinding(
+  planFile: string,
+  planID: string,
+  command: (
+    args: string[],
+  ) => Promise<{ code: number; stdout: string; stderr: string }>,
+): Promise<Binding | null> {
+  const result = await command([
+    "setup",
+    "binding",
+    "--plan",
+    planFile,
+    "--lang",
+    "en",
+    "--json",
+  ]);
+  if (result.code !== 0) return null;
+  return binding(JSON.parse(result.stdout), planID);
 }
 export async function reviewSavedModelPlan(
   home: string,
@@ -413,18 +439,8 @@ export async function prepareLocalModels(
     const bindFile = path.join(root, "binding.json");
     const previous = await readPrivate(bindFile);
     const observe = async () => {
-      const result = await command([
-        "setup",
-        "binding",
-        "--plan",
-        planFile,
-        "--lang",
-        "en",
-        "--json",
-      ]);
-      if (result.code !== 0) return null;
-      const observed = binding(JSON.parse(result.stdout), summary.planId);
-      reasons = observed.ready ? [] : reasonCodes(observed);
+      const observed = await observeBinding(planFile, summary.planId, command);
+      if (observed) reasons = observed.ready ? [] : reasonCodes(observed);
       return observed;
     };
     let inputs:
@@ -510,4 +526,37 @@ export async function prepareLocalModels(
       message: "The upstream local model stack and Pi connection are ready.",
     });
   });
+}
+/**
+ * Brings back the local model stack of a local-models setup whose services
+ * still run, such as when Linger opens again after a quit stopped the
+ * models. Only while the Computer's model source is local: a person who
+ * switched to a subscription or BYOK keeps that choice. A ready stack costs
+ * one binding check; otherwise this applies the approved plan again and makes
+ * the stack the model source. Returns the outcome when the restore fails.
+ */
+export async function restoreLocalModels(
+  instance: Instance,
+  options: { signal: AbortSignal; onEvent: (e: InstallerEvent) => void },
+  dependencies: Dependencies = {},
+): Promise<InstallOutcome | undefined> {
+  if ((await readSetupChoice(instance)) !== "local-models") return;
+  const home = path.resolve(instance.root, "../..");
+  // Installs from earlier releases may have no model source saved yet; their
+  // source is the local stack they set up.
+  const source = await readByokEnvironment(home);
+  if (source && source.mode !== "local") return;
+  const planID = await savedPlanID(home);
+  if (!planID) return;
+  const invoke = dependencies.localmodels ?? runLocalmodels;
+  const observed = await observeBinding(
+    path.join(home, "runtime/localmodels/plan.json"),
+    planID,
+    (args) => invoke(home, args, { signal: options.signal, timeoutMs: 120000 }),
+  );
+  if (observed?.ready) return;
+  return (
+    (await prepareLocalModels(instance, options, dependencies)) ??
+    (await applyNativeSource(home, "local", "pi", options.signal, dependencies))
+  );
 }
