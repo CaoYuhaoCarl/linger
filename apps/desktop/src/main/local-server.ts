@@ -2171,9 +2171,9 @@ export class LocalServerModule implements Module {
   // `previous` is the origin this installation answered at before.
   #ready(origin: string, previous?: string): void {
     this.#origin = origin;
-    const windows = this.#ctx?.get<WindowManagerModule>("WindowManager");
-    if (previous && previous !== origin) windows?.setServer(origin, previous);
-    else windows?.setServer(origin);
+    this.#ctx
+      ?.get<WindowManagerModule>("WindowManager")
+      ?.setServer(origin, previous);
   }
 
   // The server sets up the Another Me once this computer offers a signed-in

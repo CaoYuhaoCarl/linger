@@ -673,7 +673,10 @@ describe("LocalServerModule", () => {
       "owner@linger.local",
       "pw",
     );
-    expect(f.setServer).toHaveBeenCalledWith("http://localhost:3000");
+    expect(f.setServer).toHaveBeenCalledWith(
+      "http://localhost:3000",
+      undefined,
+    );
     expect(f.enroll).toHaveBeenCalled();
     expect(f.module.status()).toMatchObject({
       phase: "ready",
@@ -2342,7 +2345,10 @@ describe("LocalServerModule after a restart", () => {
     const f = fixture({}, enrolled, record);
     await f.host.start();
     await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
-    expect(f.setServer).toHaveBeenCalledWith("http://localhost:3000");
+    expect(f.setServer).toHaveBeenCalledWith(
+      "http://localhost:3000",
+      "http://localhost:3000",
+    );
     // The services were down, so the window waited on the starting page.
     expect(f.showStarting).toHaveBeenCalledOnce();
     expect(f.showStartFailed).not.toHaveBeenCalled();
@@ -2576,7 +2582,10 @@ describe("LocalServerModule after a restart", () => {
     expect(args[args.indexOf("--source-repo") + 1]).toBe(current);
     // The window leaves the older interface while they restart.
     expect(f.showUpdating).toHaveBeenCalledOnce();
-    expect(f.setServer).toHaveBeenCalledWith("http://localhost:3000");
+    expect(f.setServer).toHaveBeenCalledWith(
+      "http://localhost:3000",
+      "http://localhost:3000",
+    );
     expect(
       JSON.parse(
         readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
@@ -2821,7 +2830,10 @@ describe("LocalServerModule after a restart", () => {
     rmSync(path.join(f.home, "resume-fails"));
     f.bus.emit("local-server.retry");
     await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
-    expect(f.setServer).toHaveBeenCalledWith("http://localhost:3000");
+    expect(f.setServer).toHaveBeenCalledWith(
+      "http://localhost:3000",
+      "http://localhost:3000",
+    );
     await f.host.stop("quit");
   });
 
