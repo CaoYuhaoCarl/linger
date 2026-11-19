@@ -654,6 +654,39 @@ test("forwards real Harness byte progress without forwarding native logs or secr
   );
   expect(JSON.stringify(onEvent.mock.calls)).not.toContain("hidden");
 });
+test("emits download:retrying stage and partial byte progress when total is null", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  const onEvent = vi.fn();
+  const run = vi.fn<typeof import("./process.js").runProcess>(
+    async (_file, _args, options) => {
+      options?.onOutput?.(
+        '{"kind":"stage","stage":"download","state":"retrying"}\n' +
+          '{"kind":"progress","stage":"download","completed":2097152,"total":null,"unit":"bytes"}\n',
+      );
+      return { code: 0, stdout: "{}", stderr: "" };
+    },
+  );
+  await runLocalmodels(
+    f.home,
+    ["harness", "apply", "plan", "--jsonl"],
+    { onEvent },
+    { run },
+  );
+  expect(onEvent).toHaveBeenCalledWith({
+    kind: "stage",
+    stage: "runtime",
+    state: "running",
+    message: "Retrying the Harness download…",
+  });
+  expect(onEvent).toHaveBeenCalledWith({
+    kind: "stage",
+    stage: "runtime",
+    state: "running",
+    message: "Downloading the selected Harness (2.0 MB)…",
+    progress: { completed: 2097152, unit: "bytes", partial: true },
+  });
+});
 
 test("forwards safe extraction and verification stages after Harness downloads finish", async () => {
   const f = await fixture();

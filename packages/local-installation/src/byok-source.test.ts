@@ -213,4 +213,53 @@ describe("BYOK localmodels integration", () => {
       environment: { PI_CODING_AGENT_DIR: "/abs/pi" },
     });
   });
+
+  it("emits periodic elapsed progress while mounting the BYOK gateway", async () => {
+    vi.useFakeTimers();
+    try {
+      const home = await makeHome();
+      const events: { kind: string; stage?: string; message: string }[] = [];
+      let resolveApply!: (value: {
+        code: number;
+        stdout: string;
+        stderr: string;
+      }) => void;
+      const promise = prepareByokRuntime(
+        {
+          baseUrl: "https://api.example.com/v1",
+          modelId: "gpt-4o",
+          runtime: "codex",
+        },
+        {
+          home,
+          signal: new AbortController().signal,
+          onEvent: (event) => events.push(event),
+        },
+        {
+          prepareNative: async () => ({
+            code: 0,
+            state: "ready",
+            message: "ok",
+          }),
+          localmodels: () =>
+            new Promise((resolve) => {
+              resolveApply = resolve;
+            }),
+        },
+      );
+      await vi.advanceTimersByTimeAsync(2_100);
+      resolveApply({ code: 0, stdout: "{}", stderr: "" });
+      const outcome = await promise;
+      expect(outcome.state).toBe("ready");
+      expect(
+        events.some((event) =>
+          /Starting local BYOK model gateway \(\d+s elapsed\)\.\.\./.test(
+            event.message,
+          ),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

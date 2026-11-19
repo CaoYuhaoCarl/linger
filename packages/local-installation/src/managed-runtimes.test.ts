@@ -13,6 +13,7 @@ import path from "node:path";
 import {
   installNativeRuntime,
   inspectRuntime,
+  prepareRuntime,
   runtimeEnvironmentFromDescriptors,
 } from "./managed-runtimes.js";
 const roots: string[] = [];
@@ -432,3 +433,30 @@ it.each(["RUNTIME_ACTION_FAILED", "RUNTIME_EXTENSIONS_FAILED"])(
     expect(failure).toMatchObject({ code });
   },
 );
+
+it("prepareRuntime reuses the post-install inspection instead of running harness status twice", async () => {
+  const options = await fixture();
+  const id = "b".repeat(64);
+  const localmodels = vi.fn(async (_home: string, args: string[]) => {
+    if (args[1] === "plan") {
+      await writeFile(
+        args[args.indexOf("--out") + 1]!,
+        JSON.stringify({
+          schema: "localmodels.harness-plan/v1",
+          id,
+          runtime: "codex",
+        }),
+      );
+    }
+    return {
+      code: 0,
+      stdout: args[1] === "status" ? JSON.stringify(status("codex", true)) : "",
+      stderr: "",
+    };
+  });
+  const outcome = await prepareRuntime("codex", options, { localmodels });
+  expect(outcome.state).toBe("ready");
+  expect(
+    localmodels.mock.calls.filter(([, args]) => args[1] === "status"),
+  ).toHaveLength(1);
+});

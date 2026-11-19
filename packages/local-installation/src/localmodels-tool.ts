@@ -418,6 +418,11 @@ export function localmodelsStateDirectory(home: string): string {
 export function localmodelsBaseDirectory(home: string): string {
   return path.join(path.resolve(home), "runtime", "localmodels", "models");
 }
+function formatDownloadedBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
 export async function runLocalmodels(
   home: string,
   args: string[],
@@ -462,6 +467,7 @@ export async function runLocalmodels(
         value?.kind === "stage"
       ) {
         const messages: Record<string, string> = {
+          "download:retrying": "Retrying the Harness download…",
           "extract:running":
             "Extracting Harness files and applying private permissions…",
           "verify:running": "Verifying the installed Harness executable…",
@@ -488,26 +494,40 @@ export async function runLocalmodels(
         value.unit !== "bytes" ||
         typeof value.completed !== "number" ||
         !Number.isSafeInteger(value.completed) ||
-        value.completed < 0 ||
-        typeof value.total !== "number" ||
-        !Number.isSafeInteger(value.total) ||
-        value.total <= 0 ||
-        value.completed > value.total
+        value.completed < 0
       )
         continue;
+      const hasTotal = value.total !== null && value.total !== undefined;
+      if (
+        hasTotal &&
+        (typeof value.total !== "number" ||
+          !Number.isSafeInteger(value.total) ||
+          value.total <= 0 ||
+          value.completed > value.total)
+      )
+        continue;
+      const label =
+        args[0] === "gateway"
+          ? "Downloading the application model gateway"
+          : "Downloading the selected Harness";
       options.onEvent?.({
         kind: "stage",
         stage: "runtime",
         state: "running",
-        message:
-          args[0] === "gateway"
-            ? "Downloading the application model gateway…"
-            : "Downloading the selected Harness…",
-        progress: {
-          completed: value.completed,
-          total: value.total,
-          unit: "bytes",
-        },
+        message: hasTotal
+          ? `${label}…`
+          : `${label} (${formatDownloadedBytes(value.completed)})…`,
+        progress: hasTotal
+          ? {
+              completed: value.completed,
+              total: value.total as number,
+              unit: "bytes",
+            }
+          : {
+              completed: value.completed,
+              unit: "bytes",
+              partial: true,
+            },
       });
     }
   };

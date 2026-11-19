@@ -319,7 +319,7 @@ export async function installNativeRuntime(
       code: 0,
       state: "ready",
       message: `${runtime} is installed. Authentication will be checked separately.`,
-      details: { executable: state.executable },
+      details: { executable: state.executable, inspection: state },
     };
   } catch (error) {
     options.signal.throwIfAborted();
@@ -387,7 +387,13 @@ export async function prepareRuntime(
     dependencies,
   );
   if (installed.code !== 0) return installed;
-  const state = await inspectRuntime(runtime, options, dependencies);
+  const inspected = (
+    installed.details as { inspection?: RuntimeInspection } | undefined
+  )?.inspection;
+  const state =
+    inspected?.runtime === runtime
+      ? inspected
+      : await inspectRuntime(runtime, options, dependencies);
   if (state.ready)
     return {
       code: 0,

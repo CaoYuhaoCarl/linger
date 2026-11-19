@@ -87,7 +87,10 @@ installer, and the next start tries again. Only `--migrate` reports them: a
 warning naming each and why on stderr, and one JSON line
 `{"skipped":[{instance,reason}]}` on stdout. Other modes stay silent, so a
 warning is never taken for the reason a start failed, and refuse a skipped
-instance when they open it.
+instance when they open it. Fresh native installs overlap `migrate`,
+`services`, and `account` with `runtime` while holding `services`/`account`
+completion until both branches succeed; upgrades and live re-runs keep `migrate`
+sequential after `runtime`.
 
 Run `make check-installer`; verify UI process behavior with an isolated
 browser context and retain masked evidence. Never stop a user's existing stack

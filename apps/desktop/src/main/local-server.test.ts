@@ -422,6 +422,8 @@ const fixture = (
         showStarting,
         showStartFailed,
         loadServer,
+        prewarmAssets: vi.fn(async () => {}),
+        preloadAuthenticated: vi.fn(),
       } as never,
       {
         ...stubModule("Enrollment"),
@@ -3311,6 +3313,12 @@ describe("LocalServerModule after a restart", () => {
           showStarting: vi.fn(),
           showStartFailed: vi.fn(),
           loadServer: vi.fn(),
+          prewarmAssets: vi.fn(async () => {}),
+          preloadAuthenticated: vi.fn(),
+        } as never,
+        {
+          ...stubModule("WorkspaceGrants", ["Config"]),
+          ensureDefault: vi.fn(async () => {}),
         } as never,
         enrollment,
         module,

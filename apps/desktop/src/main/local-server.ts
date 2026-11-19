@@ -427,6 +427,7 @@ export class LocalServerModule implements Module {
   #resuming = false;
   #running: Promise<void> | undefined;
   #check: LocalModelsCheck = { state: "unchecked" };
+  #checkedAt: number | undefined;
   // Read once from the bundled installer's distribution.
   #nativePostgres: boolean | undefined;
   // Where an installation goes unless the setup page chose another folder:
@@ -671,9 +672,11 @@ export class LocalServerModule implements Module {
     )
       return;
     this.#check = { state: "checking" };
+    this.#checkedAt = undefined;
     this.#ctx?.bus.emit("local-server.changed");
     const started = Date.now();
     const signal = this.#abort.signal;
+    if (!signal.aborted) void this.#ensureNode(signal).catch(() => undefined);
     void this.#inspect(signal, (download) => {
       if (this.#check.state !== "checking") return;
       this.#check = { state: "checking", download };
@@ -693,6 +696,7 @@ export class LocalServerModule implements Module {
             ...(reasonLog.length ? { reasons: reasonLog } : {}),
           });
           this.#check = check;
+          this.#checkedAt = Date.now();
         },
         (error: unknown) => {
           this.#ctx?.log.warn("local_server.inspect_failed", {
@@ -700,12 +704,11 @@ export class LocalServerModule implements Module {
             error: error instanceof Error ? error.message : String(error),
           });
           this.#check = { state: "unavailable" };
+          this.#checkedAt = undefined;
         },
       )
       .then(() => {
         this.#ctx?.bus.emit("local-server.changed");
-        if (!signal.aborted)
-          void this.#ensureNode(signal).catch(() => undefined);
       });
   }
 
@@ -1035,9 +1038,29 @@ export class LocalServerModule implements Module {
             fresh,
           ),
         );
+      // Reuse a fresh non-local recommendation from the setup window check
+      // instead of running a duplicate setup inspection.
+      const inspectedRuntime =
+        plan.runtime === "recommended" &&
+        !plan.byok &&
+        !this.#location &&
+        !keysChanged &&
+        this.#check.state === "checked" &&
+        this.#checkedAt !== undefined &&
+        Date.now() - this.#checkedAt < 60_000 &&
+        this.#check.recommendation &&
+        this.#check.recommendation !== "local-models"
+          ? this.#check.recommendation
+          : undefined;
+      const effectivePlan: LocalServerPlan = inspectedRuntime
+        ? { ...plan, runtime: inspectedRuntime }
+        : plan;
       // Changed keys reach the services only when the installation runs
       // again, even after one that finished.
-      let job = await runInstaller(plan, keysChanged || Boolean(plan.byok));
+      let job = await runInstaller(
+        effectivePlan,
+        keysChanged || Boolean(plan.byok),
+      );
       // The runtime is installed but has no sign-in here: the server would
       // never create the Another Me, so ask for it now. Another runtime
       // reruns the installation for it.
@@ -1068,6 +1091,11 @@ export class LocalServerModule implements Module {
                 true,
               );
       }
+      // Prewarm main-window assets in the background as soon as the server
+      // origin is known.
+      void this.#ctx
+        ?.get<WindowManagerModule>("WindowManager")
+        .prewarmAssets(job.origin);
       // The desktop's Computer runs the runtime this installer set up, with
       // its profile, rather than whatever its PATH finds.
       const runtime = await installer.runtime();
@@ -1122,6 +1150,9 @@ export class LocalServerModule implements Module {
       await this.#timed("enroll", () =>
         this.#ctx!.get<EnrollmentModule>("Enrollment").enroll(),
       );
+      this.#ctx
+        ?.get<WindowManagerModule>("WindowManager")
+        .preloadAuthenticated(job.origin);
       this.#advance("agents", 0, "Preparing your agents…");
       await this.#timed("await_agents", () =>
         this.#awaitAgents(job.origin, signal),

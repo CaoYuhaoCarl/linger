@@ -306,17 +306,36 @@ export async function prepareByokRuntime(
     state: "running",
     message: "Mounting BYOK endpoint on local Bifrost gateway…",
   });
-  const result = await applySource(
-    options.home,
-    "byok",
-    runtime,
-    {
-      signal: options.signal,
-      timeoutMs: 180_000,
-      input: byokStdin(validated),
-    },
-    dependencies.localmodels ?? runLocalmodels,
-  );
+  const startedAt = Date.now();
+  const heartbeat = setInterval(() => {
+    const elapsedSeconds = Math.max(
+      1,
+      Math.floor((Date.now() - startedAt) / 1000),
+    );
+    options.onEvent({
+      kind: "stage",
+      stage: "runtime",
+      state: "running",
+      message: `Starting local BYOK model gateway (${elapsedSeconds}s elapsed)...`,
+    });
+  }, 1_000);
+  heartbeat.unref?.();
+  let result;
+  try {
+    result = await applySource(
+      options.home,
+      "byok",
+      runtime,
+      {
+        signal: options.signal,
+        timeoutMs: 180_000,
+        input: byokStdin(validated),
+      },
+      dependencies.localmodels ?? runLocalmodels,
+    );
+  } finally {
+    clearInterval(heartbeat);
+  }
   if (result.code !== 0)
     return sourceApplyFailure(
       result.stdout,
