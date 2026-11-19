@@ -39,6 +39,22 @@ export function establishedExternalConnections(
   );
 }
 
+/**
+ * Pending connections whose identity check failed after authorization. They
+ * stay listed so the user can check again or disconnect; a duplicate identity
+ * is excluded because checking again cannot resolve it.
+ */
+export function unconfirmedExternalConnections(
+  connections: TeamHubExternalConnection[],
+) {
+  return connections.filter(
+    (connection) =>
+      connection.status === "pending" &&
+      Boolean(connection.status_error_code) &&
+      connection.status_error_code !== "duplicate_remote_principal",
+  );
+}
+
 export function activeExternalConnections(
   connections: TeamHubExternalConnection[],
 ) {

@@ -25,6 +25,7 @@ import {
   activeExternalConnections,
   externalConnectionNeedsAttention,
   openPendingExternalConnection,
+  unconfirmedExternalConnections,
 } from "./connection-state";
 import {
   externalAppsQueryOptions,
@@ -242,12 +243,15 @@ function CatalogAppCard({
     : null;
   const authorizing =
     createConnection.isPending || Boolean(createConnection.blockedConnectUrl);
+  const unconfirmed = unconfirmedExternalConnections(connections);
   const summary =
     connectFlow.configured && app.availability === "unavailable"
       ? "Unavailable"
       : authorizing
         ? "Authorizing…"
-        : appSummary(app);
+        : unconfirmed.length
+          ? "Couldn't confirm connection"
+          : appSummary(app);
 
   return (
     <article
