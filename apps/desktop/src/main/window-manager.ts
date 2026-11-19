@@ -382,7 +382,7 @@ export class WindowManagerModule implements Module {
     });
     contents.setWindowOpenHandler(({ url }) => {
       if (navigationDecision(url, this.#serverUrl()) !== "deny")
-        void shell.openExternal(url);
+        this.#openExternal(url);
       return { action: "deny" };
     });
     contents.on("will-attach-webview", (event) => event.preventDefault());
@@ -409,7 +409,18 @@ export class WindowManagerModule implements Module {
     const decision = navigationDecision(url, this.#serverUrl(), fromUrl);
     if (decision === "allow") return;
     event.preventDefault();
-    if (decision === "external") void shell.openExternal(url);
+    if (decision === "external") this.#openExternal(url);
+  }
+
+  // A link the system browser cannot take otherwise fails silently, so the
+  // failure is logged with the link's origin.
+  #openExternal(url: string): void {
+    shell.openExternal(url).catch((error: unknown) => {
+      this.#ctx?.log.warn("window.open_external_failed", {
+        origin: new URL(url).origin,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   #secureSession(): void {
