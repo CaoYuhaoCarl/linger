@@ -721,7 +721,10 @@ function resolveTarget(
   readonly offline: boolean;
   readonly model?: RuntimeModelInfo;
 } {
-  const preferred = placement.runtimeType;
+  // Antigravity has no model.invoke, so its Agents call through Claude or
+  // Codex on the same Computer.
+  const preferred =
+    placement.runtimeType === "antigravity" ? "claude" : placement.runtimeType;
   const fallback = preferred === "claude" ? "codex" : "claude";
   const runtimeType =
     preferred !== "pi" &&
