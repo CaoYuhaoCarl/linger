@@ -449,16 +449,16 @@ In Chrome it is a window of the Computer's own in the user's everyday Chrome,
 with the user's sign-ins, history and device trust. The window opens through
 Chrome's command line, one site per call, so no key reaches the user's other
 windows. A covered window keeps working only when Chrome runs with
-`--disable-backgrounding-occluded-windows`: a Chrome that is not running
-starts with it, and one running without it returns
-`COMPUTER_BROWSER_RESTART_REQUIRED`. The Daemon never quits the user's Chrome,
-because a quit loses text typed into a page and not yet sent: the Agent asks
-the user to quit Chrome, and the next `launch_app` starts it with the flag and
-`--restore-last-session`. The Daemon records that question in
-`computer-tools/everyday-chrome-quit` in the state directory, so a Daemon
-restart keeps it, and removes the record once Chrome started. Before the
-Computer opens its window, it waits until the list of Chrome windows stops
-changing, so every restored window is there. The Computer's window is the new
+`--disable-backgrounding-occluded-windows`, which Chrome reads only when it
+starts. A Chrome that is not running starts with it. A Chrome the user started
+without it is used as it runs: Chrome freezes the Computer's window while
+another window covers it completely, so `launch_app` sets
+`pauses_when_covered` and tells the Agent to ask the user to leave part of the
+window uncovered when a page stops changing. The Daemon never quits the user's
+Chrome and never asks the user to, because a quit loses text typed into a page
+and not yet sent. After a start, before the Computer opens its window, it
+waits until the list of Chrome windows stops changing, so every restored
+window is there. The Computer's window is the new
 window with one tab: the one whose address bar shows the site just opened, or
 the only new window when the home page moved to another site. Two or more new
 one-tab windows that the site does not tell apart are refused with
