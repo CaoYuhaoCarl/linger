@@ -50,7 +50,8 @@ import {
   TEAMHUB_BINARY_DIRECTORY,
   TEAMHUB_COMMANDS,
 } from "./teamhub-binaries.js";
-import { prepareRuntime } from "./managed-runtimes.js";
+import { prepareRuntime, type RuntimeDescriptor } from "./managed-runtimes.js";
+import { managedRuntimeEnvironment } from "./managed-codex.js";
 import { applyNativeSource } from "./byok-source.js";
 import { prepareLocalModels } from "./local-models.js";
 import {
@@ -1764,4 +1765,120 @@ test("fresh-install overlap reports account when account provisioning fails", as
       state: "failed",
     }),
   );
+});
+
+test("cold resume skips pre-inspection env probe, reuses installed runtime, forwards descriptors, and overlaps services", async () => {
+  const f = await fixture();
+  // First install provisions the instance and saved account.
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const initial = await installNativeSource({
+    ...f,
+    name: "native-flow-cold-resume",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(initial.code).toBe(0);
+  const saved = await loadInstance({
+    name: "native-flow-cold-resume",
+    home: f.home,
+  });
+  await stopNativeSource(saved!, new AbortController().signal);
+
+  vi.mocked(managedRuntimeEnvironment).mockClear();
+  let releaseRuntime!: () => void;
+  let migrateStartedBeforeRuntimeDone = false;
+  let runtimeDone = false;
+  const descriptor: RuntimeDescriptor = {
+    runtime: "pi",
+    executable: "/mock/pi",
+    argvPrefix: [],
+    installed: true,
+    authenticated: true,
+    authMode: "api_key",
+    loginCommand: null,
+  };
+  vi.mocked(prepareRuntime).mockImplementationOnce(async (_choice, options) => {
+    expect(options.reuseInstalled).toBe(true);
+    expect(options.env).toBeUndefined();
+    await new Promise<void>((resolve) => {
+      releaseRuntime = resolve;
+    });
+    runtimeDone = true;
+    options.onDescriptor?.(descriptor);
+    return { code: 0, state: "ready", message: "ready" };
+  });
+  const baseRun = vi.mocked(runProcess).getMockImplementation()!;
+  vi.mocked(runProcess).mockImplementation(async (command, args, options) => {
+    if (args.includes("migrate")) {
+      migrateStartedBeforeRuntimeDone = !runtimeDone;
+      releaseRuntime();
+    }
+    return baseRun(command, args, options);
+  });
+
+  const forwarded: RuntimeDescriptor[][] = [];
+  const resumed = await installNativeSource({
+    ...f,
+    name: "native-flow-cold-resume",
+    externalComputer: true,
+    resume: true,
+    onRuntimeDescriptors: (descriptors) => forwarded.push(descriptors),
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(resumed.code).toBe(0);
+  expect(vi.mocked(managedRuntimeEnvironment)).not.toHaveBeenCalled();
+  expect(migrateStartedBeforeRuntimeDone).toBe(true);
+  expect(forwarded).toEqual([[descriptor]]);
+});
+
+test("resume stays sequential when services are already running", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const initial = await installNativeSource({
+    ...f,
+    name: "native-flow-resume-seq",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(initial.code).toBe(0);
+
+  // Services from the initial install are still running, so resume stays sequential.
+  let runtimeDone = false;
+  let migrateSawRuntimeDone = false;
+  vi.mocked(prepareRuntime).mockImplementationOnce(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    runtimeDone = true;
+    return { code: 0, state: "ready", message: "ready" };
+  });
+  const baseRun = vi.mocked(runProcess).getMockImplementation()!;
+  vi.mocked(runProcess).mockImplementation(async (command, args, options) => {
+    if (args.includes("migrate")) {
+      migrateSawRuntimeDone = runtimeDone;
+    }
+    return baseRun(command, args, options);
+  });
+
+  const resumed = await installNativeSource({
+    ...f,
+    name: "native-flow-resume-seq",
+    externalComputer: true,
+    resume: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(resumed.code).toBe(0);
+  expect(migrateSawRuntimeDone).toBe(true);
 });

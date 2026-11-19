@@ -5,6 +5,7 @@ import { loadInstance } from "@linger/local-installation/instance";
 import { restoreLocalModels } from "@linger/local-installation/local-models";
 import { userEnvironmentPending } from "@linger/local-installation/user-environment";
 import type { InstallOutcome } from "@linger/local-installation/events";
+import type { RuntimeDescriptor } from "@linger/local-installation/managed-runtimes";
 import {
   installNativeSource,
   probeNativeSourceServices,
@@ -17,6 +18,7 @@ export interface ResumeOptions {
   externalComputer?: boolean;
   signal: AbortSignal;
   log: (message: string) => void;
+  onRuntimeDescriptors?: (descriptors: RuntimeDescriptor[]) => void;
 }
 
 type Instance = NonNullable<Awaited<ReturnType<typeof loadInstance>>>;
@@ -99,6 +101,8 @@ export async function resumeSourceInstance(
     home: options.home,
     repo: options.sourceRepo,
     externalComputer: options.externalComputer,
+    resume: true,
+    onRuntimeDescriptors: options.onRuntimeDescriptors,
     signal: options.signal,
     onEvent: (event) => {
       if (event.message) options.log(event.message);

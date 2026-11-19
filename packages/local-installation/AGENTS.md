@@ -227,21 +227,28 @@ published kit, and `LOCALMODELS_DEBUG` (`simulate` or `tiny`, or
 `installNativeSource` records wall-clock stage seconds (`timings`) in the job's
 `details` and logs `Native install timings (s): ...` in the installer event log
 without adding contract fields. Because `runtime` overlaps `release`, `images`,
-and (on fresh installs) `migrate`, `services`, and `account` while running
-concurrently, stage durations may sum to more than the total job duration. On
-fresh installs (`!switchingCheckout`, no provisioned account unless a legacy
-backup was set aside, and no running services), `migrate`, `services`, and
-`account` run concurrently with `runtime`, `prepareFoundationServices`, and
-`prepareModelGateway`, holding `services`/`account` `succeeded` events and
-`saveSourceBinding` until both branches succeed and aborting and draining both
-before rollback on failure; upgrades and live re-runs keep `migrate` sequential
-after `runtime`. Within `release`, binary and native-runtime bundle checks run
-in parallel, while dependency and voice tool preparations stay sequential on the
-shared native-tools lock. `prepareRuntime` reuses the post-install
-`RuntimeInspection` from `installNativeRuntime`, `runLocalmodels` forwards
-`harness apply` `download:retrying` and `total: null` partial byte progress,
-and `prepareByokRuntime` emits 1 s elapsed progress while mounting the BYOK
-gateway.
+and (on fresh installs and same-checkout stopped cold resumes) `migrate`,
+`services`, and `account` while running concurrently, stage durations may sum to
+more than the total job duration. On fresh installs (`!switchingCheckout`, no
+provisioned account unless a legacy backup was set aside, and no running
+services) and cold resumes (`resume: true`, `!switchingCheckout`, and no running
+services), `migrate`, `services`, and `account` run concurrently with `runtime`,
+`prepareFoundationServices`, and `prepareModelGateway`, holding
+`services`/`account` `succeeded` events and `saveSourceBinding` until both
+branches succeed and aborting and draining both before rollback on failure;
+upgrades and live re-runs keep `migrate` sequential after `runtime`. When
+`resume: true`, `prepareRuntime` inspects the selected runtime once and skips
+`harness plan` and `harness apply` when it is already installed (falling back to
+a full install if missing or unreadable), and passes the inspected descriptor
+through `onRuntimeDescriptors` so callers avoid a second status probe. Within
+`release`, binary and native-runtime bundle checks run in parallel, while
+dependency and voice tool preparations stay sequential on the shared
+native-tools lock; collaboration services start concurrently when `node-services`
+is not pre-stopped for a TeamHub config restart. `prepareRuntime` reuses the
+post-install `RuntimeInspection` from `installNativeRuntime`, `runLocalmodels`
+forwards `harness apply` `download:retrying` and `total: null` partial byte
+progress, and `prepareByokRuntime` emits 1 s elapsed progress while mounting the
+BYOK gateway.
 
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and

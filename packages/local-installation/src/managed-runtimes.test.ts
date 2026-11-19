@@ -460,3 +460,89 @@ it("prepareRuntime reuses the post-install inspection instead of running harness
     localmodels.mock.calls.filter(([, args]) => args[1] === "status"),
   ).toHaveLength(1);
 });
+
+it.each([
+  { authenticated: true, expectedState: "ready", expectedCode: 0 },
+  {
+    authenticated: false,
+    expectedState: "action_required",
+    expectedCode: 4,
+  },
+])(
+  "prepareRuntime with reuseInstalled skips plan and apply when already installed (authenticated=$authenticated)",
+  async ({ authenticated, expectedState, expectedCode }) => {
+    const options = await fixture();
+    const localmodels = vi.fn(async (_home: string, args: string[]) => ({
+      code: 0,
+      stdout:
+        args[1] === "status" ? JSON.stringify(status("pi", authenticated)) : "",
+      stderr: "",
+    }));
+    const descriptors: unknown[] = [];
+    const outcome = await prepareRuntime(
+      "pi",
+      {
+        ...options,
+        reuseInstalled: true,
+        onDescriptor: (descriptor) => descriptors.push(descriptor),
+      },
+      { localmodels },
+    );
+    expect(outcome).toMatchObject({
+      code: expectedCode,
+      state: expectedState,
+    });
+    expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+      "status",
+    ]);
+    expect(descriptors).toHaveLength(1);
+    expect(descriptors[0]).toMatchObject({ runtime: "pi", installed: true });
+  },
+);
+
+it("prepareRuntime with reuseInstalled falls back to plan and apply when not installed", async () => {
+  const options = await fixture();
+  const id = "c".repeat(64);
+  let statusCalls = 0;
+  const localmodels = vi.fn(async (_home: string, args: string[]) => {
+    if (args[1] === "status") {
+      statusCalls += 1;
+      const body = status("pi", true);
+      if (statusCalls === 1) {
+        body.runtimes[0]!.installed = false;
+        body.runtimes[0]!.authenticated = false;
+      }
+      return { code: 0, stdout: JSON.stringify(body), stderr: "" };
+    }
+    if (args[1] === "plan") {
+      await writeFile(
+        args[args.indexOf("--out") + 1]!,
+        JSON.stringify({
+          schema: "localmodels.harness-plan/v1",
+          id,
+          runtime: "pi",
+        }),
+      );
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  });
+  const descriptors: unknown[] = [];
+  const outcome = await prepareRuntime(
+    "pi",
+    {
+      ...options,
+      reuseInstalled: true,
+      onDescriptor: (descriptor) => descriptors.push(descriptor),
+    },
+    { localmodels },
+  );
+  expect(outcome.state).toBe("ready");
+  expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+    "status",
+    "plan",
+    "apply",
+    "status",
+  ]);
+  expect(descriptors).toHaveLength(1);
+  expect(descriptors[0]).toMatchObject({ runtime: "pi", installed: true });
+});

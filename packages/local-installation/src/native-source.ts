@@ -542,7 +542,11 @@ async function runNativeSource(
               home,
               signal,
               onEvent: emit,
-              env: await managedRuntimeEnvironment(home, current.root),
+              ...(options.resume
+                ? { reuseInstalled: true }
+                : { env: await managedRuntimeEnvironment(home, current.root) }),
+              onDescriptor: (descriptor) =>
+                options.onRuntimeDescriptors?.([descriptor]),
             });
             if (
               choice !== "pi" &&
@@ -981,12 +985,28 @@ async function runNativeSource(
             (await inspectNativeProcess(current.root, "node-services")).running;
           if (preStopped)
             await stopNativeProcess(current.root, "node-services");
-          for (const name of ["teamhub", "node-services", "web"] as const) {
-            const running = (await inspectNativeProcess(current.root, name))
-              .running;
-            if (!running && !(preStopped && name === "node-services"))
-              started.push(name);
-            await startNativeProcess(serviceOptions(name));
+          const serviceNames = ["teamhub", "node-services", "web"] as const;
+          if (preStopped) {
+            for (const name of serviceNames) {
+              const running = (await inspectNativeProcess(current.root, name))
+                .running;
+              if (!running && name !== "node-services") started.push(name);
+              await startNativeProcess(serviceOptions(name));
+            }
+          } else {
+            const states = await Promise.all(
+              serviceNames.map((name) =>
+                inspectNativeProcess(current.root, name),
+              ),
+            );
+            for (const [index, name] of serviceNames.entries()) {
+              if (!states[index]!.running) started.push(name);
+            }
+            await Promise.all(
+              serviceNames.map((name) =>
+                startNativeProcess(serviceOptions(name)),
+              ),
+            );
           }
           return timed(
             "Waiting for native collaboration services",
@@ -1008,10 +1028,11 @@ async function runNativeSource(
             },
           });
         const overlapWithRuntime =
-          Boolean(options.setupChoice || options.byok) &&
           !switchingCheckout &&
-          (!hadProvisionedAccount || Boolean(legacyBackup)) &&
-          !anyServiceRunning;
+          !anyServiceRunning &&
+          (Boolean(options.resume) ||
+            (Boolean(options.setupChoice || options.byok) &&
+              (!hadProvisionedAccount || Boolean(legacyBackup))));
         let checks: { service: string; ready: boolean }[];
         if (overlapWithRuntime) {
           timer.leave();
