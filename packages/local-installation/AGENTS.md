@@ -186,6 +186,9 @@ Verified downloads stop reading on explicit cancellation even when a response
 body ignores the fetch signal. They retain the caller's abort reason, cancel
 the reader and keep only resumable partial bytes; cancellation never waits
 for the idle timeout or moves on to another mirror.
+Rebuilding the checksum of a saved resumable partial also uses the caller's
+signal, so cancellation stops local reads before another request starts and
+leaves the partial file intact for the next attempt.
 
 Move a freshly downloaded or unpacked file or folder into place with
 `renameRetrying` from `fs-retry.ts`: on Windows antivirus and indexing hold
