@@ -28,7 +28,9 @@ once its services are ready on it: until then `instance.json` keeps naming the
 checkout they run from, the new checkout's migrations run only after the
 runtime (the local model, for one) is ready, and a run that stops earlier
 leaves the running services and their schema as they were. A successful
-outcome's `details.source` names the checkout the services serve from. A
+outcome's `details.source` names the checkout the services serve from, and
+`details.origin` the origin they serve at, which the run moves when another
+program took the web port. A
 local model stack whose saved binding is no longer ready (any setup binding
 reason, `pi-extensions-unavailable` from a Pi an earlier localmodels
 installed without extension support included) gets its approved plan applied

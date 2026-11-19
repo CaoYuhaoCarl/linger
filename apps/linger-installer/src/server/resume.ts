@@ -105,7 +105,9 @@ export async function resumeSourceInstance(
     },
   });
   if (outcome.code !== 0) return outcome;
-  // The instance names a checkout only once its services serve from it.
+  // The instance names a checkout only once its services serve from it, and
+  // the origin they serve at: the run moves the web port off one another
+  // program took.
   const serving = await load({
     name: options.instanceName,
     home: options.home,
@@ -114,7 +116,7 @@ export async function resumeSourceInstance(
     ...outcome,
     details: {
       ...(outcome.details as object | undefined),
-      origin: instance.origin,
+      origin: serving?.origin,
       source: serving?.source?.repo,
     },
   };

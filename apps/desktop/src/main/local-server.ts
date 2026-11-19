@@ -66,7 +66,7 @@ import {
 } from "../../../../scripts/local-computer-node-distributions.mjs";
 import type { Logger } from "./log.js";
 import type { Module, ModuleContext, StopReason } from "./modules.js";
-import { sameOrigin } from "./navigation.js";
+import { parseServerUrl, sameOrigin } from "./navigation.js";
 import { humanTenant, type EnrollmentModule } from "./enrollment.js";
 import { compareVersions } from "./update-manifest.js";
 import type { WindowManagerModule } from "./window-manager.js";
@@ -1080,6 +1080,9 @@ export class LocalServerModule implements Module {
       this.#advance("connect", 0, "Connecting this computer…");
       const login = await installer.login();
       await this.#signInAs(home, job.origin, login.email, login.password);
+      // The installation this window used in the same location is the same
+      // server, at another origin when the installer moved its web port.
+      const previous = await this.#readRecord();
       await this.#writeRecord({
         home,
         repo,
@@ -1089,7 +1092,10 @@ export class LocalServerModule implements Module {
       await this.#pruneSources(home, [repo]);
       this.#home = home;
       this.#location = undefined;
-      this.#ready(job.origin);
+      this.#ready(
+        job.origin,
+        previous?.home === home ? previous.origin : undefined,
+      );
       this.#daemonConnection = undefined;
       await this.#ctx!.get<EnrollmentModule>("Enrollment").enroll();
       this.#advance("agents", 0, "Preparing your agents…");
@@ -2163,9 +2169,12 @@ export class LocalServerModule implements Module {
     );
   }
 
-  #ready(origin: string): void {
+  // `previous` is the origin this installation answered at before.
+  #ready(origin: string, previous?: string): void {
     this.#origin = origin;
-    this.#ctx?.get<WindowManagerModule>("WindowManager").setServer(origin);
+    this.#ctx
+      ?.get<WindowManagerModule>("WindowManager")
+      ?.setServer(origin, previous);
   }
 
   // The server sets up the Another Me once this computer offers a signed-in
@@ -2318,25 +2327,36 @@ export class LocalServerModule implements Module {
           ? await this.#ensureSource(record.home, signal)
           : record.repo;
       const serving = await this.#runResume(record, repo, signal);
+      // The installer moves the web port off one another program took. The
+      // record and the window follow the origin together (a launch resumes
+      // only while they agree), and so does this computer's enrollment: it
+      // is the same server.
+      const origin = serving.origin ?? record.origin;
       if (repo !== record.repo) {
         // The record moves, and the older folder goes, only once the
         // services run from the new one and answer; until then the older
         // services keep running from their folder, and Retry moves them.
         if (
-          serving !== (await realpath(repo).catch(() => repo)) ||
-          !(await this.#reachable(record.origin))
+          serving.source !== (await realpath(repo).catch(() => repo)) ||
+          !(await this.#reachable(origin))
         )
           throw new Error(
             "Linger could not restart on this version. The earlier version is still installed; try again.",
           );
-        await this.#moved(record, repo);
-      }
+        await this.#moved({ ...record, origin }, repo);
+      } else if (origin !== record.origin)
+        await this.#writeRecord({ ...record, origin });
+      if (origin !== record.origin)
+        this.#ctx?.log.info("local_server.origin_moved", {
+          from: record.origin,
+          to: origin,
+        });
       if (update)
         this.#ctx?.log.info("local_server.source_updated", {
           source: path.basename(repo),
           from: record.version,
         });
-      this.#ready(record.origin);
+      this.#ready(origin, record.origin);
       this.#set("ready", "Linger is running on this computer.");
     } catch (error) {
       if (signal.aborted) return;
@@ -2408,20 +2428,15 @@ export class LocalServerModule implements Module {
   }
 
   // Resolves with the source folder the installer reports the services
-  // serving from.
+  // serving from, and the origin they serve at.
   async #runResume(
     record: LocalRecord,
     repo: string,
     signal: AbortSignal,
-  ): Promise<string | undefined> {
+  ): Promise<{ source?: string; origin?: string }> {
     await this.#adoptSourceKeys(record.home);
     const node = await this.#ensureNode(signal);
-    const outcome = await new Promise<{
-      code: number;
-      message: string;
-      details?: { source?: unknown; code?: unknown; reasons?: unknown };
-      runtime?: InstanceRuntime;
-    }>((resolve, reject) => {
+    const outcome = await new Promise<ResumeOutcome>((resolve, reject) => {
       const child = spawn(
         node,
         [
@@ -2452,14 +2467,7 @@ export class LocalServerModule implements Module {
       child.once("close", (code) => {
         try {
           const last = output.trim().split("\n").at(-1) ?? "";
-          resolve(
-            JSON.parse(last) as {
-              code: number;
-              message: string;
-              details?: { source?: unknown; code?: unknown; reasons?: unknown };
-              runtime?: InstanceRuntime;
-            },
-          );
+          resolve(JSON.parse(last) as ResumeOutcome);
         } catch {
           reject(new Error(`The installer exited with code ${code}`));
         }
@@ -2489,8 +2497,13 @@ export class LocalServerModule implements Module {
       );
     }
     this.#adoptRuntime(outcome.runtime);
-    const source = outcome.details?.source;
-    return typeof source === "string" ? source : undefined;
+    const { source, origin } = outcome.details ?? {};
+    return {
+      ...(typeof source === "string" ? { source } : {}),
+      ...(typeof origin === "string" && parseServerUrl(origin) === origin
+        ? { origin }
+        : {}),
+    };
   }
 
   // Every resume reports the runtime and localmodels tool paths, so an
@@ -2597,6 +2610,19 @@ const atLeast = (version: string, minimum: string): boolean => {
   const [wantMajor = 0, wantMinor = 0] = minimum.split(".").map(Number);
   return major !== wantMajor ? major > wantMajor : minor >= wantMinor;
 };
+
+// The single JSON line `installer.js --resume` prints.
+interface ResumeOutcome {
+  code: number;
+  message: string;
+  details?: {
+    source?: unknown;
+    origin?: unknown;
+    code?: unknown;
+    reasons?: unknown;
+  };
+  runtime?: InstanceRuntime;
+}
 
 interface LocalRecord {
   // The installer home.

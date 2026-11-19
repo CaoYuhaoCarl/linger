@@ -169,6 +169,26 @@ test("reports the source the services serve from", async () => {
   ).toMatchObject({ code: 0, details: { source: "/old-source" } });
 });
 
+test("reports the origin the services moved to", async () => {
+  const moved = { ...instance, origin: "http://localhost:3001" } as Instance;
+  const load = vi
+    .fn<() => Promise<Instance>>()
+    .mockResolvedValueOnce(instance)
+    .mockResolvedValue(moved);
+  const run = vi.fn<ResumeEngine["run"]>(async () => ({
+    code: 0,
+    state: "ready",
+    message: "ok",
+    details: { origin: moved.origin },
+  }));
+  expect(
+    await resumeSourceInstance(options, {
+      load,
+      engines: native(run, false),
+    }),
+  ).toMatchObject({ code: 0, details: { origin: "http://localhost:3001" } });
+});
+
 test("needs an installed source instance", async () => {
   expect(
     await resumeSourceInstance(options, {

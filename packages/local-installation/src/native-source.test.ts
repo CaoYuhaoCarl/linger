@@ -247,8 +247,8 @@ test("a resumed instance moves off ports another program took", async () => {
   );
   expect(second.warnings).toHaveLength(5);
 
-  // Once the owner account exists, the browser session and the desktop app
-  // keep the origin: the web port stays and its service reports the program.
+  // Once the owner account exists, a Computer this installer enrolled keeps
+  // the origin: the web port stays and its service reports the program.
   await writeFile(
     path.join(first.instance.root, "local-account.json"),
     JSON.stringify({ provisioned: true }),
@@ -261,7 +261,7 @@ test("a resumed instance moves off ports another program took", async () => {
   expect(third.warnings).toEqual([]);
 
   // A database set aside from an older install marks the account to be made
-  // again, but that install's desktop still keeps the origin.
+  // again, but that install's Computer still keeps the origin.
   await writeFile(
     path.join(first.instance.root, "local-account.json"),
     JSON.stringify({ provisioned: false }),
@@ -271,4 +271,47 @@ test("a resumed instance moves off ports another program took", async () => {
   const fourth = await prepareNativeConfiguration(f.repo, options);
   expect(fourth.instance.port).toBe(after.web);
   expect(fourth.warnings).toEqual([]);
+});
+test("the desktop's web origin moves off a taken port after the account exists", async () => {
+  const f = await fixture();
+  const options = { home: f.home, name: "desktop", externalComputer: true };
+  const first = await prepareNativeConfiguration(f.repo, options);
+  const before = first.instance.source!.ports;
+  await writeFile(
+    path.join(first.instance.root, "local-account.json"),
+    JSON.stringify({ provisioned: true }),
+    { mode: 0o600 },
+  );
+  // A database set aside from an older install does not hold it either.
+  await mkdir(path.join(first.instance.root, "simplex-backup-earlier"));
+  await occupy(before.web);
+  // The desktop update that finds the port taken also brings a new checkout.
+  const next = path.join(f.home, "next");
+  await mkdir(path.join(next, "scripts"), { recursive: true });
+  for (const file of ["package.json", "scripts/source-native.mjs"])
+    await writeFile(
+      path.join(next, file),
+      await readFile(path.join(f.repo, file)),
+    );
+
+  const second = await prepareNativeConfiguration(next, {
+    ...options,
+    rebindSource: true,
+  });
+  const after = second.instance.source!.ports;
+  expect(after.web).not.toBe(before.web);
+  expect(second.instance.port).toBe(after.web);
+  expect(second.instance.origin).toBe(`http://localhost:${after.web}`);
+  expect(second.env.WEB_PUBLIC_ORIGIN).toBe(second.instance.origin);
+  expect(second.env.WEB_HTTP_PORT).toBe(String(after.web));
+  expect(second.warnings.join("")).toContain(
+    `Port ${before.web} is in use by another program; Linger's web uses port ${after.web} instead.`,
+  );
+  // The moved origin is saved at once; the checkout only once the services
+  // serve from it.
+  const stored = await loadInstance(options);
+  expect(stored?.origin).toBe(second.instance.origin);
+  expect(stored?.source?.ports).toEqual(after);
+  expect(stored?.releaseDir).toBe(f.repo);
+  expect(stored?.source?.repo).toBe(f.repo);
 });
