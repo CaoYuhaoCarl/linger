@@ -46,8 +46,11 @@ build:assets` to check the initial JS budget.
   eligibility and `Pi` runtime switch payloads in `local-model-agents.ts`
   (`Use with <Another Me>`, `Open chat`, `Switch Agent…` in `Used by`, and
   `Make room` automatic Agent handoff once the replacement model loads when `Pi`
-  is ready), and maps every code and enum
-  label to English in `local-models-copy.ts`. Without `?computer=`
+  is ready), maps every code and enum
+  label to English in `local-models-copy.ts`, checks live download memory via
+  `downloadMemoryCheck` (`DownloadLowMemoryDialog`: `Recheck memory` or
+  `Download only` with `no_autoload`), and exposes `MemoryBreakdownPopover` on
+  the header summary and Details `PoolBar` plus `Recheck memory` in Details. Without `?computer=`
   the desktop app opens
   its own Computer. Only the Computer's owner can act; actions return at once
   and progress arrives as `local-models` invalidation hints. From the click
