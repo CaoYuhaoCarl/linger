@@ -63,7 +63,9 @@ gateway (`stopLocalmodels`).
 location `desktop/local-server.json` names, it unloads the model library's
 loaded models and stops the stack with the gateway the localmodels tool
 started, and keeps the services and the model controller running. It
-prints one JSON line with what failed.
+holds each home's local model lock (`withLocalModelsLock`) while it stops,
+so the next launch's restore waits for it; a home whose lock a deployment
+holds is skipped with a log line. It prints one JSON line with what failed.
 
 Every other mode first converts an install from before the rename to Linger
 (`migrateLegacyInstallation`); `--migrate` does only that and exits, for the

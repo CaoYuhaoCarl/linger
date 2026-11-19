@@ -51,6 +51,8 @@ import {
   TEAMHUB_COMMANDS,
 } from "./teamhub-binaries.js";
 import { prepareRuntime } from "./managed-runtimes.js";
+import { applyNativeSource } from "./byok-source.js";
+import { prepareLocalModels } from "./local-models.js";
 import {
   inspectNativeListeners,
   inspectNativeProcess,
@@ -81,6 +83,11 @@ vi.mock("./native-livekit.js", async (original) => ({
 vi.mock("./byok-source.js", async (original) => ({
   ...(await original<typeof import("./byok-source.js")>()),
   applyNativeSource: vi.fn(async () => undefined),
+}));
+// Deploying local models runs the localmodels tool too.
+vi.mock("./local-models.js", async (original) => ({
+  ...(await original<typeof import("./local-models.js")>()),
+  prepareLocalModels: vi.fn(async () => undefined),
 }));
 vi.mock("./managed-runtimes.js", () => ({
   runtimeVersionFailure: vi.fn(() => undefined),
@@ -270,6 +277,50 @@ test("native services and owner creation continue while selected Runtime authent
   expect(JSON.stringify(owner?.[1])).not.toContain(owner?.[2]?.input?.trim());
   expect(events.join("\n")).not.toContain(owner?.[2]?.input?.trim());
 });
+test("choosing local models makes them the model source", async () => {
+  const f = await fixture();
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "local-models",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result.code).toBe(0);
+  expect(prepareLocalModels).toHaveBeenCalled();
+  expect(applyNativeSource).toHaveBeenCalledWith(
+    path.resolve(f.home),
+    "local",
+    "pi",
+    expect.any(AbortSignal),
+  );
+});
+
+test("a restart of local models keeps the model source the person switched to", async () => {
+  const f = await fixture();
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "local-models",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  vi.mocked(applyNativeSource).mockClear();
+  // A resume after a reboot or an update reads the saved choice.
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result.code).toBe(0);
+  expect(vi.mocked(prepareLocalModels).mock.calls).toHaveLength(2);
+  expect(applyNativeSource).not.toHaveBeenCalled();
+});
+
 test("only TeamHub's process gets the server identity key", async () => {
   const f = await fixture();
   vi.mocked(prepareRuntime).mockResolvedValue({

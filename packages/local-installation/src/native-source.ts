@@ -502,10 +502,21 @@ async function runNativeSource(
               localModelsApproval: options.localModelsApproval,
               localModelsReplan: options.localModelsReplan,
             });
-            if (runtimeOutcome?.code === 0)
-              runtimeOutcome =
-                (await applyNativeSource(home, "local", "pi", signal)) ??
-                runtimeOutcome;
+            // A person who chose local models just now makes them the
+            // source, replacing one an earlier setup left. A restart reads
+            // the choice from setup-choice.json and passes no approval, so a
+            // source the person switched since on the Models page stays.
+            if (
+              !runtimeOutcome &&
+              (options.setupChoice === "local-models" ||
+                options.localModelsApproval)
+            )
+              runtimeOutcome = await applyNativeSource(
+                home,
+                "local",
+                "pi",
+                signal,
+              );
           } else {
             runtimeOutcome = await prepareRuntime(choice, {
               home,

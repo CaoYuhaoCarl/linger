@@ -14,6 +14,7 @@ import {
   localModelsEnvironment,
   restoreLocalModels,
   stackProgress,
+  withLocalModelsLock,
 } from "./local-models.js";
 import { writeSetupChoice } from "./setup-selection.js";
 import { runProcess } from "./process.js";
@@ -535,6 +536,72 @@ test("a restore whose plan fails to apply reports why", async () => {
     },
   });
   expect(commands(f)).not.toContain("source apply");
+});
+test("a restore waits for a quit-time stop and checks the stack it left", async () => {
+  const f = await stoppedLocalSetup("local");
+  Object.assign(f.binding, f.ready);
+  let release!: () => void;
+  let acquired!: () => void;
+  const locked = new Promise<void>((resolve) => (acquired = resolve));
+  const stopping = withLocalModelsLock(
+    f.home,
+    () =>
+      new Promise<void>((resolve) => {
+        acquired();
+        release = () => {
+          // The stop takes the stack down before it lets go.
+          Object.assign(f.binding, {
+            ready: false,
+            pi: null,
+            reasons: [{ code: "gateway-unavailable" }],
+          });
+          resolve();
+        };
+      }),
+  );
+  await locked;
+  const restoring = restoreLocalModels(f.instance, f.options, {
+    localmodels: f.call,
+    lockRetryMs: 5,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(f.call).not.toHaveBeenCalled();
+  release();
+  await stopping;
+  expect(await restoring).toBeUndefined();
+  expect(commands(f)).toContain("stack apply");
+  expect(commands(f).at(-1)).toBe("source apply");
+});
+test("a restore gives up when the stack stays locked", async () => {
+  const f = await stoppedLocalSetup("local");
+  let release!: () => void;
+  let acquired!: () => void;
+  const locked = new Promise<void>((resolve) => (acquired = resolve));
+  const held = withLocalModelsLock(
+    f.home,
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+        acquired();
+      }),
+  );
+  await locked;
+  try {
+    expect(
+      await restoreLocalModels(f.instance, f.options, {
+        localmodels: f.call,
+        lockWaitMs: 30,
+        lockRetryMs: 5,
+      }),
+    ).toMatchObject({
+      state: "action_required",
+      details: { code: "LOCAL_MODELS_RECOVERY_REQUIRED" },
+    });
+    expect(f.call).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await held;
+  }
 });
 test("a restored stack the model source refuses reports why", async () => {
   const f = await stoppedLocalSetup();

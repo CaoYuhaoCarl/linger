@@ -109,12 +109,18 @@ the `LINGER_LOCALMODELS_*` keys of the installer's instance runtime.
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the
 stack is, and a subscription after its Runtime installs, signed in or not.
+The local source is set only by a start whose request chose local models
+(`setupChoice` or a plan approval); a restart from the saved choice keeps a
+source the person switched to on the Models page.
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. `restoreLocalModels` (`local-models.ts`) brings back a
 local-models setup's stack while its services keep running, such as after
 the desktop's quit stopped it, but only while that source is `local` or not
 saved yet: a ready stack costs one `setup binding` check, a stopped one gets
-its approved plan applied again and the local source set again.
+its approved plan applied again and the local source set again. Deployments,
+that check and the quit-time stop share one lock per home
+(`withLocalModelsLock`); the check waits up to 180 s for it, past the stop's
+150 s hard exit, then asks to try again.
 
 Each native service runs under a detached supervisor
 (`native-process-worker.mjs`) whose record holds its PID, birth and an
