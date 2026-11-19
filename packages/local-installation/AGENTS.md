@@ -139,6 +139,14 @@ still carrying its lease (the app was killed with it) ends them as a stop
 does and starts the service again. A live recorded PID or process group
 without the lease proves nothing and is refused, never signalled.
 
+Every download offered by both a global host and a mainland-China mirror
+goes through `downloadInRegion` (`region.ts`), which tries the home's
+download region first and never drops a source; the region is
+`SIMPLEX_REGION`, else `<home>/runtime/region.json` (7 days), else the npm
+registry probe, and a fallback to the other region rewrites the file. The
+resolved region reaches every `localmodels` child and native service as
+`SIMPLEX_REGION`. The contract is in `scripts/installs/README.md`.
+
 Move a freshly downloaded or unpacked file or folder into place with
 `renameRetrying` from `fs-retry.ts`: on Windows antivirus and indexing hold
 new files for a moment, and a plain rename then fails with EPERM.

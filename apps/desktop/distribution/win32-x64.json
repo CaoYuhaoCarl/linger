@@ -3,6 +3,10 @@
   "arch": "x64",
   "localmodelsTool": {
     "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev39/win32-x64.tgz",
+    "mirrors": [
+      "https://registry.npmjs.org/@simplexai/localmodels-win32-x64/-/localmodels-win32-x64-0.1.0-dev.39.tgz",
+      "https://cdn.npmmirror.com/packages/@simplexai/localmodels-win32-x64/0.1.0-dev.39/localmodels-win32-x64-0.1.0-dev.39.tgz"
+    ],
     "sha256": "492ed40845a7d732f077b575c7ef4d75f06965c991e5e2c4c0e9f356ed0da37f",
     "bytes": 23174114,
     "sourceCommit": "9a72159a9c114e323de703fcbf6e030fbf7d480a",
