@@ -1010,12 +1010,14 @@ export class LocalServerModule implements Module {
         this.#launchInstaller(node, home, repo, signal),
       );
       const runInstaller = (next: LocalServerPlan, fresh = false) =>
-        installer.run(
-          next,
-          signal,
-          (stage, share, text, transfer) =>
-            this.#advance(stage, share, text, transfer),
-          fresh,
+        this.#timed("installer_job", () =>
+          installer.run(
+            next,
+            signal,
+            (stage, share, text, transfer) =>
+              this.#advance(stage, share, text, transfer),
+            fresh,
+          ),
         );
       // Changed keys reach the services only when the installation runs
       // again, even after one that finished.
@@ -1025,7 +1027,9 @@ export class LocalServerModule implements Module {
       // reruns the installation for it.
       for (;;) {
         const nextChoice = job.signInRequired
-          ? await this.#awaitSignIn(installer, signal)
+          ? await this.#timed("await_signin", () =>
+              this.#awaitSignIn(installer, signal),
+            )
           : undefined;
         if (!nextChoice) break;
         this.#endSignIn();
@@ -1079,7 +1083,9 @@ export class LocalServerModule implements Module {
       }
       this.#advance("connect", 0, "Connecting this computer…");
       const login = await installer.login();
-      await this.#signInAs(home, job.origin, login.email, login.password);
+      await this.#timed("sign_in_as", () =>
+        this.#signInAs(home, job.origin, login.email, login.password),
+      );
       // The installation this window used in the same location is the same
       // server, at another origin when the installer moved its web port.
       const previous = await this.#readRecord();
@@ -1097,9 +1103,13 @@ export class LocalServerModule implements Module {
         previous?.home === home ? previous.origin : undefined,
       );
       this.#daemonConnection = undefined;
-      await this.#ctx!.get<EnrollmentModule>("Enrollment").enroll();
+      await this.#timed("enroll", () =>
+        this.#ctx!.get<EnrollmentModule>("Enrollment").enroll(),
+      );
       this.#advance("agents", 0, "Preparing your agents…");
-      await this.#awaitAgents(job.origin, signal);
+      await this.#timed("await_agents", () =>
+        this.#awaitAgents(job.origin, signal),
+      );
       this.#set("ready", "Linger is running on this computer.");
     } catch (error) {
       this.#endSignIn();

@@ -103,6 +103,7 @@ export class WindowManagerModule implements Module {
   #titlebar: WebContentsView | undefined;
   #content: WebContentsView | undefined;
   #quitting = false;
+  #openFromSetupAt: number | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: WindowManagerOptions) {
@@ -149,6 +150,26 @@ export class WindowManagerModule implements Module {
 
   webContents(): WebContents | undefined {
     return this.#content?.webContents;
+  }
+
+  markOpenFromSetup(): void {
+    const contents = this.#content?.webContents;
+    const target = this.#serverUrl();
+    if (
+      target &&
+      contents &&
+      !contents.isDestroyed() &&
+      !contents.isLoading() &&
+      sameOrigin(contents.getURL(), target)
+    ) {
+      this.#openFromSetupAt = undefined;
+      this.#ctx?.log.info("local_server.timing", {
+        step: "open_linger_to_load",
+        ms: 0,
+      });
+      return;
+    }
+    this.#openFromSetupAt = Date.now();
   }
 
   show(): void {
@@ -397,6 +418,17 @@ export class WindowManagerModule implements Module {
       if (!isMain || code === -3 || url.startsWith(OFFLINE_ORIGIN)) return;
       this.#ctx!.log.warn("window.load_failed", { code, description });
       this.#loadOffline(description);
+    });
+    contents.on("did-finish-load", () => {
+      if (this.#openFromSetupAt === undefined) return;
+      const target = this.#serverUrl();
+      if (!target || !sameOrigin(contents.getURL(), target)) return;
+      const startedAt = this.#openFromSetupAt;
+      this.#openFromSetupAt = undefined;
+      this.#ctx?.log.info("local_server.timing", {
+        step: "open_linger_to_load",
+        ms: Date.now() - startedAt,
+      });
     });
     for (const event of [
       "did-navigate",

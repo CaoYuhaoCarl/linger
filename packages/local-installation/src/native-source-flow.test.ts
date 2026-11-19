@@ -1292,7 +1292,13 @@ test("bundled services that verify install no packages and record stage times", 
   const timings = (result.details as { timings: Record<string, number> })
     .timings;
   expect(Object.keys(timings)).toEqual(
-    expect.arrayContaining(["preflight", "release", "images", "services"]),
+    expect.arrayContaining([
+      "preflight",
+      "release",
+      "images",
+      "runtime",
+      "services",
+    ]),
   );
   expect(Object.values(timings).every((seconds) => seconds > 0)).toBe(true);
   expect(

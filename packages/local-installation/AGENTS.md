@@ -224,6 +224,12 @@ to absolute paths runs a local `localmodels` checkout instead of fetching the
 published kit, and `LOCALMODELS_DEBUG` (`simulate` or `tiny`, or
 `~/.config/localmodels/debug.json`) passes straight through to `localmodels`.
 
+`installNativeSource` records wall-clock stage seconds (`timings`) in the job's
+`details` and logs `Native install timings (s): ...` in the installer event log
+without adding contract fields. Because `runtime` overlaps `release`, `images`,
+and `services` while running concurrently, stage durations may sum to more than
+the total job duration.
+
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and
 applies to changes that affect its public behavior.

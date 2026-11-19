@@ -356,10 +356,15 @@ function stageTimer(now = () => Date.now()) {
     since = at;
   };
   return {
+    now,
     enter(stage: InstallStage) {
       if (stage === current) return;
       close();
       current = stage;
+    },
+    record(stage: InstallStage, durationMs: number) {
+      if (!Number.isFinite(durationMs) || durationMs < 0) return;
+      timings[stage] = (timings[stage] ?? 0) + durationMs / 1000;
     },
     finish() {
       close();
@@ -479,6 +484,7 @@ async function runNativeSource(
       const started: NativeService[] = [];
       let runtimeOutcome: InstallOutcome | undefined;
       let runtimeError: unknown;
+      const runtimeStartedAt = timer.now();
       const runtime = (async () => {
         try {
           if (options.byok) {
@@ -549,6 +555,8 @@ async function runNativeSource(
         } catch (error) {
           runtimeError = error;
           controller.abort();
+        } finally {
+          timer.record("runtime", timer.now() - runtimeStartedAt);
         }
       })();
       try {
@@ -841,13 +849,17 @@ async function runNativeSource(
         // Mark before startup so a failed init/readiness step can stop a process
         // it managed to create without touching a previously running cluster.
         if (!postgresWasRunning) started.push("postgres");
-        const { legacyBackup } = await prepareNativeDatabase({
-          instance: current,
-          postgresBin: tools.postgresBin,
-          env,
-          signal,
-          onOutput: (chunk) => output.write(chunk),
-        });
+        const { legacyBackup } = await timed(
+          "Preparing private PostgreSQL",
+          () =>
+            prepareNativeDatabase({
+              instance: current,
+              postgresBin: tools.postgresBin,
+              env,
+              signal,
+              onOutput: (chunk) => output.write(chunk),
+            }),
+        );
         if (legacyBackup)
           emit({
             kind: "log",
@@ -857,15 +869,17 @@ async function runNativeSource(
         // The runtime is ready before the checkout's migrations run: when it is
         // not, services still running from an earlier checkout keep the
         // schema they know.
-        await runtime;
+        await timed("Waiting for runtime preparation", () => runtime);
         signal.throwIfAborted();
-        await command("migrate");
-        await prepareFoundationServices(current, choice, {
-          home,
-          signal,
-          onEvent: emit,
-          shareGpu: options.shareGpu,
-        });
+        await timed("Running database migrations", () => command("migrate"));
+        await timed("Preparing foundation services", () =>
+          prepareFoundationServices(current, choice, {
+            home,
+            signal,
+            onEvent: emit,
+            shareGpu: options.shareGpu,
+          }),
+        );
         // Binds the local stack's gateway for local models; with a runtime's own
         // sign-in, retires one an earlier release started.
         await prepareModelGateway(
@@ -933,7 +947,10 @@ async function runNativeSource(
             started.push(name);
           await startNativeProcess(serviceOptions(name));
         }
-        const checks = await waitHealthy(current, signal, emit, ends);
+        const checks = await timed(
+          "Waiting for native collaboration services",
+          () => waitHealthy(current, signal, emit, ends),
+        );
         await saveSourceBinding(current);
         emit({
           kind: "stage",
