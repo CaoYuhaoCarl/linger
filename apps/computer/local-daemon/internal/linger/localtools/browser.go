@@ -157,6 +157,10 @@ func (op *operation) nativeBrowserCall(ctx context.Context, name string, args js
 // which later tasks of the same Agent reuse.
 // A rejected token fails the call: it never falls back to the Agent profile.
 func (op *operation) userChromeCall(ctx context.Context, chrome *browserConnection, name string, args json.RawMessage, confirmed *bool) (json.RawMessage, error) {
+	if name == "browser_file_upload" && uploadsFiles(args) && extensionFileAccessOff(op.manager.env, chrome.Profile) {
+		*confirmed = true
+		return nil, errUserChromeFileAccess
+	}
 	var err error
 	if op.browser == nil {
 		session, err := op.manager.checkoutUserChrome(ctx, op, chrome)
@@ -187,6 +191,17 @@ func (op *operation) userChromeCall(ctx context.Context, chrome *browserConnecti
 		}
 	}
 	return result, err
+}
+
+var errUserChromeFileAccess = errors.New("BROWSER_FILE_ACCESS_DISABLED: the user's Chrome does not let the Playwright Extension read local files, so no file was attached. Ask the user to open chrome://extensions/?id=" + playwrightExtensionID + " and turn on Allow access to file URLs, then call browser_file_upload again; the file chooser is still open")
+
+// uploadsFiles reports whether browser_file_upload arguments name files; a
+// call without paths only cancels the file chooser.
+func uploadsFiles(args json.RawMessage) bool {
+	var input struct {
+		Paths []string `json:"paths"`
+	}
+	return json.Unmarshal(args, &input) == nil && len(input.Paths) > 0
 }
 
 // holdBrowserCalls admits one browser call of this Operation at a time. The

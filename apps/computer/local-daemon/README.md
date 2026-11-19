@@ -653,7 +653,11 @@ one seat in it. When every installed version of the Playwright Extension in
 the profile is 0.5.0 or later, the extension keeps several Playwright clients
 connected, each in its own tab group. Each Agent then has its own seat, and
 Agents work in their own background tabs at once. An earlier extension may drop
-one client when the next connects, so its whole profile is one seat. Release
+one client when the next connects, so its whole profile is one seat. Chrome lets the extension
+set a file input only when the user turns on Allow access to file URLs for it,
+which is off by default. When the profile's preferences show it off, the Daemon
+fails `browser_file_upload` with `BROWSER_FILE_ACCESS_DISABLED` before Chrome
+sees it, and the Agent asks the user to turn it on; the file chooser stays open. Release
 bundles patch Playwright to keep focus emulation on its CDP connections, this
 Chrome and the Agent Chrome alike. Without it a background tab is hidden: it
 stops rendering, clicks wait for it, and mouse and key events are lost. One task or Live call holds a seat at a time, so tasks of

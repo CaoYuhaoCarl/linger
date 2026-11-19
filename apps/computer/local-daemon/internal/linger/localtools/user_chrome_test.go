@@ -810,3 +810,53 @@ func TestLiveCallStopsWaitingWithItsCaller(t *testing.T) {
 		t.Fatalf("err=%v, want the caller's deadline", err)
 	}
 }
+
+func TestFileUploadReportsExtensionWithoutFileAccess(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Skip("the everyday Chrome is connected on macOS and Windows")
+	}
+	writePrefs := func(env []string, name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(chromeUserDataDirectory(env), "Default", name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setting := func(value string) string {
+		return `{"extensions":{"settings":{"` + playwrightExtensionID + `":{"location":1` + value + `}}}}`
+	}
+	for _, test := range []struct {
+		name  string
+		prefs map[string]string
+		off   bool
+	}{
+		{"no preferences", nil, false},
+		{"unreadable preferences", map[string]string{"Secure Preferences": "{"}, false},
+		{"default off", map[string]string{"Secure Preferences": setting("")}, true},
+		{"turned off", map[string]string{"Secure Preferences": setting(`,"newAllowFileAccess":false`)}, true},
+		{"turned on", map[string]string{"Secure Preferences": setting(`,"newAllowFileAccess":true`)}, false},
+		{"turned on in Preferences", map[string]string{"Secure Preferences": setting(""), "Preferences": setting(`,"newAllowFileAccess":true`)}, false},
+	} {
+		env := chromeHome(t, "0.6.0_0")
+		for name, body := range test.prefs {
+			writePrefs(env, name, body)
+		}
+		if got := extensionFileAccessOff(env, "Default"); got != test.off {
+			t.Errorf("%s: file access off = %v, want %v", test.name, got, test.off)
+		}
+	}
+
+	m := newConnectionManager(t)
+	m.env = chromeHome(t, "0.6.0_0")
+	writePrefs(m.env, "Secure Preferences", setting(""))
+	op := &operation{manager: m, label: "linger-test", userChrome: &browserConnection{Profile: "Default"}}
+	_, err := op.nativeBrowserCall(t.Context(), "browser_file_upload", json.RawMessage(`{"paths":["/tmp/report.txt"]}`))
+	if !errors.Is(err, errUserChromeFileAccess) {
+		t.Fatalf("an upload the extension cannot perform reached Chrome: %v", err)
+	}
+	if op.browser != nil {
+		t.Fatal("the refused upload started a Playwright session")
+	}
+	if uploadsFiles(json.RawMessage(`{}`)) || uploadsFiles(json.RawMessage(`{"paths":[]}`)) {
+		t.Fatal("cancelling the file chooser was treated as an upload")
+	}
+}
