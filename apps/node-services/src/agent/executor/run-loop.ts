@@ -19,12 +19,16 @@ import {
   runtimeSessionStartsFresh,
 } from "./provider.js";
 import type { ExecutionContextRef } from "./context-ref.js";
-import { ReplyDelivery } from "./reply-delivery.js";
+import {
+  extractDeliverableReplyText,
+  ReplyDelivery,
+} from "./reply-delivery.js";
 import type {
   ProfileUpdate,
   ContextRuntimeStatePort,
   LocalRunTerminal,
 } from "./context-runtime-state.js";
+import { TeamHubRuntimeStateError } from "./teamhub-runtime-state-client.js";
 import type {
   Message,
   NonEmptyReadonlyArray,
@@ -1367,10 +1371,24 @@ export class RunLoop {
     const statusDrainStartedAt = performance.now();
     await this.#settleRuntimeStatusEvents(execution);
     const runtimeStatusDrainMs = performance.now() - statusDrainStartedAt;
+    if (execution.upstreamCanceled) {
+      this.#finishRevokedExecution(execution);
+      return;
+    }
+    const fallbackFailure = await this.#deliverFallbackReplyIfNeeded(
+      execution,
+      finalResponse,
+      replyDelivery,
+    );
+    if (execution.upstreamCanceled) {
+      this.#finishRevokedExecution(execution);
+      return;
+    }
     const terminal = this.#completedTerminal(
       runId,
       finalResponse,
       replyDelivery,
+      fallbackFailure,
     );
     this.#logger.log("info", "local_run.finish_started", {
       runId,
@@ -1726,16 +1744,88 @@ export class RunLoop {
   }
 
   /**
-   * A Room Agent speaks only through TeamHub message writes, so a finished
-   * Provider turn is not a succeeded Run when the Room has nothing to show:
-   * the Agent tried to post and none landed, or a Human who mentioned it is
-   * waiting and it never tried. Its final text is private scratch and is not
-   * posted for it. Task Runs report through their final response and keep it.
+   * Surfaces non-empty final assistant text to the target Room or Thread when
+   * a Human mentioned the Agent and the Runtime completed without invoking the
+   * message command. Empty or pure-thinking output stays undelivered so
+   * `#completedTerminal` fails with `reply_not_sent`.
+   */
+  async #deliverFallbackReplyIfNeeded(
+    execution: LocalRunExecution,
+    finalResponse: string,
+    replyDelivery: ReplyDelivery,
+  ): Promise<"response_too_large" | undefined> {
+    if (
+      this.#executionContextRef?.kind !== "meta" ||
+      !replyDelivery.replyNotSent ||
+      !this.#state.deliverFallbackReply ||
+      execution.controller.signal.aborted
+    ) {
+      return undefined;
+    }
+    const fallbackText = extractDeliverableReplyText(finalResponse);
+    if (fallbackText === "") {
+      return undefined;
+    }
+    const deliver = this.#state.deliverFallbackReply.bind(this.#state);
+    try {
+      const result = await this.#commitDurably(() =>
+        deliver(
+          execution.runId,
+          fallbackText,
+          replyDelivery.targetInboxId,
+          this.#terminalRecoveryStop.signal,
+        ),
+      );
+      if (result.delivered) {
+        replyDelivery.markFallbackDelivered();
+        this.#logger.log("info", "local_run.reply_fallback_delivered", {
+          runId: execution.runId,
+          ...replyDelivery.counts(),
+          fallbackTextLength: fallbackText.length,
+          alreadySent: result.alreadySent,
+          ...(result.messageId ? { messageId: result.messageId } : {}),
+          ...(replyDelivery.targetInboxId
+            ? { inboxId: replyDelivery.targetInboxId }
+            : {}),
+        });
+      }
+      return undefined;
+    } catch (error) {
+      if (await this.#reconcileRevocation(execution, error)) {
+        return undefined;
+      }
+      this.#logger.log("warn", "local_run.reply_fallback_failed", {
+        runId: execution.runId,
+        ...replyDelivery.counts(),
+        fallbackTextLength: fallbackText.length,
+        ...(replyDelivery.targetInboxId
+          ? { inboxId: replyDelivery.targetInboxId }
+          : {}),
+        error,
+      });
+      if (
+        error instanceof TeamHubRuntimeStateError &&
+        error.code === "RESPONSE_TOO_LARGE"
+      ) {
+        return "response_too_large";
+      }
+      return undefined;
+    }
+  }
+
+  /**
+   * A Room Agent speaks through TeamHub message writes, or fallback Room
+   * delivery when a Human mentioned it and the Runtime produced deliverable
+   * final assistant text without invoking the message command. A finished
+   * Provider turn fails when every attempted write failed (`reply_undelivered`)
+   * or when a waiting Human still has no reply (`reply_not_sent` or
+   * `response_too_large`). Task Runs report through their final response.
    */
   #completedTerminal(
     runId: string,
     finalResponse: string,
     replyDelivery: ReplyDelivery,
+    fallbackFailure?: "response_too_large",
   ): LocalRunTerminal {
     const roomRun = this.#executionContextRef?.kind === "meta";
     const undelivered = roomRun && replyDelivery.replyUndelivered;
@@ -1752,6 +1842,13 @@ export class RunLoop {
         type: "failed",
         error: "Agent reply was not delivered to the Room",
         failure: runFailure("reply_undelivered", this.#runtimeType),
+      };
+    }
+    if (roomRun && fallbackFailure === "response_too_large") {
+      return {
+        type: "failed",
+        error: "Agent reply exceeded the maximum Room message length",
+        failure: runFailure("response_too_large", this.#runtimeType),
       };
     }
     if (roomRun && replyDelivery.replyNotSent) {

@@ -123,6 +123,10 @@ export interface TeamHubRuntimeStateClient {
     body: RuntimeStateSchemas["FinishAgentLocalRunRequest"],
     signal?: AbortSignal,
   ): Promise<RuntimeStateSchemas["FinishAgentLocalRunResult"]>;
+  deliverFallbackReply(
+    body: RuntimeStateSchemas["DeliverAgentLocalRunFallbackReplyRequest"],
+    signal?: AbortSignal,
+  ): Promise<RuntimeStateSchemas["DeliverAgentLocalRunFallbackReplyResult"]>;
   cancelRun(
     body: RuntimeStateSchemas["CancelAgentLocalRunRequest"],
     signal?: AbortSignal,
@@ -366,6 +370,11 @@ export const createTeamHubRuntimeStateClient = (
     finishRun: (body, signal) =>
       request<RuntimeStateSchemas["FinishAgentLocalRunResult"]>(
         raw.finishRun(body, signal),
+        signal,
+      ),
+    deliverFallbackReply: (body, signal) =>
+      request<RuntimeStateSchemas["DeliverAgentLocalRunFallbackReplyResult"]>(
+        raw.deliverFallbackReply(body, signal),
         signal,
       ),
     cancelRun: (body, signal) =>

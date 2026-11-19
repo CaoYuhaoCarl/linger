@@ -335,6 +335,7 @@ describe("RunLoop", () => {
       input: Message = message("introduce yourself"),
       finalResponse = "I could not deliver the reply: TeamHub returned 404.",
       steered?: Message,
+      setupState?: (state: ContextRuntimeState) => void,
     ) => {
       const harness = createHarness(
         undefined,
@@ -343,6 +344,7 @@ describe("RunLoop", () => {
         undefined,
         executionContextRef,
       );
+      setupState?.(harness.state);
       const run = new FakeRun(events);
       harness.provider.runs.push(run);
       const runId = enqueue(harness.state, input);
@@ -364,6 +366,7 @@ describe("RunLoop", () => {
         return {
           log: harness.log,
           run: harness.state.getLocalRun(runId),
+          fallbackReplies: [...harness.state.state.fallbackReplies],
         };
       } finally {
         await harness.execution.drain({ cancelActive: true });
@@ -444,11 +447,12 @@ describe("RunLoop", () => {
         readonly messageKind: string;
         readonly mentioned: boolean;
       },
+      inboxId = "room:room-1",
     ): Message =>
       ({
-        ...message(inputId, "room:room-1"),
+        ...message(inputId, inboxId),
         acceptedNotification: {
-          inboxId: "room:room-1",
+          inboxId,
           after: "0",
           through: "1",
           targeted: queued.mentioned,
@@ -463,19 +467,147 @@ describe("RunLoop", () => {
           ],
         },
       }) as Message;
-    const humanMention = (inputId: string) =>
-      inboxInput(inputId, {
-        authorType: "user",
-        messageKind: "conversation",
-        mentioned: true,
-      });
+    const humanMention = (inputId: string, inboxId = "room:room-1") =>
+      inboxInput(
+        inputId,
+        {
+          authorType: "user",
+          messageKind: "conversation",
+          mentioned: true,
+        },
+        inboxId,
+      );
 
-    it("fails a Room Run that posted nothing while the Human who mentioned the Agent waits", async () => {
-      const { log, run } = await finishRun(
+    it("delivers non-empty final assistant text via fallback when a Human mention got no message command", async () => {
+      const { log, run, fallbackReplies } = await finishRun(
         failedRead,
         undefined,
         humanMention("mention"),
+        "<think>internal reasoning</think>\n\nDoing well, you?",
+      );
+
+      expect(run).toMatchObject({
+        status: "succeeded",
+        terminal: { type: "succeeded" },
+      });
+      expect(fallbackReplies).toEqual([
+        expect.objectContaining({
+          runId: run?.runId,
+          inboxId: "room:room-1",
+          text: "Doing well, you?",
+        }),
+      ]);
+      expect(log).toHaveBeenCalledWith(
+        "info",
+        "local_run.reply_fallback_delivered",
+        expect.objectContaining({
+          runId: run?.runId,
+          deliveredMessageWrites: 0,
+          fallbackTextLength: "Doing well, you?".length,
+          alreadySent: false,
+          inboxId: "room:room-1",
+        }),
+      );
+      expect(log).not.toHaveBeenCalledWith(
+        "warn",
+        "local_run.reply_not_sent",
+        expect.anything(),
+      );
+    });
+
+    it("targets the waiting Thread Inbox for fallback delivery", async () => {
+      const { run, fallbackReplies } = await finishRun(
+        [],
+        undefined,
+        humanMention("thread-mention", "thread:thread-42"),
+        "Fixed the failing test.",
+      );
+
+      expect(run?.terminal).toMatchObject({ type: "succeeded" });
+      expect(fallbackReplies).toEqual([
+        expect.objectContaining({
+          runId: run?.runId,
+          inboxId: "thread:thread-42",
+          text: "Fixed the failing test.",
+        }),
+      ]);
+    });
+
+    it("succeeds without duplicate delivery when fallback reports the Run already sent a message", async () => {
+      const { log, run } = await finishRun(
+        [],
+        undefined,
+        humanMention("already-sent"),
+        "Final summary.",
+        undefined,
+        (state) => {
+          vi.spyOn(state, "deliverFallbackReply").mockReturnValue({
+            delivered: true,
+            alreadySent: true,
+            messageId: "message_existing",
+          });
+        },
+      );
+
+      expect(run?.terminal).toMatchObject({ type: "succeeded" });
+      expect(log).toHaveBeenCalledWith(
+        "info",
+        "local_run.reply_fallback_delivered",
+        expect.objectContaining({
+          runId: run?.runId,
+          alreadySent: true,
+          messageId: "message_existing",
+        }),
+      );
+    });
+
+    it.each([
+      ["empty output", ""],
+      ["whitespace only", "   \n\t  "],
+      ["pure thinking block", "<think>checking files</think>"],
+      ["unclosed thinking block", "<thinking>still working"],
+    ] as const)(
+      "fails a Room Run as reply_not_sent on %s without fallback delivery",
+      async (_label, finalResponse) => {
+        const { log, run, fallbackReplies } = await finishRun(
+          failedRead,
+          undefined,
+          humanMention("empty-mention"),
+          finalResponse,
+        );
+
+        expect(fallbackReplies).toEqual([]);
+        expect(run).toMatchObject({
+          status: "failed",
+          terminal: {
+            type: "failed",
+            failure: { code: "reply_not_sent", runtime_type: "pi" },
+          },
+        });
+        expect(log).toHaveBeenCalledWith(
+          "warn",
+          "local_run.reply_not_sent",
+          expect.objectContaining({
+            runId: run?.runId,
+            deliveredMessageWrites: 0,
+            finalResponseLength: finalResponse.length,
+          }),
+        );
+      },
+    );
+
+    it("falls back to reply_not_sent when fallback delivery fails", async () => {
+      const { log, run } = await finishRun(
+        [],
+        undefined,
+        humanMention("fallback-error"),
         "Doing well, you?",
+        undefined,
+        (state) => {
+          vi.spyOn(state, "deliverFallbackReply").mockRejectedValue(
+            new TeamHubRuntimeStateError(404, "Not found", "NOT_FOUND", false),
+          );
+        },
       );
 
       expect(run).toMatchObject({
@@ -488,17 +620,93 @@ describe("RunLoop", () => {
       expect(JSON.stringify(run?.terminal)).not.toContain("Doing well");
       expect(log).toHaveBeenCalledWith(
         "warn",
+        "local_run.reply_fallback_failed",
+        expect.objectContaining({
+          runId: run?.runId,
+          fallbackTextLength: "Doing well, you?".length,
+        }),
+      );
+      expect(log).toHaveBeenCalledWith(
+        "warn",
         "local_run.reply_not_sent",
         expect.objectContaining({
           runId: run?.runId,
           deliveredMessageWrites: 0,
-          finalResponseLength: "Doing well, you?".length,
         }),
       );
     });
 
-    it("fails a Room Run that posted nothing after a Human mention was steered into it", async () => {
+    it("fails as response_too_large when fallback delivery rejects an oversized reply", async () => {
       const { run } = await finishRun(
+        [],
+        undefined,
+        humanMention("fallback-too-large"),
+        "oversized answer",
+        undefined,
+        (state) => {
+          vi.spyOn(state, "deliverFallbackReply").mockRejectedValue(
+            new TeamHubRuntimeStateError(
+              400,
+              "Too large",
+              "RESPONSE_TOO_LARGE",
+              false,
+            ),
+          );
+        },
+      );
+
+      expect(run).toMatchObject({
+        status: "failed",
+        terminal: {
+          type: "failed",
+          failure: { code: "response_too_large", runtime_type: "pi" },
+        },
+      });
+    });
+
+    it("does not mask reply_undelivered with fallback delivery when a message write failed", async () => {
+      const { run, fallbackReplies } = await finishRun(
+        messageWrite("send-1", "failed"),
+        undefined,
+        humanMention("failed-send"),
+        "Final text after failed send",
+      );
+
+      expect(fallbackReplies).toEqual([]);
+      expect(run).toMatchObject({
+        status: "failed",
+        terminal: {
+          type: "failed",
+          failure: { code: "reply_undelivered", runtime_type: "pi" },
+        },
+      });
+    });
+
+    it("delivers fallback text when a Human mention was steered into the Run", async () => {
+      const { run, fallbackReplies } = await finishRun(
+        [],
+        undefined,
+        inboxInput("room-talk", {
+          authorType: "user",
+          messageKind: "conversation",
+          mentioned: false,
+        }),
+        "Steered answer ready.",
+        humanMention("steered-mention", "thread:thread-9"),
+      );
+
+      expect(run?.terminal).toMatchObject({ type: "succeeded" });
+      expect(fallbackReplies).toEqual([
+        expect.objectContaining({
+          runId: run?.runId,
+          inboxId: "thread:thread-9",
+          text: "Steered answer ready.",
+        }),
+      ]);
+    });
+
+    it("fails a Room Run that posted nothing after a Human mention was steered into it", async () => {
+      const { run, fallbackReplies } = await finishRun(
         [],
         undefined,
         inboxInput("room-talk", {
@@ -510,20 +718,22 @@ describe("RunLoop", () => {
         humanMention("steered-mention"),
       );
 
+      expect(fallbackReplies).toEqual([]);
       expect(run?.terminal).toMatchObject({
         type: "failed",
         failure: { code: "reply_not_sent" },
       });
     });
 
-    it("keeps a Room Run succeeded when it answered a Human mention with a message", async () => {
-      const { run } = await finishRun(
+    it("keeps a Room Run succeeded without fallback when it answered a Human mention with a message", async () => {
+      const { run, fallbackReplies } = await finishRun(
         messageWrite("send-1", "succeeded"),
         undefined,
         humanMention("mention"),
-        "",
+        "Private scratch.",
       );
 
+      expect(fallbackReplies).toEqual([]);
       expect(run?.terminal).toMatchObject({ type: "succeeded" });
     });
 
@@ -541,15 +751,16 @@ describe("RunLoop", () => {
         { authorType: "agent", messageKind: "conversation", mentioned: true },
       ],
     ] as const)(
-      "keeps a Room Run that stayed silent on %s succeeded",
+      "keeps a Room Run that stayed silent on %s succeeded without fallback delivery",
       async (_label, queued) => {
-        const { run } = await finishRun(
+        const { run, fallbackReplies } = await finishRun(
           [],
           undefined,
           inboxInput("wake", queued),
           "Nothing to add.",
         );
 
+        expect(fallbackReplies).toEqual([]);
         expect(run?.terminal).toMatchObject({ type: "succeeded" });
       },
     );
