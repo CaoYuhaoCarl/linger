@@ -19,6 +19,7 @@ import {
   statfs,
   writeFile,
 } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { createInterface } from "node:readline";
@@ -78,6 +79,8 @@ import {
 import type {
   SetupByokCheck,
   SetupByokConfig,
+  SetupLocalAccount,
+  SetupLocalServer,
   SetupReason,
 } from "../shared/setup.js";
 
@@ -286,6 +289,41 @@ export interface LocalServerStatus {
   // Where this installation moved the data of the earlier Simplex app,
   // which it could not upgrade.
   readonly legacyBackup?: string;
+}
+
+// Projects LocalServerStatus for the setup page, replacing the user's home
+// prefix with ~ and forwarding runtime sign-in and BYOK check state.
+export function setupLocalServerState(
+  status: LocalServerStatus,
+  account: SetupLocalAccount | undefined,
+  homeDir = os.homedir(),
+): SetupLocalServer {
+  const shown = (folder: string) =>
+    folder === homeDir || folder.startsWith(homeDir + path.sep)
+      ? "~" + folder.slice(homeDir.length)
+      : folder;
+  return {
+    available: status.available,
+    phase: status.phase,
+    message: status.message,
+    steps: status.steps,
+    step: status.step,
+    progress: status.progress,
+    ...(status.transfer ? { transfer: status.transfer } : {}),
+    attempt: status.attempt,
+    localModels: status.localModels,
+    location: {
+      ...status.location,
+      path: shown(status.location.path),
+    },
+    keys: status.keys,
+    ...(status.signIn ? { signIn: status.signIn } : {}),
+    ...(status.byokCheck ? { byokCheck: status.byokCheck } : {}),
+    ...(status.legacyBackup
+      ? { legacyBackup: shown(status.legacyBackup) }
+      : {}),
+    ...(account ? { account } : {}),
+  };
 }
 
 export interface LocalServerOptions {

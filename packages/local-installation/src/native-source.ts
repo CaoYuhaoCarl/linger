@@ -45,7 +45,11 @@ import {
   managedRuntimeEnvironment,
 } from "./managed-codex.js";
 import { prepareRuntime, runtimeVersionFailure } from "./managed-runtimes.js";
-import { applyNativeSource, prepareByokRuntime } from "./byok-source.js";
+import {
+  applyNativeSource,
+  prepareByokRuntime,
+  readByokEnvironment,
+} from "./byok-source.js";
 import {
   readSetupChoice,
   writeGpuSharing,
@@ -525,7 +529,11 @@ async function runNativeSource(
               onEvent: emit,
               env: await managedRuntimeEnvironment(home, current.root),
             });
+            // Only an explicit subscription install writes the subscription
+            // source; a resume reads the saved runtime and keeps a BYOK or
+            // Models-page source intact.
             if (
+              options.setupChoice === choice &&
               choice !== "pi" &&
               (runtimeOutcome.code === 0 ||
                 (runtimeOutcome.details as { code?: string } | undefined)
@@ -866,11 +874,16 @@ async function runNativeSource(
           onEvent: emit,
           shareGpu: options.shareGpu,
         });
-        // Binds the local stack's gateway for local models; with a runtime's own
-        // sign-in, retires one an earlier release started.
+        // Binds the local stack's gateway for local models or BYOK; with a
+        // runtime's own sign-in, retires one an earlier release started.
+        const savedSource =
+          !options.byok && choice !== "local-models"
+            ? await readByokEnvironment(home)
+            : undefined;
         await prepareModelGateway(
           current,
-          options.byok && choice !== "local-models"
+          (options.byok || savedSource?.mode === "byok") &&
+            choice !== "local-models"
             ? { runtime: choice, modelSource: "byok" }
             : choice,
           {

@@ -51,7 +51,7 @@ import {
   TEAMHUB_COMMANDS,
 } from "./teamhub-binaries.js";
 import { prepareRuntime } from "./managed-runtimes.js";
-import { applyNativeSource } from "./byok-source.js";
+import { applyNativeSource, prepareByokRuntime } from "./byok-source.js";
 import { prepareLocalModels } from "./local-models.js";
 import {
   inspectNativeListeners,
@@ -83,6 +83,11 @@ vi.mock("./native-livekit.js", async (original) => ({
 vi.mock("./byok-source.js", async (original) => ({
   ...(await original<typeof import("./byok-source.js")>()),
   applyNativeSource: vi.fn(async () => undefined),
+  prepareByokRuntime: vi.fn(async () => ({
+    code: 0,
+    state: "ready",
+    message: "BYOK gateway and runtime profiles are ready.",
+  })),
 }));
 // Deploying local models runs the localmodels tool too.
 vi.mock("./local-models.js", async (original) => ({
@@ -319,6 +324,70 @@ test("a restart of local models keeps the model source the person switched to", 
   expect(result.code).toBe(0);
   expect(vi.mocked(prepareLocalModels).mock.calls).toHaveLength(2);
   expect(applyNativeSource).not.toHaveBeenCalled();
+});
+
+test("a BYOK install skips local models and a restart keeps its BYOK source", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const first = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-byok",
+    setupChoice: "codex",
+    byok: {
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-demo-key",
+      modelId: "gpt-5.4",
+      runtime: "codex",
+    },
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(first.code).toBe(0);
+  expect(prepareByokRuntime).toHaveBeenCalled();
+  expect(prepareLocalModels).not.toHaveBeenCalled();
+  expect(prepareModelGateway).toHaveBeenCalledWith(
+    expect.anything(),
+    { runtime: "codex", modelSource: "byok" },
+    expect.anything(),
+  );
+  // Persist the BYOK model-source.json that localmodels source apply writes.
+  const stateDir = path.join(f.home, "runtime", "localmodels", "state");
+  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+  await writeFile(
+    path.join(stateDir, "model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "byok",
+      runtime: "codex",
+      runtime_model: "localmodels-byok",
+      model_label: "gpt-5.4",
+      gateway_url: "http://127.0.0.1:8089",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(prepareModelGateway).mockClear();
+  const resumed = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-byok",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(resumed.code).toBe(0);
+  expect(prepareLocalModels).not.toHaveBeenCalled();
+  expect(applyNativeSource).not.toHaveBeenCalled();
+  expect(prepareModelGateway).toHaveBeenCalledWith(
+    expect.anything(),
+    { runtime: "codex", modelSource: "byok" },
+    expect.anything(),
+  );
 });
 
 test("only TeamHub's process gets the server identity key", async () => {

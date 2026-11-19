@@ -130,9 +130,10 @@ the `LINGER_LOCALMODELS_*` keys of the installer's instance runtime.
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the
 stack is, and a subscription after its Runtime installs, signed in or not.
-The local source is set only by a start whose request chose local models
-(`setupChoice` or a plan approval); a restart from the saved choice keeps a
-source the person switched to on the Models page.
+The local or subscription source is set only by a start whose request
+explicitly chose it (`setupChoice` or a plan approval); a restart from the
+saved choice keeps a BYOK or switched source intact, including its model
+gateway binding.
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. `restoreLocalModels` (`local-models.ts`) brings back a
 local-models setup's stack while its services keep running, such as after

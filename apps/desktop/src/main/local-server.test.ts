@@ -38,6 +38,7 @@ import {
   parseSetCookie,
   LocalServerUnverifiedError,
   proveLocalServer,
+  setupLocalServerState,
   SignInRejectedError,
   signInFailure,
   signInWithPassword,
@@ -4134,5 +4135,44 @@ describe("InstallerApi polling", () => {
       (await open(fake.fetcher)).run(plan, controller.signal, () => {}),
     ).rejects.toThrow();
     expect(fake.reads()).toBe(1);
+  });
+});
+
+describe("setupLocalServerState", () => {
+  it("forwards BYOK check results and shortens home paths for the setup page", () => {
+    const view = setupLocalServerState(
+      {
+        available: true,
+        phase: "idle",
+        message: "",
+        steps: ["prepare", "services", "workspace", "connect", "agents"],
+        step: "prepare",
+        progress: 0,
+        attempt: 0,
+        localModels: { state: "unavailable" },
+        location: { path: "/home/alice/.simplexai", custom: false },
+        keys: { composio: false },
+        byokCheck: {
+          state: "ready",
+          protocol: "openai-responses",
+          modelId: "gpt-5.4",
+          contextWindow: 200_000,
+        },
+        legacyBackup:
+          "/home/alice/.simplexai/instances/desktop/simplex-backup-1",
+      },
+      undefined,
+      "/home/alice",
+    );
+    expect(view.location.path).toBe("~/.simplexai");
+    expect(view.legacyBackup).toBe(
+      "~/.simplexai/instances/desktop/simplex-backup-1",
+    );
+    expect(view.byokCheck).toEqual({
+      state: "ready",
+      protocol: "openai-responses",
+      modelId: "gpt-5.4",
+      contextWindow: 200_000,
+    });
   });
 });

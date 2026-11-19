@@ -141,16 +141,19 @@ Gateway and runs Agents. The daemon exits with the app.
   `local-models` is the planned model served by Pi, shown with the model,
   GPU, memory and download (the card's memory is the whole stack's, so
   "with its services"); otherwise the named runtime, with why there is no
-  local model. The page words each reason by its code and the counts it
-  carries (`gpuIndex`, `freeBytes`, `requiredBytes`); the tool's message
-  goes only to the main process log (`local_server.inspected`), never to
-  the page. Under Customize the Local model card stays visible once the
-  check ends: disabled, "Not available on this computer", with that reason.
-  Off macOS the page names the system tray, not the menu bar.
-  Under Customize the local model runs only behind Pi: with another runtime
-  it is greyed (`aria-disabled`, still focusable), does not toggle, and says
-  "Local models are only available with the Pi runtime."; choosing another
-  runtime clears it, and choosing Pi offers it again.
+  local model. The welcome screen shows the three model sources directly
+  (Local model, BYOK, and Subscription), so a first-time user can skip local
+  model download and enter a BYOK endpoint, key, model ID and runtime without
+  opening More options or waiting for the local-model hardware check to finish;
+  More options holds only install location and optional app integrations.
+  `setupLocalServerState` forwards `byokCheck` to the setup page so BYOK
+  endpoint checks render their live result. The page words each reason by its
+  code and the counts it carries (`gpuIndex`, `freeBytes`, `requiredBytes`);
+  the tool's message goes only to the main process log
+  (`local_server.inspected`), never to the page. When no local model fits, the
+  Local model card stays visible once the check ends: disabled, "Not available
+  on this computer", with that reason. Off macOS the page names the system
+  tray, not the menu bar.
   When the tool reports local models blocked now (`stack.state:
 "blocked-now"`: the model fits the hardware, but other programs hold the
   memory it needs now; a tool before that field marks it by `basis:
