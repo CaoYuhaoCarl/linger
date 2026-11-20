@@ -76,6 +76,8 @@ export const nativeServices = [
   "livekit",
   "postgres",
 ] as const;
+/** Marks a native service whose stop failed without a more specific code. */
+export const NATIVE_SERVICE_STOP_FAILED = "NATIVE_SERVICE_STOP_FAILED";
 function requireNative(instance: Instance) {
   if (instance.mode !== "source-native" || !instance.source)
     throw new Error("This operation requires a native source instance.");
@@ -353,33 +355,21 @@ const STAGE_ACTIVITY: Record<InstallStage, string> = {
 // outcome and log; a stage that runs again adds to its time.
 function stageTimer(now = () => Date.now()) {
   const timings: Partial<Record<InstallStage, number>> = {};
-  let current: InstallStage | undefined = "preflight";
+  let current: InstallStage = "preflight";
   let since = now();
   const close = () => {
-    if (!current) return;
     const at = now();
     timings[current] = (timings[current] ?? 0) + (at - since) / 1000;
     since = at;
   };
   return {
-    now,
     enter(stage: InstallStage) {
       if (stage === current) return;
       close();
       current = stage;
-      since = now();
-    },
-    leave() {
-      close();
-      current = undefined;
-    },
-    record(stage: InstallStage, durationMs: number) {
-      if (!Number.isFinite(durationMs) || durationMs < 0) return;
-      timings[stage] = (timings[stage] ?? 0) + durationMs / 1000;
     },
     finish() {
       close();
-      current = undefined;
       return Object.fromEntries(
         Object.entries(timings).map(([stage, seconds]) => [
           stage,
@@ -399,9 +389,6 @@ export async function installNativeSource(
   const timings = timer.finish();
   options.onEvent({
     kind: "log",
-    stage:
-      (outcome.details as { stage?: InstallStage } | undefined)?.stage ??
-      "preflight",
     message: `Native install timings (s): ${Object.entries(timings)
       .map(([stage, seconds]) => `${stage} ${seconds}`)
       .join(", ")}\n`,
@@ -497,7 +484,7 @@ async function runNativeSource(
       let runtimeOutcome: InstallOutcome | undefined;
       let runtimeError: unknown;
       let runtimeAborted = false;
-      const runtimeStartedAt = timer.now();
+      let runtimePending = true;
       const runtime = (async () => {
         try {
           if (options.byok) {
@@ -579,7 +566,7 @@ async function runNativeSource(
             controller.abort();
           }
         } finally {
-          timer.record("runtime", timer.now() - runtimeStartedAt);
+          runtimePending = false;
         }
       })();
       try {
@@ -929,14 +916,20 @@ async function runNativeSource(
             stage,
             message: `The data from the earlier Simplex app can't be upgraded to Linger, so Linger starts with a fresh workspace. The earlier data was moved, not deleted, to ${legacyBackup}.\n`,
           });
-        const startAndAwaitServices = async () => {
+        // Emits the services stage and captures the log ends that
+        // waitHealthy reads, before any service starts.
+        const beginServices = () => {
           emit({
             kind: "stage",
             stage: "services",
             state: "running",
             message: "Starting native collaboration services…",
           });
-          const ends = await logEnds(current);
+          return logEnds(current);
+        };
+        // Bind LiveKit's saved port before the model controller asks the OS
+        // for its own port; an unbound port can be assigned to either service.
+        const bindLiveKit = async () => {
           const liveKit = voice && (await readLiveKitSettings(current.root));
           if (voice && liveKit) {
             if (!(await inspectNativeProcess(current.root, "livekit")).running)
@@ -951,6 +944,10 @@ async function runNativeSource(
             (await inspectNativeProcess(current.root, "livekit")).running
           )
             await stopNativeProcess(current.root, "livekit");
+        };
+        const startAndAwaitServices = async (
+          ends: Awaited<ReturnType<typeof logEnds>>,
+        ) => {
           const serviceOptions = (
             name: "teamhub" | "node-services" | "web",
           ) => ({
@@ -1100,7 +1097,13 @@ async function runNativeSource(
           });
         let checks: { service: string; ready: boolean }[];
         if (overlapWithRuntime) {
-          timer.leave();
+          // LiveKit binds before the fork so the runtime branch's foundation
+          // services can never take its port.
+          const ends = await beginServices();
+          await bindLiveKit();
+          // Each second counts once, toward the critical path: services and
+          // account while branch2 runs, then runtime only for the wait beyond.
+          timer.enter("services");
           let firstFailure: { error: unknown; stage: InstallStage } | undefined;
           const failBranch = (
             error: unknown,
@@ -1120,12 +1123,10 @@ async function runNativeSource(
           const branch2 = (async () => {
             let branchStage: InstallStage = "services";
             try {
-              const servicesStartedAt = timer.now();
               await migrate(branchStage);
-              const probed = await startAndAwaitServices();
-              timer.record("services", timer.now() - servicesStartedAt);
-              const accountStartedAt = timer.now();
+              const probed = await startAndAwaitServices(ends);
               branchStage = "account";
+              timer.enter("account");
               emit({
                 kind: "stage",
                 stage: branchStage,
@@ -1133,16 +1134,19 @@ async function runNativeSource(
                 message: "Preparing local account and workspace…",
               });
               await provisionAccount();
-              timer.record("account", timer.now() - accountStartedAt);
               return probed;
             } catch (error) {
               return failBranch(error, branchStage);
             }
           })();
-          const [result1, result2] = await Promise.allSettled([
-            branch1,
-            branch2,
-          ]);
+          let branch1Pending = true;
+          const settled1 = Promise.allSettled([branch1]).then(([result]) => {
+            branch1Pending = false;
+            return result;
+          });
+          const [result2] = await Promise.allSettled([branch2]);
+          if (branch1Pending) timer.enter("runtime");
+          const result1 = await settled1;
           if (result1.status === "rejected" || result2.status === "rejected") {
             stage = runtimeAborted
               ? "runtime"
@@ -1162,9 +1166,16 @@ async function runNativeSource(
           // The runtime is ready before the checkout's migrations run: when it is
           // not, services still running from an earlier checkout keep the
           // schema they know.
-          await prepareRuntimeSide(undefined, () => migrate());
-          timer.enter("services");
-          checks = await startAndAwaitServices();
+          let ends: Awaited<ReturnType<typeof logEnds>> | undefined;
+          // Count only the runtime wait beyond the parallel work.
+          if (runtimePending) timer.enter("runtime");
+          await prepareRuntimeSide(undefined, async () => {
+            timer.enter("services");
+            await migrate();
+            ends = await beginServices();
+            await bindLiveKit();
+          });
+          checks = await startAndAwaitServices(ends!);
           await servicesSucceeded();
           step("account", "Preparing local account and workspace…");
           await provisionAccount();
@@ -1300,6 +1311,7 @@ async function runNativeSource(
         }
         options.signal.throwIfAborted();
         if (runtimeFailedFirst) {
+          stage = "runtime";
           // eslint-disable-next-line @typescript-eslint/only-throw-error -- rethrows the first failure unchanged
           if (runtimeError) throw runtimeError;
           if (
@@ -1307,8 +1319,24 @@ async function runNativeSource(
             runtimeOutcome.code !== 0 &&
             (runtimeOutcome.details as { code?: string } | undefined)?.code !==
               "RUNTIME_AUTH_REQUIRED"
-          )
-            return runtimeOutcome;
+          ) {
+            const message = safe(runtimeOutcome.message);
+            if (
+              runtimeOutcome.state === "failed" ||
+              runtimeOutcome.state === "prerequisite_unavailable"
+            )
+              emit({ kind: "stage", stage, state: "failed", message });
+            return {
+              ...runtimeOutcome,
+              message,
+              details: {
+                ...(typeof runtimeOutcome.details === "object"
+                  ? runtimeOutcome.details
+                  : {}),
+                stage,
+              },
+            };
+          }
         }
         throw error;
       } finally {
@@ -1390,7 +1418,18 @@ export async function stopNativeSource(
     await stopComputer(instance, { signal });
     for (const name of nativeServices) {
       signal?.throwIfAborted();
-      await stopNativeProcess(instance.root, name);
+      try {
+        await stopNativeProcess(instance.root, name);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException | null)?.code;
+        throw Object.assign(
+          new Error(
+            error instanceof Error ? error.message : `Could not stop ${name}.`,
+            { cause: error },
+          ),
+          { code: code ?? NATIVE_SERVICE_STOP_FAILED, nativeService: name },
+        );
+      }
     }
     await reclaimEarlierProcesses(
       instance,

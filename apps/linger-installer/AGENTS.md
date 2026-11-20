@@ -59,6 +59,9 @@ whose Computer still uses the local model source (`model-source.json` says
 (`restoreLocalModels`), since a quit stops the models but not the services: a
 stack that is not ready gets the same restore, then becomes the model source
 again. A source switched to a subscription or BYOK leaves the stack stopped.
+A failed installation records the stage that caused it, even when native
+checkout preparation and runtime setup ran in parallel. A BYOK mount failure
+belongs to runtime and keeps the redacted provider error in the job.
 A failed job's `errorCode` is the runtime's cause when it
 has one (`RUNTIME_PLAN_REFUSED`, a harness plan refused before anything
 changed, such as an unusable `SIMPLEX_PI_PATH` or a Windows runtime root too
@@ -83,7 +86,13 @@ loaded models and stops the stack with the gateway the localmodels tool
 started, and keeps the services and the model controller running. It
 holds each home's local model lock (`withLocalModelsLock`) while it stops,
 so the next launch's restore waits for it; a home whose lock a deployment
-holds is skipped with a log line. It prints one JSON line with what failed.
+holds is skipped with a log line. A kit that is present but fails verification
+is a stop failure, so the helper logs the repair guidance, prints a JSON
+failure and exits nonzero without running or downloading that tool. This
+helper is detached: Linger quits and its log records that the models may
+still be running. The full `--stop` command reports the same failure. Windows
+uninstall aborts on that failure; replacement setup reports it and proceeds.
+A missing pinned kit has nothing to stop.
 
 Every other mode first converts an install from before the rename to Linger
 (`migrateLegacyInstallation`); `--migrate` does only that and exits, for the

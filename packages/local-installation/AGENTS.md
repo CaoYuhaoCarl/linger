@@ -162,11 +162,19 @@ supervisor whose job file is in this instance's process directory under a
 lease no serving record holds, and a process on one of this instance's
 ports whose command line runs from this installation's folders but belongs
 to no recorded service, with its wrappers up to its supervisor. Never by a
-program name alone, and never the installer or what started it. Readiness on
-Windows also needs each port's listener inside that service's tree: an
+program name alone, and never the installer or what started it. If the
+recorded PID and creation time still exist but the command line is missing,
+stop checks a fresh process listing: CIM can report that incomplete row once
+for an exiting process. If the same process remains without a matching lease,
+stop fails without signalling it and keeps the record. A start cannot replace
+it, and a PID reused by another process does not prevent discarding a stale
+record. Readiness on Windows also needs each
+port's listener inside that service's tree: an
 earlier release's TeamHub or web still on the port would otherwise pass the
 health check for a service that could not bind, and a port held by another
-program fails the start after 15 seconds instead of at the deadline.
+program fails the start after 15 seconds instead of at the deadline. The
+listener lookup streams IPv4 TCP rows from the Windows system netstat in
+parallel with the process listing; process-only inspections need no port lookup.
 
 On POSIX, a start that finds the recorded supervisor gone but processes
 still carrying its lease (the app was killed with it) ends them as a stop
@@ -219,6 +227,12 @@ new files for a moment, and a plain rename then fails with EPERM.
 Cancellation is checked before every rename attempt, including after a
 retry wait, so a cancelled installation cannot publish the waiting file.
 
+Verified Windows kit files carry the read-only attribute before publication or
+reuse so Python children cannot replace their checked bytecode. The separate
+model data and tool state remain writable. Setup can replace a damaged kit
+from its pinned archive; quit and uninstall do not download or execute a kit
+that fails verification.
+
 Setting `LINGER_LOCALMODELS_DEV_PYTHON` and `LINGER_LOCALMODELS_DEV_MODULE_DIR`
 to absolute paths runs a local `localmodels` checkout instead of fetching the
 published kit, and `LOCALMODELS_DEBUG` (`simulate` or `tiny`, or
@@ -226,10 +240,14 @@ published kit, and `LOCALMODELS_DEBUG` (`simulate` or `tiny`, or
 
 `installNativeSource` records wall-clock stage seconds (`timings`) in the job's
 `details` and logs `Native install timings (s): ...` in the installer event log
-without adding contract fields. Because `runtime` overlaps `release`, `images`,
-and (on fresh installs and same-checkout stopped cold resumes) `migrate`,
-`services`, and `account` while running concurrently, stage durations may sum to
-more than the total job duration. On fresh installs (`!switchingCheckout`, no
+without adding contract fields. Each wall-clock second counts toward exactly one
+stage on the critical path, so stage durations sum to the total job duration:
+`runtime` runs alongside `release`, `images`, and (on overlapped installs)
+`migrate`, `services`, and `account`, and counts only the wait beyond that
+parallel work, appearing only when the runtime finishes last. LiveKit binds its
+saved port before `prepareFoundationServices` on both paths (before the fork
+when overlapped), because the model controller asks the OS for a free port. On
+fresh installs (`!switchingCheckout`, no
 provisioned account unless a legacy backup was set aside, and no running
 services) and cold resumes (`resume: true`, `!switchingCheckout`, and no running
 services), `migrate`, `services`, and `account` run concurrently with `runtime`,
