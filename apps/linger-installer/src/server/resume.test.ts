@@ -42,9 +42,36 @@ test("starts the saved instance again without new input", async () => {
       home: "/home",
       repo: "/source",
       externalComputer: true,
+      resume: true,
     }),
   );
   expect(run.mock.calls[0]![0]).not.toHaveProperty("password");
+});
+
+test("forwards runtime descriptors reported during resume", async () => {
+  const onRuntimeDescriptors = vi.fn();
+  const descriptor = {
+    runtime: "pi" as const,
+    executable: "/mock/pi",
+    argvPrefix: [],
+    installed: true,
+    authenticated: true,
+    authMode: "api_key",
+    loginCommand: null,
+  };
+  const run = vi.fn<typeof installNativeSource>(async (opts) => {
+    opts.onRuntimeDescriptors?.([descriptor]);
+    return { code: 0, state: "ready", message: "ok" };
+  });
+  const outcome = await resumeSourceInstance(
+    { ...options, onRuntimeDescriptors },
+    {
+      load: async () => instance,
+      engines: native(run, false),
+    },
+  );
+  expect(outcome.code).toBe(0);
+  expect(onRuntimeDescriptors).toHaveBeenCalledWith([descriptor]);
 });
 
 test("leaves running services alone", async () => {
