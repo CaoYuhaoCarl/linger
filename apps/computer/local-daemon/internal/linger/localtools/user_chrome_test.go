@@ -811,19 +811,11 @@ func TestLiveCallStopsWaitingWithItsCaller(t *testing.T) {
 	}
 }
 
-func TestFileUploadReportsExtensionWithoutFileAccess(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
-		t.Skip("the everyday Chrome is connected on macOS and Windows")
-	}
-	writePrefs := func(env []string, name, body string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(chromeUserDataDirectory(env), "Default", name), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	setting := func(value string) string {
-		return `{"extensions":{"settings":{"` + playwrightExtensionID + `":{"location":1` + value + `}}}}`
-	}
+func fileAccessPrefs(value string) string {
+	return `{"extensions":{"settings":{"` + playwrightExtensionID + `":{"location":1` + value + `}}}}`
+}
+
+func TestExtensionFileAccessPreference(t *testing.T) {
 	for _, test := range []struct {
 		name  string
 		prefs map[string]string
@@ -831,23 +823,36 @@ func TestFileUploadReportsExtensionWithoutFileAccess(t *testing.T) {
 	}{
 		{"no preferences", nil, false},
 		{"unreadable preferences", map[string]string{"Secure Preferences": "{"}, false},
-		{"default off", map[string]string{"Secure Preferences": setting("")}, true},
-		{"turned off", map[string]string{"Secure Preferences": setting(`,"newAllowFileAccess":false`)}, true},
-		{"turned on", map[string]string{"Secure Preferences": setting(`,"newAllowFileAccess":true`)}, false},
-		{"turned on in Preferences", map[string]string{"Secure Preferences": setting(""), "Preferences": setting(`,"newAllowFileAccess":true`)}, false},
+		{"default off", map[string]string{"Secure Preferences": fileAccessPrefs("")}, true},
+		{"turned off", map[string]string{"Secure Preferences": fileAccessPrefs(`,"newAllowFileAccess":false`)}, true},
+		{"turned on", map[string]string{"Secure Preferences": fileAccessPrefs(`,"newAllowFileAccess":true`)}, false},
+		{"turned on in Preferences", map[string]string{"Secure Preferences": fileAccessPrefs(""), "Preferences": fileAccessPrefs(`,"newAllowFileAccess":true`)}, false},
 	} {
-		env := chromeHome(t, "0.6.0_0")
+		profile := t.TempDir()
 		for name, body := range test.prefs {
-			writePrefs(env, name, body)
+			if err := os.WriteFile(filepath.Join(profile, name), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if got := extensionFileAccessOff(env, "Default"); got != test.off {
+		if got := extensionFileAccessOff(profile); got != test.off {
 			t.Errorf("%s: file access off = %v, want %v", test.name, got, test.off)
 		}
 	}
+	if uploadsFiles(json.RawMessage(`{}`)) || uploadsFiles(json.RawMessage(`{"paths":[]}`)) || !uploadsFiles(json.RawMessage(`{"paths":["/tmp/a.txt"]}`)) {
+		t.Fatal("only a call with paths counts as an upload; one without cancels the file chooser")
+	}
+}
 
+func TestFileUploadReportsExtensionWithoutFileAccess(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Skip("the everyday Chrome is connected on macOS and Windows")
+	}
 	m := newConnectionManager(t)
 	m.env = chromeHome(t, "0.6.0_0")
-	writePrefs(m.env, "Secure Preferences", setting(""))
+	prefs := filepath.Join(chromeUserDataDirectory(m.env), "Default", "Secure Preferences")
+	if err := os.WriteFile(prefs, []byte(fileAccessPrefs("")), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	op := &operation{manager: m, label: "linger-test", userChrome: &browserConnection{Profile: "Default"}}
 	_, err := op.nativeBrowserCall(t.Context(), "browser_file_upload", json.RawMessage(`{"paths":["/tmp/report.txt"]}`))
 	if !errors.Is(err, errUserChromeFileAccess) {
@@ -855,8 +860,5 @@ func TestFileUploadReportsExtensionWithoutFileAccess(t *testing.T) {
 	}
 	if op.browser != nil {
 		t.Fatal("the refused upload started a Playwright session")
-	}
-	if uploadsFiles(json.RawMessage(`{}`)) || uploadsFiles(json.RawMessage(`{"paths":[]}`)) {
-		t.Fatal("cancelling the file chooser was treated as an upload")
 	}
 }

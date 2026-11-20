@@ -143,19 +143,16 @@ func versionAtLeast(version string, minimum [3]int) bool {
 	return true
 }
 
-// extensionFileAccessOff reports whether the profile's preferences show the
-// Playwright Extension without file access. Chrome rejects the extension's
-// DOM.setFileInputFiles without it, and only the user can turn it on. Chrome
-// keeps the switch, off by default, in Secure Preferences or Preferences.
-// Unreadable preferences report false so that Chrome decides.
-func extensionFileAccessOff(env []string, profile string) bool {
-	data := chromeUserDataDirectory(env)
-	if data == "" {
-		return false
-	}
+// extensionFileAccessOff reports whether the preferences in the Chrome
+// profile directory show the Playwright Extension without file access. Chrome
+// rejects the extension's DOM.setFileInputFiles without it, and only the user
+// can turn it on. Chrome keeps the switch, off by default, in Secure
+// Preferences or Preferences. Unreadable preferences report false so that
+// Chrome decides.
+func extensionFileAccessOff(profileDirectory string) bool {
 	read := false
 	for _, name := range []string{"Secure Preferences", "Preferences"} {
-		encoded, err := os.ReadFile(filepath.Join(data, profile, name))
+		encoded, err := os.ReadFile(filepath.Join(profileDirectory, name))
 		if err != nil {
 			continue
 		}

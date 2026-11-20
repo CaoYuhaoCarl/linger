@@ -157,7 +157,7 @@ func (op *operation) nativeBrowserCall(ctx context.Context, name string, args js
 // which later tasks of the same Agent reuse.
 // A rejected token fails the call: it never falls back to the Agent profile.
 func (op *operation) userChromeCall(ctx context.Context, chrome *browserConnection, name string, args json.RawMessage, confirmed *bool) (json.RawMessage, error) {
-	if name == "browser_file_upload" && uploadsFiles(args) && extensionFileAccessOff(op.manager.env, chrome.Profile) {
+	if data := chromeUserDataDirectory(op.manager.env); name == "browser_file_upload" && uploadsFiles(args) && data != "" && extensionFileAccessOff(filepath.Join(data, chrome.Profile)) {
 		*confirmed = true
 		return nil, errUserChromeFileAccess
 	}
@@ -193,7 +193,7 @@ func (op *operation) userChromeCall(ctx context.Context, chrome *browserConnecti
 	return result, err
 }
 
-var errUserChromeFileAccess = errors.New("BROWSER_FILE_ACCESS_DISABLED: the user's Chrome does not let the Playwright Extension read local files, so no file was attached. Ask the user to open chrome://extensions/?id=" + playwrightExtensionID + " and turn on Allow access to file URLs, then call browser_file_upload again; the file chooser is still open")
+var errUserChromeFileAccess = errors.New("BROWSER_FILE_ACCESS_DISABLED: the user's Chrome does not let the Playwright Extension read local files, so no file was attached. Ask the user to open chrome://extensions/?id=" + playwrightExtensionID + " and turn on Allow access to file URLs. Chrome then reloads the extension, which closes the file chooser, and saves the setting a few seconds later. After the user confirms, wait a few seconds, click the upload control again, and call browser_file_upload")
 
 // uploadsFiles reports whether browser_file_upload arguments name files; a
 // call without paths only cancels the file chooser.
