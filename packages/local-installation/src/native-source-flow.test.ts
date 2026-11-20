@@ -51,7 +51,7 @@ import {
   TEAMHUB_COMMANDS,
 } from "./teamhub-binaries.js";
 import { prepareRuntime } from "./managed-runtimes.js";
-import { applyNativeSource } from "./byok-source.js";
+import { applyNativeSource, prepareByokRuntime } from "./byok-source.js";
 import { prepareLocalModels } from "./local-models.js";
 import {
   inspectNativeListeners,
@@ -83,6 +83,7 @@ vi.mock("./native-livekit.js", async (original) => ({
 vi.mock("./byok-source.js", async (original) => ({
   ...(await original<typeof import("./byok-source.js")>()),
   applyNativeSource: vi.fn(async () => undefined),
+  prepareByokRuntime: vi.fn(),
 }));
 // Deploying local models runs the localmodels tool too.
 vi.mock("./local-models.js", async (original) => ({
@@ -1096,6 +1097,82 @@ test("a failed Runtime reports its own outcome while the checkout preparation st
   });
 });
 
+test.each(["returned", "thrown"])(
+  "a %s BYOK failure after PostgreSQL startup fails the runtime stage",
+  async (failure) => {
+    const f = await fixture();
+    let signalPostgresStarted!: () => void;
+    const postgresStarted = new Promise<void>((resolve) => {
+      signalPostgresStarted = resolve;
+    });
+    vi.mocked(prepareNativeDatabase).mockImplementation(async () => {
+      f.running.add("postgres");
+      signalPostgresStarted();
+      return {};
+    });
+    const message = "Could not mount the model endpoint: ConnectionResetError.";
+    vi.mocked(prepareByokRuntime).mockImplementation(async (_byok, options) => {
+      await postgresStarted;
+      options.onEvent({
+        kind: "stage",
+        stage: "runtime",
+        state: "running",
+        message: "Mounting BYOK endpoint on local Bifrost gateway…",
+      });
+      if (failure === "thrown") throw new Error(message);
+      return { code: 1, state: "failed", message };
+    });
+    const events: InstallerEvent[] = [];
+    const result = await installNativeSource({
+      ...f,
+      name: "native-flow",
+      byok: {
+        baseUrl: "https://example.test/v1",
+        modelId: "test",
+        apiKey: "test-key",
+        runtime: "pi",
+      },
+      signal: new AbortController().signal,
+      onEvent: (event) => events.push(event),
+    });
+    expect(result).toMatchObject({
+      state: "failed",
+      message: expect.stringContaining(message),
+      details: { stage: "runtime" },
+    });
+    expect(events.filter((event) => event.state === "failed")).toEqual([
+      { kind: "stage", stage: "runtime", state: "failed", message },
+    ]);
+    expect(f.running.size).toBe(0);
+  },
+);
+
+test("an invalid checkout fails preflight before starting the runtime", async () => {
+  const f = await fixture();
+  const events: InstallerEvent[] = [];
+  const result = await installNativeSource({
+    ...f,
+    name: "native-flow",
+    repo: path.join(f.repo, "missing"),
+    setupChoice: "pi",
+    signal: new AbortController().signal,
+    onEvent: (event) => events.push(event),
+  });
+  expect(result).toMatchObject({
+    state: "failed",
+    details: { stage: "preflight" },
+  });
+  expect(events.filter((event) => event.state === "failed")).toEqual([
+    {
+      kind: "stage",
+      stage: "preflight",
+      state: "failed",
+      message: expect.any(String),
+    },
+  ]);
+  expect(prepareRuntime).not.toHaveBeenCalled();
+});
+
 test("an installation stopped from outside stays cancelled", async () => {
   const f = await fixture();
   const controller = new AbortController();
@@ -1245,6 +1322,66 @@ async function bundledRuntime(repo: string) {
   return directory;
 }
 
+test("native timings count only Runtime work that outlasts PostgreSQL", async () => {
+  const f = await fixture();
+  let clock = 0;
+  let startRuntime!: () => void;
+  let finishRuntime!: () => void;
+  const runtimeStarted = new Promise<void>((resolve) => {
+    startRuntime = resolve;
+  });
+  const runtimeFinished = new Promise<void>((resolve) => {
+    finishRuntime = resolve;
+  });
+  vi.mocked(prepareRuntime).mockImplementation(async (_runtime, options) => {
+    options.onEvent?.({
+      kind: "stage",
+      stage: "runtime",
+      state: "running",
+      message: "Preparing Pi…",
+    });
+    startRuntime();
+    await runtimeFinished;
+    return { code: 0, state: "ready", message: "ready" };
+  });
+  vi.mocked(prepareNativeDatabase).mockImplementation(async () => {
+    await runtimeStarted;
+    clock += 3000;
+    f.running.add("postgres");
+    // Let the install reach its Runtime wait before completing the probe.
+    setImmediate(() => {
+      clock += 7000;
+      finishRuntime();
+    });
+    return {};
+  });
+  const run = vi.mocked(runProcess).getMockImplementation()!;
+  vi.mocked(runProcess).mockImplementation(async (command, args, options) => {
+    if (args.includes("migrate")) clock += 2000;
+    return run(command, args, options);
+  });
+  const runtimeStages: InstallerEvent["state"][] = [];
+  const result = await installNativeSource(
+    {
+      ...f,
+      name: "native-timings",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: (event) => {
+        if (event.kind === "stage" && event.stage === "runtime")
+          runtimeStages.push(event.state);
+      },
+    },
+    () => clock,
+  );
+  expect(result).toMatchObject({
+    code: 0,
+    details: { timings: { services: 5, runtime: 7 } },
+  });
+  expect(runtimeStages).toEqual(["running", "succeeded"]);
+});
+
 test("bundled services that verify install no packages and record stage times", async () => {
   const f = await fixture();
   await bundledRuntime(f.repo);
@@ -1295,6 +1432,7 @@ test("bundled services that verify install no packages and record stage times", 
     expect.arrayContaining(["preflight", "release", "images", "services"]),
   );
   expect(Object.values(timings).every((seconds) => seconds > 0)).toBe(true);
+  expect(timings).not.toHaveProperty("runtime");
   expect(
     logs.some((line) => line.startsWith("Native install timings (s): ")),
   ).toBe(true);
@@ -1401,6 +1539,81 @@ for (const keys of [{}, { SONIOX_API_KEY: "soniox-1" }] as Record<
     );
     expect(events).not.toContain("soniox-1");
   });
+
+test("LiveKit holds its port before the model controller chooses one", async () => {
+  const f = await fixture();
+  const livekit = net.createServer();
+  const modelController = net.createServer();
+  const listen = (server: net.Server, port: number) =>
+    new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+  const close = (server: net.Server) =>
+    new Promise<void>((resolve) => {
+      if (server.listening) server.close(() => resolve());
+      else resolve();
+    });
+  const actual = await vi.importActual<typeof import("./native-livekit.js")>(
+    "./native-livekit.js",
+  );
+  vi.mocked(readLiveKitSettings).mockImplementation(actual.readLiveKitSettings);
+  vi.mocked(prepareNativeVoiceTools).mockResolvedValue({
+    bin: path.join(f.home, "voice"),
+    livekit: path.join(f.home, "voice", "livekit-server"),
+  });
+  vi.mocked(startNativeLiveKit).mockImplementation(async ({ settings }) => {
+    if (!livekit.listening) await listen(livekit, settings.httpPort);
+    f.running.add("livekit");
+  });
+  vi.mocked(prepareFoundationServices).mockImplementation(async (instance) => {
+    if (modelController.listening) return;
+    const settings = (await actual.readLiveKitSettings(instance.root))!;
+    // Force the allocation observed on a cold setup: the controller gets
+    // LiveKit's assigned port whenever LiveKit has not bound it yet.
+    try {
+      await listen(modelController, settings.httpPort);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+      await listen(modelController, 0);
+    }
+  });
+  const stop = vi.mocked(stopNativeProcess).getMockImplementation()!;
+  vi.mocked(stopNativeProcess).mockImplementation(async (root, name) => {
+    if (name === "livekit") await close(livekit);
+    await stop(root, name);
+  });
+  try {
+    const installed = await runFlow(f);
+    expect(installed.code, installed.message).toBe(0);
+    const livekitAddress = livekit.address();
+    const controllerAddress = modelController.address();
+    expect(livekitAddress).not.toBeNull();
+    expect(controllerAddress).not.toBeNull();
+    expect(controllerAddress).not.toEqual(livekitAddress);
+
+    // On a retry after a later startup failure, roll back only the LiveKit
+    // this run started; keep the controller and reuse the original port.
+    const instanceRoot = path.join(f.home, "instances", "native-flow");
+    await stopNativeProcess(instanceRoot, "livekit");
+    vi.mocked(prepareModelGateway).mockRejectedValueOnce(
+      new Error("test gateway startup failure"),
+    );
+    expect(await runFlow(f)).toMatchObject({
+      code: 1,
+      message: expect.stringContaining("test gateway startup failure"),
+    });
+    expect(livekit.listening).toBe(false);
+    expect(modelController.address()).toEqual(controllerAddress);
+    expect(await runFlow(f)).toMatchObject({ code: 0 });
+    expect(livekit.address()).toEqual(livekitAddress);
+  } finally {
+    await Promise.all([close(livekit), close(modelController)]);
+  }
+});
 
 for (const tools of ["absent", "failed"] as const)
   test(`voice stays off and the install continues when voice tools are ${tools}`, async () => {

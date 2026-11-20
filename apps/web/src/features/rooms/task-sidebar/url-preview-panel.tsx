@@ -35,9 +35,8 @@ interface RefusedFrame {
 }
 
 // The development server proxies previews, so its frames share the app's
-// origin and get no storage. The desktop app lets sites be framed directly
-// (its window drops their frame refusals), even when it runs a development
-// server on this computer.
+// origin and get no storage. The desktop app frames sites directly, even when
+// it runs a development server on this computer.
 function previewProxied() {
   return import.meta.env.DEV && !isDesktopShell();
 }
