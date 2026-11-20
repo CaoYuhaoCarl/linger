@@ -1002,11 +1002,17 @@ async function runNativeSource(
             for (const [index, name] of serviceNames.entries()) {
               if (!states[index]!.running) started.push(name);
             }
-            await Promise.all(
+            // Settle every start before rollback so a supervisor still being
+            // spawned is recorded and can be stopped.
+            const results = await Promise.allSettled(
               serviceNames.map((name) =>
                 startNativeProcess(serviceOptions(name)),
               ),
             );
+            const failed = results.find(
+              (result) => result.status === "rejected",
+            );
+            if (failed) throw failed.reason;
           }
           return timed(
             "Waiting for native collaboration services",

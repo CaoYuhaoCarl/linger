@@ -32,7 +32,8 @@ starting sign-in for the new runtime stops the previous runtime's pending login.
 `--resume` (native source with `--instance`) starts an installed instance's
 stopped services headless, reusing its saved choices; the desktop client runs it
 after a reboot and reads the outcome from the single JSON line on stdout. Cold
-resumes on the same checkout pass `resume: true` so an already-installed runtime
+resumes on the same checkout pass `resume: true` (a resume onto another
+checkout omits it and prepares the runtime in full, sequentially) so an already-installed runtime
 is reused after one status check, runtime/foundation preparation overlaps
 service startup, and inspected runtime descriptors are passed directly to
 `instanceRuntime` without a second status probe. It also restarts running

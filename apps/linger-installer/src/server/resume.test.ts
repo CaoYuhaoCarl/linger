@@ -171,6 +171,28 @@ test("moves running services to a new source tree", async () => {
   );
 });
 
+test("prepares the runtime in full when resuming onto another checkout", async () => {
+  const onRuntimeDescriptors = vi.fn();
+  const run = vi.fn<ResumeEngine["run"]>(async () => ({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  }));
+  await resumeSourceInstance(
+    { ...options, onRuntimeDescriptors },
+    {
+      load: async () =>
+        ({ ...instance, source: { repo: "/old-source" } }) as Instance,
+      engines: native(run, false),
+    },
+  );
+  expect(run.mock.calls[0]![0]).not.toHaveProperty("resume");
+  expect(run.mock.calls[0]![0]).toMatchObject({
+    repo: "/source",
+    onRuntimeDescriptors,
+  });
+});
+
 test("reports the source the services serve from", async () => {
   expect(
     await resumeSourceInstance(options, {

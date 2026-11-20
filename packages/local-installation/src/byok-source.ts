@@ -307,18 +307,15 @@ export async function prepareByokRuntime(
     message: "Mounting BYOK endpoint on local Bifrost gateway…",
   });
   const startedAt = Date.now();
+  // A log line, not a stage event: the job appends and persists every stage
+  // event, and other stages may run concurrently with this one.
   const heartbeat = setInterval(() => {
-    const elapsedSeconds = Math.max(
-      1,
-      Math.floor((Date.now() - startedAt) / 1000),
-    );
     options.onEvent({
-      kind: "stage",
+      kind: "log",
       stage: "runtime",
-      state: "running",
-      message: `Starting local BYOK model gateway (${elapsedSeconds}s elapsed)...`,
+      message: `Local BYOK model gateway is starting (${Math.floor((Date.now() - startedAt) / 1000)}s elapsed).\n`,
     });
-  }, 1_000);
+  }, 10_000);
   heartbeat.unref?.();
   let result;
   try {

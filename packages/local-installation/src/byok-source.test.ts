@@ -214,50 +214,90 @@ describe("BYOK localmodels integration", () => {
     });
   });
 
-  it("emits periodic elapsed progress while mounting the BYOK gateway", async () => {
+  async function mountWithHeartbeat(settle: "resolve" | "reject") {
+    const home = await makeHome();
+    const events: { kind: string; stage?: string; message: string }[] = [];
+    let resolveApply!: (value: {
+      code: number;
+      stdout: string;
+      stderr: string;
+    }) => void;
+    let rejectApply!: (error: Error) => void;
+    const promise = prepareByokRuntime(
+      {
+        baseUrl: "https://api.example.com/v1",
+        modelId: "gpt-4o",
+        runtime: "codex",
+      },
+      {
+        home,
+        signal: new AbortController().signal,
+        onEvent: (event) => events.push(event),
+      },
+      {
+        prepareNative: async () => ({
+          code: 0,
+          state: "ready",
+          message: "ok",
+        }),
+        localmodels: () =>
+          new Promise((resolve, reject) => {
+            resolveApply = resolve;
+            rejectApply = reject;
+          }),
+      },
+    );
+    await vi.advanceTimersByTimeAsync(9_900);
+    const beforeTen = events.length;
+    await vi.advanceTimersByTimeAsync(200);
+    const heartbeats = events.slice(beforeTen);
+    if (settle === "resolve")
+      resolveApply({ code: 0, stdout: "{}", stderr: "" });
+    else rejectApply(new Error("localmodels crashed"));
+    const outcome = await promise.catch((error: Error) => error);
+    return { events, beforeTen, heartbeats, outcome };
+  }
+
+  it("logs elapsed progress every 10s while mounting the BYOK gateway", async () => {
     vi.useFakeTimers();
     try {
-      const home = await makeHome();
-      const events: { kind: string; stage?: string; message: string }[] = [];
-      let resolveApply!: (value: {
-        code: number;
-        stdout: string;
-        stderr: string;
-      }) => void;
-      const promise = prepareByokRuntime(
+      const { events, beforeTen, heartbeats, outcome } =
+        await mountWithHeartbeat("resolve");
+      expect(outcome).toMatchObject({ state: "ready" });
+      const stages = events.slice(0, beforeTen);
+      expect(stages).toEqual([
+        expect.objectContaining({
+          kind: "stage",
+          message: expect.stringMatching(/^Mounting BYOK endpoint/),
+        }),
+      ]);
+      expect(heartbeats).toEqual([
         {
-          baseUrl: "https://api.example.com/v1",
-          modelId: "gpt-4o",
-          runtime: "codex",
+          kind: "log",
+          stage: "runtime",
+          message: "Local BYOK model gateway is starting (10s elapsed).\n",
         },
-        {
-          home,
-          signal: new AbortController().signal,
-          onEvent: (event) => events.push(event),
-        },
-        {
-          prepareNative: async () => ({
-            code: 0,
-            state: "ready",
-            message: "ok",
-          }),
-          localmodels: () =>
-            new Promise((resolve) => {
-              resolveApply = resolve;
-            }),
-        },
-      );
-      await vi.advanceTimersByTimeAsync(2_100);
-      resolveApply({ code: 0, stdout: "{}", stderr: "" });
-      const outcome = await promise;
-      expect(outcome.state).toBe("ready");
-      expect(
-        events.some((event) =>
-          /Starting local BYOK model gateway \(\d+s elapsed\)\.\.\./.test(
-            event.message,
-          ),
-        ),
-      ).toBe(true);
+      ]);
+      const count = events.length;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(events.length).toBe(count);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the BYOK heartbeat when the mount rejects", async () => {
+    vi.useFakeTimers();
+    try {
+      const { events, heartbeats, outcome } =
+        await mountWithHeartbeat("reject");
+      expect(outcome).toBeInstanceOf(Error);
+      expect(heartbeats.map((event) => event.kind)).toEqual(["log"]);
+      const count = events.length;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(events.length).toBe(count);
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }

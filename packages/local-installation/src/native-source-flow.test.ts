@@ -1931,6 +1931,108 @@ test("overlap runtime failure returns the runtime outcome and stops started serv
   expect(stopped).toEqual([...started].reverse().concat("postgres"));
 });
 
+test("a service start that fails at once waits for the other starts before rollback", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const baseStart = vi.mocked(startNativeProcess).getMockImplementation()!;
+  const settled = new Set<string>();
+  vi.mocked(startNativeProcess).mockImplementation(async (options) => {
+    if (options.name === "teamhub")
+      throw new Error("teamhub identity cannot be verified");
+    if (options.name === "web" || options.name === "node-services") {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const result = await baseStart(options);
+      settled.add(options.name);
+      return result;
+    }
+    return baseStart(options);
+  });
+  const stopsBeforeSettled: string[] = [];
+  const stopped: string[] = [];
+  vi.mocked(stopNativeProcess).mockImplementation(async (_root, name) => {
+    if (settled.size < 2) stopsBeforeSettled.push(name);
+    stopped.push(name);
+    f.running.delete(name);
+  });
+  const failed = await installNativeSource({
+    ...f,
+    name: "native-flow-start-settle",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(failed.code).not.toBe(0);
+  expect(settled).toEqual(new Set(["web", "node-services"]));
+  expect(stopsBeforeSettled).toEqual([]);
+  expect(stopped).toEqual(
+    expect.arrayContaining(["teamhub", "node-services", "web"]),
+  );
+});
+
+for (const variant of ["resume", "setup choice"] as const)
+  test(`a ${variant} onto another checkout keeps migrate after the runtime`, async () => {
+    const f = await fixture();
+    const name = `native-flow-switch-${variant.replace(" ", "-")}`;
+    vi.mocked(prepareRuntime).mockResolvedValue({
+      code: 0,
+      state: "ready",
+      message: "ready",
+    });
+    const initial = await installNativeSource({
+      ...f,
+      name,
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(initial.code).toBe(0);
+    const saved = await loadInstance({ name, home: f.home });
+    await stopNativeSource(saved!, new AbortController().signal);
+    // Without a provisioned account a setup choice would overlap too, so
+    // only the checkout switch keeps it sequential.
+    if (variant === "setup choice")
+      await rm(path.join(saved!.root, "local-account.json"));
+    const next = path.join(f.home, "next");
+    await cp(f.repo, next, { recursive: true });
+
+    let runtimeDone = false;
+    let releaseRuntime!: () => void;
+    vi.mocked(prepareRuntime).mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseRuntime = resolve;
+      });
+      runtimeDone = true;
+      return { code: 0, state: "ready", message: "ready" };
+    });
+    const baseRun = vi.mocked(runProcess).getMockImplementation()!;
+    let migrateSawRuntimeDone: boolean | undefined;
+    vi.mocked(runProcess).mockImplementation(async (command, args, options) => {
+      if (args.includes("migrate")) migrateSawRuntimeDone = runtimeDone;
+      return baseRun(command, args, options);
+    });
+    const runPromise = installNativeSource({
+      ...f,
+      repo: next,
+      name,
+      externalComputer: true,
+      ...(variant === "resume" ? { resume: true } : { setupChoice: "pi" }),
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    await vi.waitFor(() => expect(releaseRuntime).toBeTypeOf("function"));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(migrateSawRuntimeDone).toBeUndefined();
+    releaseRuntime();
+    expect((await runPromise).code).toBe(0);
+    expect(migrateSawRuntimeDone).toBe(true);
+  });
+
 test("a repeated resume after a successful resume succeeds without provisioning the owner again", async () => {
   const f = await fixture();
   vi.mocked(prepareRuntime).mockResolvedValue({
