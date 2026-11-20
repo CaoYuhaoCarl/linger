@@ -200,6 +200,11 @@ func (s *Service) readTool(ctx context.Context, connection externalsource.AgentT
 	if !execution.Successful || !ok {
 		return nil, &Error{Code: "tool_execution_failed", Message: "The connected application did not return the draft"}
 	}
+	return toolData(data), nil
+}
+
+// toolData returns a read's own result object.
+func toolData(data map[string]any) map[string]any {
 	// Some tools wrap their result in their own execution envelope.
 	if inner, ok := data["data"].(map[string]any); ok {
 		if _, wrapped := data["successful"]; wrapped {
@@ -209,7 +214,7 @@ func (s *Service) readTool(ctx context.Context, connection externalsource.AgentT
 	if inner, ok := data["response_data"].(map[string]any); ok {
 		data = inner
 	}
-	return data, nil
+	return data
 }
 
 func digestOf(value any) string {

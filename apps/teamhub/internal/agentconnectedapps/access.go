@@ -68,7 +68,8 @@ func onlyQueries(document any) bool {
 
 // readTools are the provider reads the wrapped connector commands make,
 // including the draft reads TeamHub makes to build a send-draft card, plus the
-// Discord reads of the connected guild, its channels, threads, and messages, the
+// Discord reads of the connected guild, its channels, threads, and messages
+// (which run at once only inside the connected guild; see discordReadInScope), the
 // Slack reads Agents make through the generic execute to find direct messages
 // and the people in them, and the Linear reads, which have no wrapped command.
 // A read the generic execute names outside this list is held like a write.

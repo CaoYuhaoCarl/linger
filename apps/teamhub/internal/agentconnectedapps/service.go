@@ -306,7 +306,17 @@ func (s *Service) execute(ctx context.Context, input ExecuteInput, authorize fun
 	if _, err := s.pinnedTool(ctx, connection, input.ToolSlug, input.ToolVersion, "execute"); err != nil {
 		return Result{}, err
 	}
-	if accessOf(input.ToolSlug, input.Arguments) == accessConfirm {
+	access := accessOf(input.ToolSlug, input.Arguments)
+	if access == accessRead {
+		inScope, err := s.discordReadInScope(ctx, connection, input.ToolSlug, input.Arguments)
+		if err != nil {
+			return Result{}, err
+		}
+		if !inScope {
+			access = accessConfirm
+		}
+	}
+	if access == accessConfirm {
 		return s.prepareConfirmation(ctx, connection, confirmationAction{
 			ToolSlug: input.ToolSlug, ToolVersion: input.ToolVersion, Arguments: input.Arguments,
 		})
