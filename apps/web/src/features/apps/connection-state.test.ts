@@ -7,7 +7,7 @@ import {
   activeExternalConnections,
   connectLinkOpen,
   establishedExternalConnections,
-  unconfirmedExternalConnections,
+  externalConnectionUnconfirmed,
   usableConnectUrl,
 } from "./connection-state";
 
@@ -57,7 +57,7 @@ describe("external connection state projection", () => {
 
   it("treats a pending connection with a check failure as unconfirmed, except a duplicate", () => {
     expect(
-      unconfirmedExternalConnections(connections).map((item) => item.id),
+      connections.filter(externalConnectionUnconfirmed).map((item) => item.id),
     ).toEqual(["pending-error", "pending-retry"]);
   });
 });

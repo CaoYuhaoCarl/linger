@@ -31,7 +31,8 @@ import {
   externalConnectionNeedsAttention,
   openPendingExternalConnection,
   accountIdentityText,
-  unconfirmedExternalConnections,
+  externalConnectionEstablished,
+  externalConnectionUnconfirmed,
 } from "./connection-state";
 
 export function AppManageDialog({
@@ -48,13 +49,12 @@ export function AppManageDialog({
   // Without a Composio key, Connect opens the key dialog on top of this one.
   const connectFlow = useConnectAppFlow();
   const established = establishedExternalConnections(connections);
-  const unconfirmed = unconfirmedExternalConnections(connections);
   // Accounts that need reconnecting or confirming stay listed so the Human
   // can repair them.
   const rows = connections.filter(
     (connection) =>
-      established.includes(connection) ||
-      unconfirmed.includes(connection) ||
+      externalConnectionEstablished(connection) ||
+      externalConnectionUnconfirmed(connection) ||
       externalConnectionNeedsAttention(connection),
   );
   const canConnect = connectFlow.canStart(app);
@@ -165,7 +165,7 @@ function ConnectionRow({
   const checking = Boolean(connection.status_check_requested_at);
   const duplicateIdentity =
     connection.status_error_code === "duplicate_remote_principal";
-  const unconfirmed = unconfirmedExternalConnections([connection]).length > 0;
+  const unconfirmed = externalConnectionUnconfirmed(connection);
   const label = connection.identity_label ?? connection.provider;
 
   return (
