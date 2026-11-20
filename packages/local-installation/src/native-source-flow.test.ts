@@ -1389,14 +1389,19 @@ test("native timings count only Runtime work that outlasts PostgreSQL", async ()
 test("overlapped timings count Runtime only for the wait beyond services and account", async () => {
   const f = await fixture();
   let clock = 0;
-  let ownerRan!: () => void;
-  const ownerDone = new Promise<void>((resolve) => {
-    ownerRan = resolve;
+  let ownerRan = false;
+  let timerMoved!: () => void;
+  const runtimeEntered = new Promise<void>((resolve) => {
+    timerMoved = resolve;
   });
+  // Only the stage timer reads this clock. After the owner command, its next
+  // read is the move to "runtime" once the account branch has settled.
+  const now = () => {
+    if (ownerRan) timerMoved();
+    return clock;
+  };
   vi.mocked(prepareRuntime).mockImplementation(async () => {
-    await ownerDone;
-    // Let the account branch settle before the Runtime finishes.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtimeEntered;
     clock += 4000;
     return { code: 0, state: "ready", message: "ready" };
   });
@@ -1406,7 +1411,7 @@ test("overlapped timings count Runtime only for the wait beyond services and acc
     if (args.includes("owner")) {
       clock += 1000;
       const result = await run(command, args, options);
-      ownerRan();
+      ownerRan = true;
       return result;
     }
     return run(command, args, options);
@@ -1421,7 +1426,7 @@ test("overlapped timings count Runtime only for the wait beyond services and acc
       signal: new AbortController().signal,
       onEvent: () => {},
     },
-    () => clock,
+    now,
   );
   expect(result.code, result.message).toBe(0);
   const timings = (result.details as { timings: Record<string, number> })

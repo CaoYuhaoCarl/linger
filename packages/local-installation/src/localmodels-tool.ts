@@ -566,11 +566,7 @@ async function runLocalmodelsCommand(
               total: value.total as number,
               unit: "bytes",
             }
-          : {
-              completed: value.completed,
-              unit: "bytes",
-              partial: true,
-            },
+          : { completed: value.completed, unit: "bytes" },
       });
     }
   };

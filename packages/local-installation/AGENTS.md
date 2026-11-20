@@ -263,8 +263,8 @@ through `onRuntimeDescriptors` so callers avoid a second status probe. Within
 dependency and voice tool preparations stay sequential on the shared
 native-tools lock; collaboration services start concurrently when `node-services`
 is not pre-stopped for a TeamHub config restart. `runLocalmodels`
-forwards `harness apply` `download:retrying` and `total: null` partial byte
-progress, and `prepareByokRuntime` logs elapsed time every 10 s while mounting
+forwards `harness apply` `download:retrying` and `total: null` byte progress
+(without a total), and `prepareByokRuntime` logs elapsed time every 10 s while mounting
 the BYOK gateway (a log line, since the job appends and persists every stage
 event).
 
