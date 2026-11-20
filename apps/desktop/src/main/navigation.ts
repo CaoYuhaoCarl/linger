@@ -199,21 +199,33 @@ const frameAncestorSources = (policy: string): string[] | undefined => {
   return undefined;
 };
 
-// Whether a response refuses to be framed by a page of another origin. CSP
-// frame-ancestors, when present, overrides X-Frame-Options, as in Chromium.
-// A source list other than * is taken as a refusal: a site never lists the
-// Linger server among its ancestors.
-export const refusesFraming = (headers: Record<string, string[]>): boolean => {
+// Whether a response refuses to be framed by the app's page at
+// ancestorProtocol. CSP frame-ancestors, when present, overrides
+// X-Frame-Options, as in Chromium. Only * or a scheme source matching the
+// app's scheme (http: also matches https:) allows the frame; a host source
+// never names the Linger server.
+export const refusesFraming = (
+  headers: Record<string, string[]>,
+  ancestorProtocol: string,
+): boolean => {
   const values = (wanted: string): string[] =>
     Object.entries(headers).flatMap(([name, value]) =>
       name.toLowerCase() === wanted ? value : [],
     );
+  const allowing = new Set([
+    "*",
+    ancestorProtocol,
+    ...(ancestorProtocol === "https:" ? ["http:"] : []),
+  ]);
   const ancestors = values("content-security-policy").flatMap((policy) => {
     const sources = frameAncestorSources(policy);
     return sources ? [sources] : [];
   });
   if (ancestors.length)
-    return ancestors.some((sources) => !sources.includes("*"));
+    return ancestors.some(
+      (sources) =>
+        !sources.some((source) => allowing.has(source.toLowerCase())),
+    );
   return values("x-frame-options").some((value) =>
     value
       .split(",")

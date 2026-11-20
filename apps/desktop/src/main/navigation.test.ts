@@ -139,24 +139,26 @@ describe("framableHeaders", () => {
 
 describe("refusesFraming", () => {
   it("reads X-Frame-Options and lets CSP frame-ancestors override it", () => {
-    expect(refusesFraming({ "X-Frame-Options": ["SAMEORIGIN"] })).toBe(true);
-    expect(refusesFraming({ "x-frame-options": ["deny"] })).toBe(true);
-    expect(refusesFraming({ "X-Frame-Options": ["ALLOWALL"] })).toBe(false);
+    const refuses = (headers: Record<string, string[]>) =>
+      refusesFraming(headers, "https:");
+    expect(refuses({ "X-Frame-Options": ["SAMEORIGIN"] })).toBe(true);
+    expect(refuses({ "x-frame-options": ["deny"] })).toBe(true);
+    expect(refuses({ "X-Frame-Options": ["ALLOWALL"] })).toBe(false);
     expect(
-      refusesFraming({
+      refuses({
         "Content-Security-Policy": [
           "default-src 'self'; frame-ancestors 'self'",
         ],
       }),
     ).toBe(true);
     expect(
-      refusesFraming({
+      refuses({
         "X-Frame-Options": ["DENY"],
         "Content-Security-Policy": ["frame-ancestors *"],
       }),
     ).toBe(false);
     expect(
-      refusesFraming({
+      refuses({
         "Content-Security-Policy": [
           "frame-ancestors *",
           "frame-ancestors 'none'",
@@ -164,11 +166,22 @@ describe("refusesFraming", () => {
       }),
     ).toBe(true);
     expect(
-      refusesFraming({
+      refuses({
         "Content-Security-Policy": ["default-src 'self'"],
         "Content-Type": ["text/html"],
       }),
     ).toBe(false);
+  });
+
+  it("lets a scheme source allow an app served over that scheme", () => {
+    const policy = (sources: string) => ({
+      "Content-Security-Policy": [`frame-ancestors ${sources}`],
+    });
+    expect(refusesFraming(policy("https:"), "https:")).toBe(false);
+    expect(refusesFraming(policy("http:"), "https:")).toBe(false);
+    expect(refusesFraming(policy("http:"), "http:")).toBe(false);
+    expect(refusesFraming(policy("https:"), "http:")).toBe(true);
+    expect(refusesFraming(policy("https://example.com"), "https:")).toBe(true);
   });
 });
 

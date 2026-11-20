@@ -129,6 +129,9 @@ vi.mock("../../resources/icon.png", () => ({
 vi.mock("../shell/offline.html", () => ({ default: "<html>offline</html>" }));
 vi.mock("../shell/titlebar.html", () => ({ default: "<html>title</html>" }));
 
+import { session } from "electron";
+
+import { IPC } from "../shared/api.js";
 import { ConfigStore } from "./config.js";
 import { EventBus, ModuleHost, type Module } from "./modules.js";
 import { tempDirectory } from "./test-support.js";
@@ -480,5 +483,61 @@ describe("WindowManagerModule", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps framing rules for the preview frame and reports a refusal", async () => {
+    const local = "http://localhost:3000";
+    const { host } = setup({ serverUrl: local });
+    await host.start();
+    const content = contentView().webContents;
+    const onHeaders = vi.mocked(
+      session.defaultSession.webRequest.onHeadersReceived,
+    );
+    const handler = onHeaders.mock.calls.at(-1)![0] as unknown as (
+      details: Record<string, unknown>,
+      done: (response: Record<string, unknown>) => void,
+    ) => void;
+    const respond = (details: Record<string, unknown>) => {
+      const done = vi.fn();
+      handler(
+        {
+          resourceType: "subFrame",
+          webContentsId: content.id,
+          statusCode: 200,
+          url: "https://linear.app/a",
+          responseHeaders: {
+            "X-Frame-Options": ["DENY"],
+            "Content-Type": ["text/html"],
+          },
+          ...details,
+        },
+        done,
+      );
+      return done.mock.calls[0]![0];
+    };
+
+    expect(respond({ frame: { name: "" } })).toEqual({
+      responseHeaders: { "Content-Type": ["text/html"] },
+    });
+    expect(content.send).not.toHaveBeenCalled();
+
+    expect(
+      respond({ frame: { name: "linger-url-preview:a" }, statusCode: 302 }),
+    ).toEqual({});
+    expect(content.send).not.toHaveBeenCalled();
+
+    expect(respond({ frame: { name: "linger-url-preview:a" } })).toEqual({});
+    expect(content.send).toHaveBeenCalledExactlyOnceWith(
+      IPC.previewFrameRefused,
+      "linger-url-preview:a",
+      "https://linear.app/a",
+    );
+
+    expect(
+      respond({ frame: { name: "linger-url-preview:a" }, webContentsId: 99 }),
+    ).toEqual({});
+    expect(respond({ resourceType: "mainFrame" })).toEqual({});
+    expect(content.send).toHaveBeenCalledTimes(1);
+    await host.stop("quit");
   });
 });

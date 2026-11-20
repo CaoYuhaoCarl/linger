@@ -742,7 +742,10 @@ export class WindowManagerModule implements Module {
       }
       // Chromium applies framing rules to the final response only.
       const redirect = details.statusCode >= 300 && details.statusCode < 400;
-      if (!redirect && refusesFraming(details.responseHeaders))
+      if (
+        !redirect &&
+        refusesFraming(details.responseHeaders, new URL(server).protocol)
+      )
         contents.send(IPC.previewFrameRefused, name, details.url);
       done({});
     });
