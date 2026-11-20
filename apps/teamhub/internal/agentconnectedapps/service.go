@@ -49,6 +49,7 @@ type ToolProvider interface {
 	GetTool(context.Context, string, string) (composio.Tool, error)
 	ExecuteTool(context.Context, string, string, string, string, map[string]any) (composio.ToolExecution, error)
 	GetConnectionStatusForToolkit(context.Context, string, string) (composio.ConnectionStatus, error)
+	GetDiscordChannelGuild(context.Context, string, string) (string, error)
 }
 
 type Service struct {

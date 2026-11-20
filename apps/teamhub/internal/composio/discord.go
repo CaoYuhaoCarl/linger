@@ -20,6 +20,13 @@ type DiscordIdentity struct {
 var (
 	ErrDiscordGuildRequired      = errors.New("Discord server must be selected")
 	ErrDiscordGuildNotAccessible = errors.New("Discord server is not accessible")
+	// ErrDiscordToolRefused marks a Discord tool execution that Composio
+	// reported unsuccessful without a status code, so callers can tell a
+	// refusal from a transient failure without reading its text.
+	ErrDiscordToolRefused = errors.New("Discord tool execution was refused")
+	// ErrDiscordChannelGuildUnknown marks a channel lookup that succeeded but
+	// did not name the channel's server.
+	ErrDiscordChannelGuildUnknown = errors.New("Discord channel response was incomplete")
 )
 
 type DiscordChannel struct {
@@ -89,7 +96,7 @@ func (c *Client) executeDiscordTool(ctx context.Context, connectedAccountID, slu
 		case failure.StatusCode > 0:
 			return &remoteError{operation: operation, status: failure.StatusCode}
 		default:
-			return fmt.Errorf("Composio %s failed", operation)
+			return fmt.Errorf("Composio %s failed: %w", operation, ErrDiscordToolRefused)
 		}
 	}
 	if err := decodeDiscordToolData(response.Data, target); err != nil {
@@ -166,6 +173,26 @@ func (c *Client) GetDiscordGuild(ctx context.Context, connectedAccountID, guildI
 		return DiscordIdentity{}, errors.New("Discord guild response was incomplete")
 	}
 	return DiscordIdentity{GuildID: wire.ID, GuildName: wire.Name}, nil
+}
+
+// GetDiscordChannelGuild returns the server a channel or thread belongs to.
+// A response without a string guild_id fails with
+// ErrDiscordChannelGuildUnknown.
+func (c *Client) GetDiscordChannelGuild(ctx context.Context, connectedAccountID, channelID string) (string, error) {
+	if channelID == "" {
+		return "", errors.New("Discord channel id is required")
+	}
+	var wire struct {
+		GuildID any `json:"guild_id"`
+	}
+	if err := c.executeDiscordTool(ctx, connectedAccountID, "DISCORDBOT_GET_CHANNEL", map[string]any{"channel_id": channelID}, &wire, "get Discord channel"); err != nil {
+		return "", err
+	}
+	guildID, _ := wire.GuildID.(string)
+	if guildID == "" {
+		return "", ErrDiscordChannelGuildUnknown
+	}
+	return guildID, nil
 }
 
 func (c *Client) ListDiscordChannels(ctx context.Context, connectedAccountID, guildID string) ([]DiscordChannel, error) {

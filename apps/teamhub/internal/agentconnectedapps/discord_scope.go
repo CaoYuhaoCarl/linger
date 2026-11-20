@@ -2,17 +2,12 @@ package agentconnectedapps
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
 )
-
-// discordChannelLookupVersion is the DISCORDBOT_GET_CHANNEL version TeamHub
-// reads a channel's server with. It is pinned here, not taken from the
-// Agent's call, so the scope check reads the response shape it was written
-// against whatever version the Agent pins.
-const discordChannelLookupVersion = "20261116_00"
 
 // discordScope says what each Discord read names: nothing beyond the
 // connected server, a server by guild_id, or a channel or thread by
@@ -61,19 +56,13 @@ func (s *Service) discordReadInScope(ctx context.Context, connection externalsou
 		if channelID == "" || connection.RemoteTeamID == "" {
 			return false, nil
 		}
-		execution, err := s.provider.ExecuteTool(ctx, connection.UpstreamConnectionID, connection.UserID,
-			"DISCORDBOT_GET_CHANNEL", discordChannelLookupVersion, map[string]any{"channel_id": channelID})
+		guildID, err := s.provider.GetDiscordChannelGuild(ctx, connection.UpstreamConnectionID, channelID)
 		if err != nil {
-			if refusedLookup(err) {
+			if errors.Is(err, composio.ErrDiscordToolRefused) || errors.Is(err, composio.ErrDiscordChannelGuildUnknown) || refusedLookup(err) {
 				return false, nil
 			}
 			return false, mapToolError(&providerOperationError{phase: "discord_channel_lookup", err: err}, "execute")
 		}
-		data, ok := execution.Data.(map[string]any)
-		if !execution.Successful || !ok {
-			return false, nil
-		}
-		guildID, _ := toolData(data)["guild_id"].(string)
 		return guildID == connection.RemoteTeamID, nil
 	default:
 		return false, nil

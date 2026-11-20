@@ -398,3 +398,63 @@ func assertProxyParameter(t *testing.T, requests []proxyRequest, endpoint, name,
 	}
 	t.Fatalf("missing %s=%s query parameter for %s: %+v", name, value, endpoint, requests)
 }
+
+func TestDiscordChannelGuildReadsPinnedChannelTool(t *testing.T) {
+	var request discordToolRequest
+	client := newDiscordIdentityTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v3.1/tools/execute/DISCORDBOT_GET_CHANNEL" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"successful": true, "data": map[string]any{"id": "c1", "guild_id": "g1"}})
+	})
+	guildID, err := client.GetDiscordChannelGuild(context.Background(), "discord-account", "c1")
+	want := discordToolRequest{ConnectedAccountID: "discord-account", UserID: "binding-user", Version: discordToolVersion, Arguments: map[string]any{"channel_id": "c1"}}
+	if err != nil || guildID != "g1" || !reflect.DeepEqual(request, want) {
+		t.Fatalf("guild=%q err=%v request=%+v", guildID, err, request)
+	}
+}
+
+func TestDiscordChannelGuildClassifiesFailures(t *testing.T) {
+	for name, response := range map[string]map[string]any{
+		"missing guild":    {"successful": true, "data": map[string]any{"id": "c1"}},
+		"non-string guild": {"successful": true, "data": map[string]any{"id": "c1", "guild_id": 7}},
+		"refused":          {"successful": false, "data": map[string]any{"message": "no"}},
+		"forbidden":        {"successful": false, "data": map[string]any{"status_code": 403}},
+		"rate limited":     {"successful": false, "data": map[string]any{"status_code": 429}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := newDiscordIdentityTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(response)
+			})
+			guildID, err := client.GetDiscordChannelGuild(context.Background(), "discord-account", "c1")
+			status, _ := ErrorStatus(err)
+			var limited *RateLimitError
+			var ok bool
+			switch name {
+			case "missing guild", "non-string guild":
+				ok = errors.Is(err, ErrDiscordChannelGuildUnknown)
+			case "refused":
+				ok = errors.Is(err, ErrDiscordToolRefused)
+			case "forbidden":
+				ok = status == http.StatusForbidden && !errors.Is(err, ErrDiscordToolRefused)
+			case "rate limited":
+				ok = errors.As(err, &limited)
+			}
+			if !ok || guildID != "" {
+				t.Fatalf("guild=%q err=%v", guildID, err)
+			}
+		})
+	}
+}
+
+func TestDiscordChannelGuildRequiresChannelID(t *testing.T) {
+	client := newDiscordIdentityTestClient(t, func(http.ResponseWriter, *http.Request) {
+		t.Error("empty channel id reached Composio")
+	})
+	if _, err := client.GetDiscordChannelGuild(context.Background(), "discord-account", ""); err == nil {
+		t.Fatal("empty channel id was accepted")
+	}
+}
